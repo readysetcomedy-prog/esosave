@@ -1,0 +1,7 @@
+node_modules/
+dist/
+*.har
+*.har.zip
+recording*.json
+.DS_Store
+safari/build/
