@@ -482,9 +482,17 @@
   }
 
   // Restore everything recorded for sourceId into targetId (or a brand-new run when targetId is null).
-  async function restoreInto(sourceId, targetId) {
+  // Which tab a saved change belongs to. Scopes the app uses match the tab names; anything else
+  // (e.g. the record header) travels with the Incident tab.
+  const PAGE_SCOPES = ['incident', 'patient', 'vitals', 'flowchartTreatments', 'assessments', 'narrative', 'forms', 'billing', 'signatures'];
+  function pageOf(scope) {
+    const s = String(scope || '').toLowerCase();
+    return PAGE_SCOPES.find(p => p.toLowerCase() === s) || 'incident';
+  }
+  async function restoreInto(sourceId, targetId, pages) {
     const src = S.runs[sourceId];
     if (!src) return;
+    const wanted = Array.isArray(pages) && pages.length ? new Set(pages) : null; // null = every page
     if (!S.xsrf) { log(src, 'Open any ESO page first so the extension can see your session, then try again.', 'warn'); return; }
     let created = false;
     if (!targetId) {
@@ -505,11 +513,13 @@
     let n = 0;
     for (const b of src.batches) {
       if (b.status === 'dropped') continue;
+      if (wanted && !wanted.has(pageOf(b.scope))) continue;
       tgt.batches.push({ seq: tgt.nextSeq++, ts: Date.now(), origTs: b.ts, scope: b.scope, ops: b.ops, status: 'held', attempts: 0, restored: true });
       n++;
     }
     persist(tgt);
-    log(tgt, `${created ? 'Created a NEW run and queued' : 'Queued'} ${n} saved change${n === 1 ? '' : 's'} from ${src.incidentNumber || sourceId} ` +
+    const pagesTxt = wanted ? ` (pages: ${[...wanted].join(', ')})` : ' (every page)';
+    log(tgt, `${created ? 'Created a NEW run and queued' : 'Queued'} ${n} saved change${n === 1 ? '' : 's'} from ${src.incidentNumber || sourceId}${pagesTxt} ` +
       `into ${tgt.incidentNumber || (created ? 'the new run' : 'this run')}. Pushing now. ` +
       (created ? 'Open the new run from the records list when it finishes.' : 'Switch tabs to see the restored fields.'), 'good');
     kick(0);
@@ -885,12 +895,13 @@
   // ------------------------------------------------------------------ status / messaging with the extension
   function summary(run) {
     const counts = { total: run.batches.length, held: 0, rejected: 0, acked: 0, pending: 0 };
-    for (const b of run.batches) counts[b.status] = (counts[b.status] || 0) + 1;
+    const pages = {};
+    for (const b of run.batches) { counts[b.status] = (counts[b.status] || 0) + 1; if (b.status !== 'dropped') pages[pageOf(b.scope)] = (pages[pageOf(b.scope)] || 0) + 1; }
     return {
       recordId: run.recordId, realId: run.realId, tmp: run.tmp, pendingCreate: !!run.pendingCreate,
       incidentNumber: run.incidentNumber, state: run.state, locked: run.locked, lockedAt: run.lockedAt,
       createdAt: run.createdAt, lastSeenAt: run.lastSeenAt, lastSavedAt: run.lastSavedAt,
-      restoredFrom: run.restoredFrom, counts, log: run.log.slice(-60),
+      restoredFrom: run.restoredFrom, counts, pages, log: run.log.slice(-60),
       hasViews: Object.keys(run.views).length, hasCrew: !!(run.crew && run.crew.length),
     };
   }
@@ -945,8 +956,8 @@
       } else if (type === 'action') {
         const a = payload || {};
         if (a.name === 'pushNow') { probe().then(() => kick(0)); }
-        else if (a.name === 'pushIntoCurrent') { if (S.currentRecordId) restoreInto(a.recordId, S.currentRecordId); else log(S.runs[a.recordId], 'Open a run in ESO first, then push into it.', 'warn'); }
-        else if (a.name === 'pushIntoNew') { restoreInto(a.recordId, null); }
+        else if (a.name === 'pushIntoCurrent') { if (S.currentRecordId) restoreInto(a.recordId, S.currentRecordId, a.pages); else log(S.runs[a.recordId], 'Open a run in ESO first, then push into it.', 'warn'); }
+        else if (a.name === 'pushIntoNew') { restoreInto(a.recordId, null, a.pages); }
         else if (a.name === 'retryRejected') { const run = S.runs[a.recordId]; if (run) { for (const b of run.batches) if (b.status === 'rejected') { b.status = 'held'; b.error = null; } persist(run); kick(0); } }
         else if (a.name === 'dropRejected') { const run = S.runs[a.recordId]; if (run) { for (const b of run.batches) if (b.status === 'rejected') b.status = 'dropped'; persist(run); emit(); } }
         else if (a.name === 'forget') { delete S.runs[a.recordId]; if (S.currentRecordId === a.recordId) S.currentRecordId = null; emit(); }

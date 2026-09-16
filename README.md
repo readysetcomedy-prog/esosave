@@ -132,9 +132,10 @@ Notes:
   amber (no signal, or changes held), blue (pushing), red (logged out or ESO rejected a change).
 - Tap the card or **Runs** to open the panel: every run recorded on the device, how many saves are
   held, the log, signature images, and the restore buttons:
-  - **Push into the open run** — replay everything recorded for a run into the run open in ESO now.
-  - **Push into a NEW run** — create a fresh run on ESO and replay everything into it. Open it from
-    the records list when it finishes.
+  - **Push into the open run** / **Push into a NEW run** — first pick which pages to copy (Incident
+    and Narrative are on by default; Toggle all for a full recovery). Turning on Patient or
+    Signatures shows a warning: those overwrite the target run's patient details and signatures,
+    so only for the same patient. A new run is opened from the records list when it finishes.
   - **Export backup** — a JSON file with every recorded save and signature image.
   - **Clear** — remove the run from the device.
 - The toolbar icon shows the number of held changes and offers export/clear when ESO is not open.

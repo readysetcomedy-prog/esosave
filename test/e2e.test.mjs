@@ -211,6 +211,50 @@ test('restore: push a whole recorded run into a brand-new run, crew and item key
   assert.deepEqual(normalizeTree(dst.tree, dst.crew), normalizeTree(src.tree, src.crew), 'new run has the same content as the old one');
 });
 
+test('restore can copy only the chosen pages: incident and narrative go, patient and signatures stay blank', async () => {
+  const srcId = await freshRun();
+  await app(() => {
+    window.app.edit('incident', 'incident.scene.manualAddress.locationName', 'Shared Scene');
+    window.app.edit('narrative', 'narrative.narrative.text', 'shared story');
+    window.app.edit('patient', 'patient.demographics.lastName', 'FIRSTPATIENT');
+    window.app.sign('signatures', 'signatures.billingAuthorization.sectionOne.patientSignature.strokes', [[1, 2]]);
+  });
+  await waitFor(async () => { const r = await T.record(srcId); return r.tree.signatures && r.tree.patient && r.tree.narrative && r.tree.incident; }, { label: 'source saved' });
+  const before = (await T.records()).length;
+  // the panel's picker sends the chosen pages along with the action
+  await app((i) => window.postMessage({ __esosave: 'to-page', type: 'action', payload: { name: 'pushIntoNew', recordId: i, pages: ['incident', 'narrative'] } }, location.origin), srcId);
+  const list = await waitFor(async () => { const l = await T.records(); return l.length > before ? l : null; }, { label: 'new run created' });
+  const newId = list[list.length - 1].id;
+  await waitFor(async () => { const s = await T.status(); const r = s.runs.find(x => x.recordId === newId); return r && r.counts.held === 0 && !s.pushing && r.counts.total > 0; }, { label: 'copy pushed', timeout: 30000 });
+  const dst = await T.record(newId);
+  assert.equal(dst.tree.incident.scene.manualAddress.locationName, 'Shared Scene');
+  assert.equal(dst.tree.narrative.narrative.text, 'shared story');
+  assert.equal(dst.tree.patient, undefined, 'patient not copied');
+  assert.equal(dst.tree.signatures, undefined, 'signatures not copied');
+  const status = await T.status();
+  assert.deepEqual(status.runs.find(r => r.recordId === srcId).pages, { incident: 1, narrative: 1, patient: 1, signatures: 1 });
+});
+
+test('the page picker opens from the panel with Incident and Narrative on, warns on Patient or Signatures, and Toggle all selects every page', async () => {
+  const id = await app(() => window.app.recordId);
+  await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('[data-act=open]').click());
+  await waitFor(() => T.page.evaluate(() => !!document.getElementById('esosave-host').shadowRoot.querySelector('.panel .run')), { label: 'panel' });
+  await T.page.evaluate((i) => { const p = document.getElementById('esosave-host').shadowRoot; [...p.querySelectorAll('.run')].find(r => r.dataset.id === i).querySelector('[data-act=into-new]').click(); }, id);
+  const state = () => T.page.evaluate(() => { const p = document.getElementById('esosave-host').shadowRoot.querySelector('.pick'); return p && { on: [...p.querySelectorAll('.sw.on')].map(b => b.dataset.page), warn: !!p.querySelector('.warn'), go: p.querySelector('[data-act=go]').textContent }; });
+  let st = await waitFor(state, { label: 'picker open' });
+  assert.deepEqual(st.on, ['incident', 'narrative']);
+  assert.equal(st.warn, false);
+  await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.pick .sw[data-page=signatures]').click());
+  st = await state();
+  assert.ok(st.on.includes('signatures'));
+  assert.equal(st.warn, true, 'warning shown once signatures is on');
+  await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.pick [data-act=all]').click());
+  st = await state();
+  assert.deepEqual(st.on, ['incident', 'patient', 'narrative', 'signatures'], 'toggle all turns on every page that has saves');
+  assert.match(st.go, /Push 4 pages/);
+  await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.pick [data-act=cancel]').click());
+});
+
 test('locking a run marks it and it is cleared from the device after the retention window', async () => {
   const id = await app(() => window.app.recordId);
   await app(() => window.app.lock());
@@ -264,7 +308,7 @@ test('logged out: saves are held and pushed after logging back in', async () => 
   await T.control({ loggedOut: true });
   await app(() => { window.app.edit('incident', 'incident.scene.callNature', 'while logged out'); });
   await waitFor(async () => { const s = await T.status(); return s.loggedOut && s.held >= 1; }, { label: 'held while logged out' });
-  assert.match((await T.bar()).text, /LOGGED OUT/);
+  await waitFor(async () => /LOGGED OUT/.test((await T.bar()).text), { label: 'card says logged out' });
   await T.control({ loggedOut: false });
   await waitFor(async () => { const s = await T.status(); return !s.loggedOut && s.held === 0; }, { label: 'pushed after login', timeout: 30000 });
   assert.equal((await T.record(realId)).tree.incident.scene.callNature, 'while logged out');

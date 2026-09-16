@@ -137,6 +137,18 @@
     .veil .track { height: 6px; background: #e5e7eb; border-radius: 3px; margin: 10px 0 12px; overflow: hidden; }
     .veil .fill { height: 100%; background: #15803d; width: 0; transition: width .3s; }
     .veil button.a { margin-top: 4px; }
+    .pick { text-align: left; }
+    .pick h2 { text-align: center; }
+    .pick .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 0; border-bottom: 1px solid #eee; }
+    .pick .row .name { font-weight: 600; } .pick .row .n { color: #666; font-size: 12px; margin-left: 6px; font-weight: 400; }
+    .pick .row.off .name { color: #999; }
+    .sw { position: relative; width: 46px; height: 26px; border-radius: 13px; background: #cbd5e1; border: 0; cursor: pointer; flex: none; transition: background .15s; }
+    .sw::after { content: ''; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; transition: left .15s; }
+    .sw.on { background: #15803d; } .sw.on::after { left: 23px; }
+    .sw:disabled { opacity: .4; cursor: default; }
+    .pick .warn { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; border-radius: 8px; padding: 8px 10px; font-size: 13px; margin: 10px 0 0; line-height: 1.35; }
+    .pick .btns { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; flex-wrap: wrap; }
+    .pick .sub { text-align: center; color: #555; font-size: 13px; margin-bottom: 8px; }
     .panel { position: fixed; left: 212px; bottom: 8px; width: min(560px, calc(100vw - 228px)); max-height: min(85vh, 720px); overflow: auto; z-index: 2147483647;
              background: #fff; color: #111; border-radius: 12px; box-shadow: 0 12px 40px rgba(0,0,0,.35); padding: 14px 16px; font-size: 14px; line-height: 1.4; }
     .panel h1 { font-size: 16px; margin: 0 0 6px; display: flex; align-items: center; justify-content: space-between; }
@@ -272,8 +284,7 @@
       await sset({ settings }); toPage('settings', settings); settingsOpen = false; renderPanel();
     }
     else if (act === 'toggle-log') { if (openLogs.has(id)) openLogs.delete(id); else openLogs.add(id); renderPanel(); }
-    else if (act === 'into-current') { if (confirm('Push every recorded change of this run into the run that is open in ESO now?')) toPage('action', { name: 'pushIntoCurrent', recordId: id }); }
-    else if (act === 'into-new') { if (confirm('Create a brand-new run on ESO and push every recorded change of this run into it?')) toPage('action', { name: 'pushIntoNew', recordId: id }); }
+    else if (act === 'into-current' || act === 'into-new') showPagePicker(id, act === 'into-new');
     else if (act === 'retry') toPage('action', { name: 'retryRejected', recordId: id });
     else if (act === 'drop') { if (confirm('Drop the rejected changes? They will stay in the export but will not be pushed again.')) toPage('action', { name: 'dropRejected', recordId: id }); }
     else if (act === 'export') exportRuns([id]);
@@ -412,5 +423,57 @@
       if (!skipRequested && opened < views.length) warmed.delete(id);
     } catch (e) { warmed.delete(id); }
     finally { hideVeil(); warming = false; }
+  }
+
+  // ---------------------------------------------------------------- page picker for pushing a run
+  const PAGES = [
+    ['incident', 'INCIDENT'], ['patient', 'PATIENT'], ['vitals', 'VITALS'], ['flowchartTreatments', 'FLOWCHART'], ['assessments', 'ASSESSMENTS'],
+    ['narrative', 'NARRATIVE'], ['forms', 'FORMS'], ['billing', 'BILLING'], ['signatures', 'SIGNATURES'],
+  ];
+  const SENSITIVE = { patient: 'PATIENT', signatures: 'SIGNATURES' };
+  const SENSITIVE_WARNING = 'Using this page will overwrite any saved signatures and patient details in the run you are pushing into. Only use it for the SAME patient.';
+  function showPagePicker(sourceId, toNew) {
+    if (!shadow || !lastStatus) return;
+    const run = lastStatus.runs.find(r => r.recordId === sourceId);
+    if (!run) return;
+    const counts = run.pages || {};
+    const on = new Set(['incident', 'narrative'].filter(p => counts[p]));
+    const wrap = document.createElement('div');
+    wrap.className = 'veil';
+    wrap.style.cursor = 'default';
+    const render = () => {
+      const anySensitive = [...on].some(p => SENSITIVE[p]);
+      wrap.innerHTML = `<div class="box pick"><h2>${toNew ? 'Push into a NEW run' : 'Push into the open run'}</h2>
+        <div class="sub">${esc(run.incidentNumber || 'this run')} · choose which pages to copy</div>
+        ${PAGES.map(([key, label]) => `<div class="row ${on.has(key) ? '' : 'off'}"><span class="name">${label}<span class="n">${counts[key] ? counts[key] + ' save' + (counts[key] === 1 ? '' : 's') : 'nothing saved'}</span></span>
+          <button class="sw ${on.has(key) ? 'on' : ''}" data-page="${key}" ${counts[key] ? '' : 'disabled'} aria-label="${label}"></button></div>`).join('')}
+        ${anySensitive ? `<div class="warn">${esc(SENSITIVE_WARNING)}</div>` : ''}
+        <div class="btns"><button class="a sec" data-act="all">Toggle all</button><button class="a sec" data-act="cancel">Cancel</button><button class="a" data-act="go" ${on.size ? '' : 'disabled'}>Push ${on.size} page${on.size === 1 ? '' : 's'}</button></div></div>`;
+    };
+    wrap.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const sw = e.target.closest('.sw');
+      if (sw && !sw.disabled) { const k = sw.dataset.page; if (on.has(k)) on.delete(k); else on.add(k); render(); return; }
+      const act = e.target.dataset && e.target.dataset.act;
+      if (act === 'all') {
+        const all = PAGES.map(([k]) => k).filter(k => counts[k]);
+        if (all.every(k => on.has(k))) on.clear(); else all.forEach(k => on.add(k));
+        render();
+      } else if (act === 'cancel') wrap.remove();
+      else if (act === 'go') {
+        const pages = PAGES.map(([k]) => k).filter(k => on.has(k));
+        const names = PAGES.filter(([k]) => on.has(k)).map(([, l]) => l).join(', ');
+        const blank = PAGES.filter(([k]) => !on.has(k) && counts[k]).map(([, l]) => l).join(', ');
+        const sensitive = pages.some(p => SENSITIVE[p]);
+        const msg = `${toNew ? 'Create a NEW run and copy' : 'Copy'}: ${names}.` + (blank ? `\\nNot copied: ${blank}.` : '') +
+          (sensitive ? `\\n\\n⚠ ${SENSITIVE_WARNING}\\nIf this is a different patient, press Cancel and turn those pages off.` : '') + '\\n\\nContinue?';
+        if (!confirm(msg)) return;
+        wrap.remove();
+        toPage('action', { name: toNew ? 'pushIntoNew' : 'pushIntoCurrent', recordId: sourceId, pages });
+      }
+    });
+    wrap.addEventListener('pointerdown', (e) => e.stopPropagation());
+    render();
+    shadow.appendChild(wrap);
   }
 })();
