@@ -65,6 +65,7 @@
     xsrf: null,                  // last x-custom-xsrf-token seen on a live request
     currentRecordId: null,
     lastEvent: null,
+    lastView: null,              // { view, recordId, ts } of the most recent live tab load
     lastProbeAt: 0,
     rejectedSeen: false,
   };
@@ -633,6 +634,7 @@
       setOnline(true); setLoggedOut(false);
       const j = tryJSON(res.text);
       run.views[kind.view] = { text: res.text, ts: Date.now() };
+      S.lastView = { view: kind.view, recordId: kind.recordId, ts: Date.now() };
       cachePut('GET', req.url, undefined, res);
       learnTab(kind.view, kind.recordId, req);
       if (!run.prefetchedAt) schedulePrefetch(run);
@@ -890,7 +892,7 @@
     const runs = Object.values(S.runs).map(summary).sort((a, b) => b.lastSeenAt - a.lastSeenAt);
     return {
       version: VERSION, online: S.online, loggedOut: S.loggedOut, pushing: S.pushing, ready: S.ready, hasToken: !!S.xsrf,
-      currentRecordId: S.currentRecordId, runs, lastEvent: S.lastEvent,
+      currentRecordId: S.currentRecordId, runs, lastEvent: S.lastEvent, lastView: S.lastView,
       held: runs.reduce((n, r) => n + r.counts.held + (r.pendingCreate ? 1 : 0), 0),
       rejected: runs.reduce((n, r) => n + r.counts.rejected, 0),
       hasTemplates: !!(S.templates && S.templates.views && S.templates.views.Incident),
@@ -943,6 +945,7 @@
         else if (a.name === 'dropRejected') { const run = S.runs[a.recordId]; if (run) { for (const b of run.batches) if (b.status === 'rejected') b.status = 'dropped'; persist(run); emit(); } }
         else if (a.name === 'forget') { delete S.runs[a.recordId]; if (S.currentRecordId === a.recordId) S.currentRecordId = null; emit(); }
         else if (a.name === 'status') { emit(); }
+        else if (a.name === 'note') { const run = S.runs[a.recordId]; if (run) log(run, String(a.msg || ''), a.level || 'info'); }
       }
     } catch (e) { log(null, 'ESO Save internal error: ' + (e && e.message), 'error'); }
   });

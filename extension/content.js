@@ -43,7 +43,7 @@
   const sget = (keys) => new Promise(res => storage.get(keys, (v) => res(v || {})));
   const sset = (obj) => new Promise(res => storage.set(obj, () => res()));
   const sremove = (keys) => new Promise(res => storage.remove(keys, () => res()));
-  const DEFAULT_SETTINGS = { purgeHoursAfterLock: 0, probeSec: 20, heldProbeSec: 8 };
+  const DEFAULT_SETTINGS = { purgeHoursAfterLock: 0, probeSec: 20, heldProbeSec: 8, warmTabs: true };
 
   async function loadAll() {
     const all = await sget(null);
@@ -96,6 +96,7 @@
       if (panelOpen) renderPanel();
     } else if (type === 'status' && payload) {
       lastStatus = payload;
+      maybeWarmTabs(payload);
       if (payload.runs.some(r => r.locked)) purgeLocked(settings);
       renderBar();
       if (panelOpen) renderPanel();
@@ -209,6 +210,7 @@
     parts.push(`<div class="actions"><button class="a" data-act="push">Push all held changes now</button><button class="a sec" data-act="export-all">Export everything</button><button class="a sec" data-act="settings">Settings</button></div>`);
     if (settingsOpen) {
       parts.push(`<div class="run"><label class="s">Clear a run from this device <input type="number" min="0" max="720" id="purge" value="${esc(settings.purgeHoursAfterLock)}"> hours after it is locked (0 = as soon as the lock is seen)</label>` +
+        `<label class="s"><input type="checkbox" id="warm" ${settings.warmTabs === false ? '' : 'checked'}> Open every tab once, quietly, when a run opens (so tabs you have not touched still work with no signal)</label>` +
         `<div class="actions"><button class="a" data-act="save-settings">Save</button></div></div>`);
     }
     const listed = s.runs.filter(r => r.counts.total || r.pendingCreate);
@@ -256,6 +258,7 @@
     else if (act === 'save-settings') {
       const v = Number(panel.querySelector('#purge').value);
       settings.purgeHoursAfterLock = Number.isFinite(v) && v >= 0 ? v : 0;
+      settings.warmTabs = !!panel.querySelector('#warm').checked;
       await sset({ settings }); toPage('settings', settings); settingsOpen = false; renderPanel();
     }
     else if (act === 'toggle-log') { if (openLogs.has(id)) openLogs.delete(id); else openLogs.add(id); renderPanel(); }
@@ -286,5 +289,94 @@
     const a = document.createElement('a'); a.href = url; a.download = `esosave-${String(name).replace(/[^\w.-]+/g, '_')}.json`; a.target = '_blank';
     shadow.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 60000);
+  }
+
+  // ---------------------------------------------------------------- tab warm-up
+  // ESO loads each tab's code the first time it is clicked, and serves those files with headers
+  // that make the browser re-check them every time, so a tab that was never clicked cannot open
+  // without signal even when its data is cached. Once a run is open, click through every tab once
+  // (waiting for the medic to be idle), then return to where they were.
+  const TAB_LABELS = { Incident: 'INCIDENT', Patient: 'PATIENT', Vitals: 'VITALS', FlowchartTreatments: 'FLOWCHART', Assessments: 'ASSESSMENTS',
+    Narrative: 'NARRATIVE', Forms: 'FORMS', Billing: 'BILLING', Signatures: 'SIGNATURES' };
+  const warmed = new Set();
+  let warming = false;
+  let lastInputAt = 0;
+  for (const t of ['keydown', 'pointerdown', 'touchstart']) document.addEventListener(t, (e) => { if (!host || !e.composedPath().includes(host)) lastInputAt = Date.now(); }, true);
+
+  function tabElement(label) {
+    const want = label.toUpperCase();
+    const all = document.querySelectorAll('a, button, [role="tab"], li, div, span');
+    let best = null;
+    for (const el of all) {
+      if (host && host.contains(el)) continue;
+      const text = (el.innerText || el.textContent || '').trim().toUpperCase();
+      if (text !== want) continue;
+      const r = el.getBoundingClientRect();
+      if (!r.width || !r.height || r.top > 260) continue;
+      if (!best || el.contains(best) === false && best.contains(el)) best = el; // prefer the innermost match
+    }
+    if (!best) return null;
+    return best.closest('a, button, [role="tab"], li') || best;
+  }
+  function currentTabLabel(s) {
+    const v = s.lastView && s.lastView.recordId === s.currentRecordId ? s.lastView.view : 'Incident';
+    return TAB_LABELS[v] || v.toUpperCase();
+  }
+  function maybeWarmTabs(s) {
+    if (settings.warmTabs === false || warming) return;
+    const id = s.currentRecordId;
+    if (!id || warmed.has(id) || !s.online || s.loggedOut) return;
+    const run = s.runs.find(r => r.recordId === id);
+    if (!run || run.locked || run.tmp) return;
+    if (!s.lastView || s.lastView.recordId !== id) return; // wait until the app has shown the first tab
+    warmed.add(id);
+    setTimeout(() => warmTabs(id), 2500);
+  }
+  const idle = () => Date.now() - lastInputAt > 2500;
+  function waitIdle(maxWait) {
+    return new Promise((resolve) => {
+      const t0 = Date.now();
+      const tick = () => { if (idle() || Date.now() - t0 > maxWait) resolve(idle()); else setTimeout(tick, 500); };
+      tick();
+    });
+  }
+  function waitViewLoaded(view, id, timeout) {
+    return new Promise((resolve) => {
+      const t0 = Date.now();
+      const tick = () => {
+        const lv = lastStatus && lastStatus.lastView;
+        if (lv && lv.view === view && lv.recordId === id && lv.ts >= t0 - 50) return resolve(true);
+        if (Date.now() - t0 > timeout) return resolve(false);
+        setTimeout(tick, 100);
+      };
+      tick();
+    });
+  }
+  async function warmTabs(id) {
+    if (warming) return;
+    warming = true;
+    try {
+      if (!(await waitIdle(60000))) { warmed.delete(id); return; }
+      if (!lastStatus || lastStatus.currentRecordId !== id || !lastStatus.online) { warmed.delete(id); return; }
+      const startLabel = currentTabLabel(lastStatus);
+      const views = Object.keys(TAB_LABELS);
+      let opened = 0, missing = [];
+      for (const view of views) {
+        const label = TAB_LABELS[view];
+        if (label === startLabel) continue;
+        if (!idle() || !lastStatus.online || lastStatus.currentRecordId !== id) break; // the medic is working: stop
+        const el = tabElement(label);
+        if (!el) { missing.push(label); continue; }
+        el.click();
+        const ok = await waitViewLoaded(view, id, 4000);
+        if (!ok) await new Promise(r => setTimeout(r, 400));
+        opened++;
+      }
+      const back = tabElement(startLabel);
+      if (back) back.click();
+      if (opened) toPage('action', { name: 'note', recordId: id, msg: `Opened ${opened} tab${opened === 1 ? '' : 's'} once so they work with no signal.${missing.length ? ' Could not find: ' + missing.join(', ') + '.' : ''}`, level: 'info' });
+      if (opened < views.length - 1) warmed.delete(id); // try again later if we stopped early
+    } catch (e) { warmed.delete(id); }
+    finally { warming = false; }
   }
 })();

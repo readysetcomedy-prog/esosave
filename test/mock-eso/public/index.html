@@ -1,10 +1,15 @@
 <!doctype html>
 <html>
 <head><meta charset="utf-8"><title>Mock ESO EHR</title>
-<style>body{font-family:sans-serif;padding:16px} canvas{border:1px solid #999;touch-action:none} #status{white-space:pre;font-family:monospace;font-size:12px}</style>
+<style>body{font-family:sans-serif;padding:16px} .tab{padding:6px 10px;background:#eee;cursor:pointer} .tab.active{background:#3b82f6;color:#fff} canvas{border:1px solid #999;touch-action:none} #status{white-space:pre;font-family:monospace;font-size:12px}</style>
 </head>
 <body>
 <h1>Mock ESO EHR</h1>
+<nav id="tabs" style="display:flex;gap:8px;margin:8px 0">
+  <div class="tab" data-view="Incident">INCIDENT</div><div class="tab" data-view="Patient">PATIENT</div><div class="tab" data-view="Vitals">VITALS</div>
+  <div class="tab" data-view="FlowchartTreatments">FLOWCHART</div><div class="tab" data-view="Assessments">ASSESSMENTS</div><div class="tab" data-view="Narrative">NARRATIVE</div>
+  <div class="tab" data-view="Forms">FORMS</div><div class="tab" data-view="Billing">BILLING</div><div class="tab" data-view="Signatures">SIGNATURES</div>
+</nav>
 <p>Fake single-page app that talks to the mock API the same way the real ESO app does.</p>
 <div><label>Signature</label><br><canvas id="sig" width="300" height="100"></canvas></div>
 <div id="status"></div>

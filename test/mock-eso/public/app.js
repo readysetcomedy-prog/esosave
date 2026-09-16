@@ -71,6 +71,13 @@
     uuid,
   };
   setInterval(() => app.flush(), app.autosaveMs);
+  app.clicks = [];
+  document.getElementById('tabs').addEventListener('click', (e) => {
+    const t = e.target.closest('.tab'); if (!t) return;
+    app.clicks.push(t.dataset.view);
+    document.querySelectorAll('.tab').forEach(x => x.classList.toggle('active', x === t));
+    app.openTab(t.dataset.view);
+  });
   function render() {
     const el = document.getElementById('status');
     if (el) el.textContent = `record ${app.recordId}\nresponses ${app.responses.length} errors ${app.errors.length}\nkeyMap ${JSON.stringify(app.keyMap)}`;

@@ -116,6 +116,17 @@ test('every tab and its companion requests are prefetched when a run opens, so a
   assert.ok(learned.some(r => /custom\/lookup/.test(r.url) && r.url.includes('{id}')), 'companion recorded as a template: ' + JSON.stringify(learned));
 });
 
+test('the extension clicks through every tab once after a run opens, then returns to the original tab', async () => {
+  const id = await app(() => window.app.recordId);
+  const clicks = await waitFor(async () => { const c = await app(() => window.app.clicks); return c.length >= 9 ? c : null; }, { label: 'tabs clicked', timeout: 30000 });
+  for (const v of ['Patient', 'Vitals', 'FlowchartTreatments', 'Assessments', 'Narrative', 'Forms', 'Billing', 'Signatures']) assert.ok(clicks.includes(v), 'clicked ' + v);
+  assert.equal(clicks[clicks.length - 1], 'Incident', 'returned to the tab the medic was on');
+  const active = await app(() => document.querySelector('.tab.active').dataset.view);
+  assert.equal(active, 'Incident');
+  const run = await T.run(id);
+  assert.ok(run.log.some(l => /Opened 8 tabs once/.test(l.msg)), 'logged: ' + JSON.stringify(run.log.map(l => l.msg)));
+});
+
 test('offline tab switch is served from the cached view with held changes applied', async () => {
   const id = await app(() => window.app.recordId);
   await app(() => window.app.openTab('Vitals'));
