@@ -10,3 +10,4 @@ dist/
 *.key
 *.mobileprovision
 .DS_Store
+targets/esosave/assets/
