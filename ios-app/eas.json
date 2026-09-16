@@ -7,10 +7,10 @@
     "production": {
       "distribution": "store",
       "ios": {
-        "autoIncrement": true
+        "autoIncrement": true,
+        "image": "latest"
       },
-      "node": "22.22.2",
-      "image": "latest"
+      "node": "22.22.2"
     }
   },
   "submit": {
