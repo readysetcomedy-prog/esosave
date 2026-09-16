@@ -39,7 +39,9 @@ const out = await page.evaluate(async (b64) => {
     // sample the corner colour of the logo to fill behind the rounded corners
     const sc = c.getContext('2d').getImageData(minX + 40, minY + Math.round(bh / 2), 1, 1).data;
     g.fillStyle = `rgb(${sc[0]},${sc[1]},${sc[2]})`; g.fillRect(0, 0, size, size);
-    g.imageSmoothingQuality = 'high'; g.drawImage(cropped, 0, 0, size, size);
+    // draw a touch larger than the canvas so the artwork's soft outer edge falls outside it
+    const grow = Math.round(size * 0.035);
+    g.imageSmoothingQuality = 'high'; g.drawImage(cropped, -grow, -grow, size + 2 * grow, size + 2 * grow);
     return o.toDataURL('image/png').split(',')[1];
   })();
   return { bounds: [minX, minY, bw, bh], sizes: Object.fromEntries([16, 32, 48, 128, 256, 512].map(s => [s, render(s)])), ios, splash: render(512) };
