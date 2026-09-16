@@ -19,8 +19,10 @@ to bad signal or a hung page.
   that was sent and when.
 - **Signature images as a backup.** Every signature pad is snapshotted as a PNG when the pen lifts,
   in case one never makes it into ESO.
-- **Copy a vital.** A small copy button in front of each saved vital re-enters it as a new vital with
-  the current time, every other value the same.
+- **Copy a vital.** A small copy button floats just left of each saved vital's time in the Vitals
+  tab; tapping it re-enters that vital as a new one with the current time, every other value the
+  same. Only fields the app itself has been seen saving are copied, and the run log names any that
+  were not.
 
 Nothing is invented. The extension only replays what ESO's own app tried to send.
 
@@ -133,7 +135,8 @@ Notes:
 - The card in the bottom-left corner of every ESO page shows the state: green (signal OK, everything saved),
   amber (no signal, or changes held), blue (pushing), red (logged out or ESO rejected a change). The
   "–" collapses it to just the logo with a coloured ring (and a count of held changes); tap the logo
-  to expand. It expands by itself when something goes wrong.
+  to expand. It stays collapsed through amber (no signal, changes held) and only expands by itself
+  when it turns red.
 - Tap the card or **Runs** to open the panel: every run recorded on the device, how many saves are
   held, the log, signature images, and the restore buttons:
   - **Push into the open run** / **Push into a NEW run** — first pick which pages to copy (Incident

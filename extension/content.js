@@ -124,6 +124,9 @@
            font-size: 12px; color: #fff; cursor: pointer; user-select: none; box-shadow: 0 4px 14px rgba(0,0,0,.3); transition: background .2s; line-height: 1.3; }
     .bar.good { background: #15803d; } .bar.warn { background: #b45309; } .bar.bad { background: #b91c1c; } .bar.info { background: #1d4ed8; }
     .bar.warn, .bar.bad { animation: pulse 1.6s ease-in-out infinite; }
+    .copylayer { position: fixed; inset: 0; pointer-events: none; z-index: 2147483640; }
+    .copylayer .esosave-copy { position: fixed; pointer-events: auto; width: 26px; height: 22px; margin: 0; padding: 0; border: 0; border-radius: 6px; background: #15803d; color: #fff; font: 15px/22px system-ui, sans-serif; text-align: center; cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,.35); }
+    .copylayer .esosave-copy:hover { background: #166534; }
     @keyframes pulse { 0%,100% { filter: brightness(1); } 50% { filter: brightness(1.25); } }
     .bar .title { display: flex; align-items: center; gap: 6px; font-weight: 700; font-size: 13px; }
     .dot { width: 9px; height: 9px; border-radius: 50%; background: #fff; flex: none; }
@@ -222,8 +225,9 @@
   function renderBar() {
     if (!bar) return;
     const st = barState(lastStatus);
-    // a change for the worse un-collapses the card so nobody misses it
-    if (settings.cardCollapsed && lastCls && lastCls !== st.cls && (st.cls === 'warn' || st.cls === 'bad')) setCollapsed(false, false);
+    // Only a turn to red (rejected save, logged out) un-collapses the card. Amber (no signal, changes
+    // held) shows as the ring colour and the count, so the card stays the way the medic left it.
+    if (settings.cardCollapsed && lastCls && lastCls !== st.cls && st.cls === 'bad') setCollapsed(false, false);
     lastCls = st.cls;
     if (settings.cardCollapsed) {
       const held = lastStatus && (lastStatus.held || 0);
@@ -516,43 +520,99 @@
   }
 
   // ---------------------------------------------------------------- copy button on saved vitals
-  // Each saved vital row shows its time (HH:MM:SS) in the Vitals tab. A small copy button goes in
-  // front of it; tapping it re-enters that vital's values as a new row with the current time.
+  // Each saved vital row in the Vitals tab shows its time (HH:MM:SS). A small copy button floats
+  // just left of that cell; tapping it re-enters the vital's values as a new row with the current
+  // time. The buttons live in this extension's own layer, never inside ESO's page, so the cell is
+  // not pushed about and the app's own rendering is untouched.
   const TIME_RE = /^\d{1,2}:\d{2}:\d{2}$/;
+  const NOT_A_ROW = '[role="dialog"], [aria-modal="true"], [class*="modal" i], [class*="dialog" i], [class*="popover" i], [class*="dropdown" i], [class*="picker" i], [class*="menu" i], [class*="overlay" i], label';
   let copyBusy = false;
-  function decorateVitalRows() {
-    if (!lastStatus || !lastStatus.lastView || lastStatus.lastView.view !== 'Vitals' || !lastStatus.currentRecordId) return;
-    const els = document.querySelectorAll('td, div, span, p, strong, b');
-    const seen = {};
-    for (const el of els) {
+  let copyLayer = null;
+  const copyButtons = new Map(); // time element -> button in our layer
+  function vitalTimeCells() {
+    const out = [];
+    if (!lastStatus || !lastStatus.lastView || lastStatus.lastView.view !== 'Vitals' || !lastStatus.currentRecordId) return out;
+    for (const el of document.querySelectorAll('td, div, span, p, strong, b')) {
       if (host && host.contains(el)) continue;
       if (el.children.length > 1) continue;
       const text = (el.textContent || '').trim();
       if (!TIME_RE.test(text)) continue;
+      // innermost element only: a wrapper around the real cell would give a second button
+      if (el.firstElementChild && (el.firstElementChild.textContent || '').trim() === text) continue;
       if (el.closest('input, textarea, select, button, [contenteditable]')) continue;
-      if (el.querySelector && el.querySelector('input, textarea, select')) continue;
+      if (el.closest(NOT_A_ROW)) continue; // the entry form's own time field
+      // a time shown next to a field control is part of a form, not a saved row
+      let formy = false;
+      for (let a = el.parentElement, i = 0; a && i < 2; a = a.parentElement, i++) {
+        if (a.querySelector('input:not([type=checkbox]):not([type=radio]):not([type=hidden]), select, textarea')) { formy = true; break; }
+      }
+      if (formy) continue;
+      const r = el.getBoundingClientRect();
+      if (!r.width || !r.height) continue;
+      out.push({ el, text, rect: r });
+    }
+    return out;
+  }
+  function ensureCopyLayer() {
+    if (copyLayer || !shadow) return copyLayer;
+    copyLayer = document.createElement('div');
+    copyLayer.className = 'copylayer';
+    shadow.appendChild(copyLayer);
+    return copyLayer;
+  }
+  function makeCopyButton() {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'esosave-copy';
+    btn.title = 'Copy this vital as a new entry with the current time';
+    btn.textContent = '⧉';
+    btn.addEventListener('pointerdown', (e) => e.stopPropagation());
+    btn.addEventListener('click', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      if (copyBusy) return;
+      copyBusy = true;
+      showVeilMessage('Copying vital…', 'Entering the same values as a new vital with the current time.');
+      toPage('action', { name: 'copyVital', recordId: lastStatus.currentRecordId, time: btn.dataset.time, nth: Number(btn.dataset.nth) });
+      setTimeout(() => { if (copyBusy) { copyBusy = false; hideVeil(); } }, 20000);
+    });
+    return btn;
+  }
+  function decorateVitalRows() {
+    const cells = vitalTimeCells();
+    if (!cells.length && !copyButtons.size) return;
+    const layer = ensureCopyLayer();
+    if (!layer) return;
+    const keep = new Set();
+    const seen = {};
+    for (const { el, text, rect } of cells) {
       const time = text.padStart(8, '0');
       const nth = seen[time] = (seen[time] || 0);
       seen[time]++;
-      let btn = el.previousElementSibling && el.previousElementSibling.classList && el.previousElementSibling.classList.contains('esosave-copy') ? el.previousElementSibling : null;
-      if (btn) { btn.dataset.nth = String(nth); continue; }
-      btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'esosave-copy';
-      btn.title = 'Copy this vital as a new entry with the current time';
-      btn.textContent = '⧉';
+      let btn = copyButtons.get(el);
+      if (!btn) { btn = makeCopyButton(); copyButtons.set(el, btn); layer.appendChild(btn); }
+      keep.add(el);
       btn.dataset.time = time; btn.dataset.nth = String(nth);
-      btn.setAttribute('style', 'all:unset;cursor:pointer;display:inline-block;margin:0 8px 0 4px;padding:2px 8px;border-radius:6px;background:#15803d;color:#fff;font-size:15px;line-height:1.2;vertical-align:middle;');
-      btn.addEventListener('click', (e) => {
-        e.preventDefault(); e.stopPropagation();
-        if (copyBusy) return;
-        copyBusy = true;
-        showVeilMessage('Copying vital…', 'Entering the same values as a new vital with the current time.');
-        toPage('action', { name: 'copyVital', recordId: lastStatus.currentRecordId, time: btn.dataset.time, nth: Number(btn.dataset.nth) });
-        setTimeout(() => { if (copyBusy) { copyBusy = false; hideVeil(); } }, 20000);
-      }, true);
-      el.parentNode.insertBefore(btn, el);
+      // hidden when something (the entry form, a menu) is drawn over the row
+      const hit = document.elementFromPoint(rect.left + Math.min(rect.width / 2, 12), rect.top + rect.height / 2);
+      const row = el.closest('tr') || (el.parentElement && el.parentElement.parentElement) || el.parentElement || el;
+      const covered = hit && hit !== el && !el.contains(hit) && !row.contains(hit) && !(host && host.contains(hit));
+      const off = rect.bottom < 0 || rect.top > innerHeight;
+      if (covered || off) { btn.style.display = 'none'; continue; }
+      const w = 26, h = 22;
+      // just left of the cell; if the cell hugs the screen edge, in the cell's own padding before
+      // the text when that fits, otherwise just right of the cell. Never on top of the time itself.
+      let left;
+      if (rect.left - w - 6 >= 2) left = rect.left - w - 6;
+      else {
+        let textLeft = rect.left;
+        try { const rg = document.createRange(); rg.selectNodeContents(el); const tr = rg.getBoundingClientRect(); if (tr.width) textLeft = tr.left; } catch (e) { /* ignore */ }
+        left = textLeft - rect.left >= w + 4 ? textLeft - w - 2 : rect.right + 6;
+      }
+      btn.style.display = 'block';
+      btn.style.left = Math.round(left) + 'px';
+      btn.style.top = Math.round(rect.top + (rect.height - h) / 2) + 'px';
     }
+    for (const [el, btn] of copyButtons) { if (!keep.has(el)) { btn.remove(); copyButtons.delete(el); } }
   }
   function showVeilMessage(title, text) {
     hideVeil();
@@ -576,10 +636,15 @@
     }
     copyBusy = false;
     hideVeil();
+    if (p.held) setTimeout(() => alert('ESO Save: no signal right now. The copied vital is held on this device and will be pushed to ESO when signal returns.'), 50);
     setTimeout(decorateVitalRows, 300);
   }
-  const rowObserver = new MutationObserver(() => { clearTimeout(rowObserver._t); rowObserver._t = setTimeout(decorateVitalRows, 150); });
+  let rowTimer = null;
+  const scheduleRows = (ms) => { clearTimeout(rowTimer); rowTimer = setTimeout(decorateVitalRows, ms); };
+  const rowObserver = new MutationObserver(() => scheduleRows(150));
   const startRowObserver = () => { if (document.body) rowObserver.observe(document.body, { childList: true, subtree: true, characterData: true }); };
   if (document.body) startRowObserver(); else document.addEventListener('DOMContentLoaded', startRowObserver);
-  setInterval(decorateVitalRows, 2000);
+  addEventListener('scroll', () => scheduleRows(30), { capture: true, passive: true });
+  addEventListener('resize', () => scheduleRows(60));
+  setInterval(decorateVitalRows, 700);
 })();

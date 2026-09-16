@@ -5,7 +5,7 @@ import { launch, waitFor, sleep, normalizeTree } from './helpers.mjs';
 let T;
 before(async () => { T = await launch(); });
 after(async () => { if (T) await T.close(); });
-beforeEach(async () => { await T.context.setOffline(false); await T.control({ loggedOut: false, rejectValue: null, failAutosaves: 0 }); });
+beforeEach(async () => { await T.context.setOffline(false); await T.control({ loggedOut: false, rejectValue: null, failAutosaves: 0, refuseAutosaves: 0 }); });
 
 const app = (fn, ...args) => T.page.evaluate(fn, ...args);
 // A fresh page and a fresh run, with the tab warm-up finished, so a test does not inherit clicks
@@ -267,12 +267,19 @@ test('a copy button on a saved vital re-enters it as a new vital with the curren
     window.app.addScalar('vitals', `vitals.vitalSigns.['${k}'].glasgowComaScale.glasgowComaQualifierIds.['5690']`, 5690);
   }, k);
   await waitFor(async () => (await T.record(id)).tree.vitals?.vitalSigns?.[0]?.pulse?.pulseRate === '72', { label: 'vital saved' });
+  // the entry form shows a time next to its own controls: it must not get a button
+  await T.page.evaluate(() => { document.body.insertAdjacentHTML('beforeend', '<div id="entry" class="vital-entry-modal" style="position:fixed;right:20px;top:20px;background:#fff;border:1px solid #000;padding:8px"><div><span>15:39:12</span><input value="x"></div></div>'); });
   await app(() => window.app.openTab('Vitals'));
-  await waitFor(() => T.page.evaluate(() => !!document.querySelector('button.esosave-copy')), { label: 'copy button injected' });
-  const btn = await T.page.evaluate(() => { const b = document.querySelector('button.esosave-copy'); return { time: b.dataset.time, next: b.nextElementSibling.textContent }; });
+  const buttons = () => T.page.evaluate(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.esosave-copy')).filter(b => b.style.display !== 'none').map(b => ({ time: b.dataset.time, rect: b.getBoundingClientRect().toJSON() })));
+  await waitFor(async () => (await buttons()).length === 1, { label: 'one copy button, for the saved row only' });
+  const [btn] = await buttons();
   assert.equal(btn.time, '15:39:12');
-  assert.equal(btn.next, '15:39:12', 'button sits right in front of the time');
-  await T.page.click('button.esosave-copy');
+  // nothing was inserted into the page; the button floats just left of the time cell
+  assert.equal(await T.page.evaluate(() => document.querySelectorAll('.esosave-copy').length), 0, 'page DOM untouched');
+  const cell = await T.page.evaluate(() => document.querySelector('#vitals td.t').getBoundingClientRect().toJSON());
+  assert.ok(btn.rect.right <= cell.left && btn.rect.right >= cell.left - 12, `button (right ${btn.rect.right}) sits just left of the cell (left ${cell.left})`);
+  assert.ok(btn.rect.top >= cell.top - 2 && btn.rect.bottom <= cell.bottom + 2, 'vertically on the row');
+  await T.page.mouse.click(btn.rect.x + btn.rect.width / 2, btn.rect.y + btn.rect.height / 2);
   const rec = await waitFor(async () => { const r = await T.record(id); return r.tree.vitals.vitalSigns.length === 2 ? r : null; }, { label: 'second vital on ESO', timeout: 20000 });
   const [a, b] = rec.tree.vitals.vitalSigns;
   assert.equal(b.bloodPressure.bloodPressureSystolic, '120');
@@ -285,9 +292,70 @@ test('a copy button on a saved vital re-enters it as a new vital with the curren
   // the field naming matched what the app itself uses
   const op = rec.ops.find(o => /pulse\.pulseRate$/.test(o.address) && o.address.includes(b.itemId));
   assert.equal(op.fieldRef, 'PULSERATE'); assert.equal(op.dataType, 'string');
-  // the tab was refreshed so the new row shows, with its own copy button
-  await waitFor(() => T.page.evaluate(() => document.querySelectorAll('button.esosave-copy').length === 2), { label: 'two rows with copy buttons' });
+  // the tab was refreshed so the new row shows, with its own copy button; card still green
+  await waitFor(async () => (await buttons()).length === 2, { label: 'two rows with copy buttons' });
   await waitFor(() => T.page.evaluate(() => !document.getElementById('esosave-host').shadowRoot.querySelector('.veil')), { label: 'overlay gone' });
+  const s = await T.status();
+  assert.equal(s.online, true); assert.equal(s.held, 0);
+  const run = await T.run(id);
+  assert.ok(run.batches.some(b => b.synthetic === 'copyVital' && b.status === 'acked'), 'copy recorded as an acked batch');
+  await T.page.evaluate(() => document.getElementById('entry').remove());
+});
+
+test('a copied vital ESO refuses is reported and dropped; the card never turns to NO SIGNAL', async () => {
+  const id = await app(() => window.app.recordId);
+  await app(() => window.app.openTab('Vitals'));
+  const buttons = () => T.page.evaluate(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.esosave-copy')).filter(b => b.style.display !== 'none').map(b => b.getBoundingClientRect().toJSON()));
+  await waitFor(async () => (await buttons()).length === 2, { label: 'copy buttons' });
+  const dialogs = [];
+  const onDialog = (d) => { dialogs.push(d.message()); d.dismiss().catch(() => {}); };
+  T.page.on('dialog', onDialog);
+  try {
+    await T.control({ refuseAutosaves: 1 });
+    const [r] = await buttons();
+    await T.page.mouse.click(r.x + r.width / 2, r.y + r.height / 2);
+    await waitFor(() => dialogs.length ? dialogs[0] : null, { label: 'error shown to the medic' });
+    assert.match(dialogs[0], /ESO refused the copy: HTTP 500: Object reference/);
+    await sleep(1500);
+    const s = await T.status();
+    assert.equal(s.online, true, 'still online');
+    assert.equal(s.held, 0); assert.equal(s.rejected, 0);
+    assert.equal((await T.record(id)).tree.vitals.vitalSigns.length, 2, 'no third vital');
+    const run = await T.run(id);
+    assert.ok(run.log.some(l => /Could not copy the .* vital: ESO refused/.test(l.msg)), 'logged');
+    assert.equal(run.batches.filter(b => b.status === 'held' || b.status === 'rejected').length, 0);
+    // a later real save still goes through directly
+    await app(() => window.app.edit('incident', 'incident.dispatch.notes', 'after failed copy'));
+    await waitFor(async () => (await T.record(id)).tree.incident?.dispatch?.notes === 'after failed copy', { label: 'later save direct' });
+    const rec = await T.record(id);
+    const last = await T.run(id);
+    assert.equal(last.batches[last.batches.length - 1].status, 'acked');
+  } finally { T.page.off('dialog', onDialog); await T.control({ refuseAutosaves: 0 }); }
+});
+
+test('with no signal, a copied vital is held and pushed when signal returns', async () => {
+  const id = await app(() => window.app.recordId);
+  await app(() => window.app.openTab('Vitals'));
+  const buttons = () => T.page.evaluate(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.esosave-copy')).filter(b => b.style.display !== 'none').map(b => b.getBoundingClientRect().toJSON()));
+  await waitFor(async () => (await buttons()).length === 2, { label: 'copy buttons' });
+  const dialogs = [];
+  const onDialog = (d) => { dialogs.push(d.message()); d.dismiss().catch(() => {}); };
+  T.page.on('dialog', onDialog);
+  try {
+    await T.context.setOffline(true);
+    await waitFor(async () => !(await T.status()).online, { label: 'offline noticed', timeout: 30000 });
+    const [r] = await buttons();
+    await T.page.mouse.click(r.x + r.width / 2, r.y + r.height / 2);
+    await waitFor(async () => { const s = await T.status(); return s.held === 1; }, { label: 'copy held' });
+    await waitFor(() => dialogs.length, { label: 'held notice' });
+    assert.match(dialogs[0], /held on this device/);
+    // the held copy already shows in the offline tab
+    const shown = await app(() => window.app.openTab('Vitals').then(v => v.body.data.model.vitalSigns.length));
+    assert.equal(shown, 3, 'offline list includes the held copy');
+    await T.context.setOffline(false);
+    await waitFor(async () => { const s = await T.status(); return s.online && s.held === 0; }, { label: 'pushed', timeout: 30000 });
+    assert.equal((await T.record(id)).tree.vitals.vitalSigns.length, 3);
+  } finally { T.page.off('dialog', onDialog); }
 });
 
 test('locking a run marks it and it is cleared from the device after the retention window', async () => {
@@ -388,7 +456,7 @@ test('an identical batch re-sent by the app while the first is still held is not
   assert.equal(rec.tree.vitals.vitalSigns.filter(v => v.vitalSignDateTime === 'dup-test').length, 1);
 });
 
-test('the card collapses to the logo, expands on tap, and re-expands by itself when signal drops', async () => {
+test('the card collapses to the logo, stays collapsed on no signal, expands on tap, and re-expands by itself when red', async () => {
   const q = (sel) => T.page.evaluate((s) => { const el = document.getElementById('esosave-host').shadowRoot.querySelector(s); return el ? { cls: el.className, html: el.innerHTML.slice(0, 200) } : null; }, sel);
   await waitFor(async () => (await q('.bar')) && !/collapsed/.test((await q('.bar')).cls), { label: 'expanded card' });
   await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.fold').click());
@@ -396,11 +464,21 @@ test('the card collapses to the logo, expands on tap, and re-expands by itself w
   assert.match(b.html, /icons\/logo\.png/, 'collapsed card shows the logo');
   const stored = await T.storage();
   assert.equal(stored.settings.cardCollapsed, true, 'collapsed state remembered');
+  // no signal: stays collapsed, the ring turns amber and the held count shows on the logo
   await T.context.setOffline(true);
   await app(() => { window.app.edit('incident', 'incident.scene.callNature', 'collapsed test'); });
-  b = await waitFor(async () => { const x = await q('.bar'); return x && !/collapsed/.test(x.cls) && /warn/.test(x.cls) ? x : null; }, { label: 'auto-expanded on no signal', timeout: 20000 });
+  b = await waitFor(async () => { const x = await q('.bar'); return x && /collapsed/.test(x.cls) && /warn/.test(x.cls) && /class="pip">1</.test(x.html) ? x : null; }, { label: 'amber ring with count, still collapsed', timeout: 20000 });
+  await sleep(3000);
+  assert.match((await q('.bar')).cls, /collapsed/, 'did not expand by itself on no signal');
   await T.context.setOffline(false);
   await waitFor(async () => (await T.status()).held === 0, { label: 'pushed', timeout: 30000 });
+  assert.match((await q('.bar')).cls, /collapsed/, 'still collapsed after the push');
+  // red (logged out) is the one thing that un-collapses it
+  await T.control({ loggedOut: true });
+  await app(() => { window.app.edit('incident', 'incident.scene.callNature', 'collapsed test 2'); });
+  b = await waitFor(async () => { const x = await q('.bar'); return x && !/collapsed/.test(x.cls) && /bad/.test(x.cls) ? x : null; }, { label: 'auto-expanded on logged out', timeout: 20000 });
+  await T.control({ loggedOut: false });
+  await waitFor(async () => { const s = await T.status(); return !s.loggedOut && s.held === 0; }, { label: 'logged in and pushed', timeout: 30000 });
   await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.fold').click());
   await waitFor(async () => /collapsed/.test((await q('.bar')).cls), { label: 'collapsed again' });
   await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.bar').click());

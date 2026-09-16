@@ -274,7 +274,12 @@
   }
   function outcome(res) {
     if (res.netError || res.status === 0) return 'net';
-    if (res.status >= 500) return 'net';                 // Cloudflare 502/503/504 when ESO is unreachable
+    if (res.status >= 500) {
+      // 502/503/504 (and HTML error pages) mean ESO is unreachable. A 500 whose body is ESO's own
+      // JSON is the server refusing this request: treating it as "no signal" would retry it forever.
+      const j = res.status === 500 && /json/i.test(res.contentType || '') ? tryJSON(res.text) : null;
+      return j && typeof j === 'object' ? 'rejected' : 'net';
+    }
     if (res.status === 401 || res.status === 403) return 'auth';
     if (/text\/html/i.test(res.contentType || '')) return 'auth'; // bounced to the login page
     if (res.status >= 200 && res.status < 300) {
@@ -475,8 +480,9 @@
         const res = await sendBatch(run, target, b);
         const o = outcome(res);
         if (o === 'ok') { ack(run, b, res); persist(run); emit(); continue; }
-        if (o === 'net') { b.attempts = (b.attempts || 0) + 1; setOnline(false, 'push failed'); return false; }
+        if (o === 'net' && !(b.synthetic && (b.attempts || 0) >= 2)) { b.attempts = (b.attempts || 0) + 1; setOnline(false, 'push failed'); return false; }
         if (o === 'auth') { setLoggedOut(true); return false; }
+        if (b.synthetic) { b.status = 'dropped'; b.error = summarize(res); log(run, `ESO refused the copied vital, so it was dropped (${b.error}). Enter it by hand.`, 'error'); persist(run); emit(); continue; }
         reject(run, b, res); persist(run); emit();
       }
       if (!hasHeld(run)) log(run, `All changes for ${run.incidentNumber || 'this run'} are on ESO.`, 'good');
@@ -642,55 +648,80 @@
   function fmtEsoLocal(d) {
     return `${pad(d.getMonth() + 1)}/${pad(d.getDate())}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
   }
-  // The saves the app itself would make to enter this vital again, with a new time.
+  // The saves the app itself would make to enter this vital again, with a new time. Only fields the
+  // app has been seen saving (seeded from a recording, grown from live saves) are sent: a made-up
+  // field name would make ESO refuse the whole batch. Anything else in the vital is reported back.
   function vitalCopyOps(vital, newKey) {
     const base = `vitals.vitalSigns.['${newKey}']`;
     const ops = [{ verb: 'ADD', address: base, fieldRef: 'VITALSIGN', value: { vitalSignDateTime: fmtEsoLocal(new Date()) }, dataType: 'collectionWithData', isComplexType: true }];
-    const def = (p) => S.fieldDefs[p] || null;
-    const refFor = (p) => (def(p) && def(p)[0]) || p.split('.').pop().toUpperCase();
-    const typeFor = (p, v) => (def(p) && def(p)[1]) || (typeof v === 'boolean' ? 'boolean' : typeof v === 'number' ? (/id$/i.test(p) ? 'singleselect' : 'integer') : 'string');
+    const skipped = [];
     const walk = (obj, path) => {
       for (const [k, v] of Object.entries(obj)) {
         if (v === null || v === undefined || v === '') continue;
         if (!path && (k === 'itemId' || k === 'vitalSignDateTime')) continue;
         const p = path ? path + '.' + k : k;
+        const def = S.fieldDefs[p];
         if (Array.isArray(v)) {
-          for (const el of v) { if (el === null || typeof el === 'object') continue; ops.push({ verb: 'ADD', address: `${base}.${p}.['${el}']`, fieldRef: refFor(p), value: el, dataType: 'multiselect' }); }
+          const vals = v.filter(el => el !== null && typeof el !== 'object');
+          if (!vals.length) { if (v.length) skipped.push(p); continue; }
+          if (!def) { skipped.push(p); continue; }
+          for (const el of vals) ops.push({ verb: 'ADD', address: `${base}.${p}.['${el}']`, fieldRef: def[0], value: el, dataType: 'multiselect' });
         } else if (typeof v === 'object') walk(v, p);
-        else ops.push({ verb: 'EDIT', address: `${base}.${p}`, fieldRef: refFor(p), value: v, dataType: typeFor(p, v) });
+        else if (!def) skipped.push(p);
+        else if (def[1] === 'multiselect') ops.push({ verb: 'ADD', address: `${base}.${p}.['${v}']`, fieldRef: def[0], value: v, dataType: 'multiselect' });
+        else ops.push({ verb: 'EDIT', address: `${base}.${p}`, fieldRef: def[0], value: v, dataType: def[1] });
       }
     };
     walk(vital, '');
-    return ops;
+    return { ops, skipped };
   }
   async function currentVitals(run) {
     const id = run.realId || run.recordId;
     if (S.online && !S.loggedOut && !(run.tmp && !run.realId)) {
-      const res = await rawRequest({ method: 'GET', url: apiUrl(`/PatientCareRecords/${id}/Views/Vitals`), headers: headersFor(false), timeout: 15000 });
-      if (outcome(res) === 'ok') { run.views.Vitals = { text: res.text, ts: Date.now() }; cachePut('GET', apiUrl(`/PatientCareRecords/${id}/Views/Vitals`), undefined, res); }
+      const url = apiUrl(`/PatientCareRecords/${id}/Views/Vitals`);
+      const res = await rawRequest({ method: 'GET', url, headers: headersFor(false), timeout: 15000 });
+      if (outcome(res) === 'ok') { run.views.Vitals = { text: res.text, ts: Date.now() }; cachePut('GET', url, undefined, res); }
+      else log(run, `Could not re-read the vitals list (${summarize(res)}); using the saved copy.`, 'warn');
     }
     const cached = run.views.Vitals;
     if (!cached) return null;
     const j = tryJSON(applyHeldToView(run, 'Vitals', cached.text));
     return j && j.data && j.data.model && Array.isArray(j.data.model.vitalSigns) ? j.data.model.vitalSigns : null;
   }
+  // A copy is a batch the extension made up, so it is treated more carefully than the app's own
+  // saves: sent directly when there is signal, and never allowed to flip the card to NO SIGNAL or
+  // to sit in the queue blocking real saves if ESO refuses it.
   async function copyVital(recordId, timeText, nth) {
+    const fail = (error) => post('event', { name: 'vitalCopied', ok: false, error });
     const run = S.runs[recordId];
-    if (!run) return post('event', { name: 'vitalCopied', ok: false, error: 'Run not found.' });
+    if (!run) return fail('Run not found.');
     const list = await currentVitals(run);
-    if (!list) return post('event', { name: 'vitalCopied', ok: false, error: 'Could not read the vitals list.' });
+    if (!list) return fail('Could not read the vitals list.');
     const matches = list.filter(v => v && typeof v.vitalSignDateTime === 'string' && v.vitalSignDateTime.slice(-8) === timeText);
     const vital = matches[nth || 0] || matches[0];
-    if (!vital) return post('event', { name: 'vitalCopied', ok: false, error: 'That vital has not been saved by ESO yet. Wait a moment and try again.' });
+    if (!vital) return fail('That vital has not been saved by ESO yet. Wait a moment and try again.');
     const newKey = uuid();
-    const ops = vitalCopyOps(vital, newKey);
+    const { ops, skipped } = vitalCopyOps(vital, newKey);
+    if (ops.length < 2) return fail('Nothing in that vital can be copied.' + (skipped.length ? ' Unknown fields: ' + skipped.join(', ') : ''));
+    const note = skipped.length ? ` Not copied (never seen the app save them): ${skipped.join(', ')}.` : '';
+    const batch = { seq: run.nextSeq++, ts: Date.now(), scope: 'vitals', ops, status: 'pending', attempts: 0, synthetic: 'copyVital' };
+    if (!S.online || S.loggedOut || run.pendingCreate || run.pushing || hasHeld(run)) {
+      batch.status = 'held'; run.batches.push(batch); persist(run, true); emit(); kick(300);
+      log(run, `Copied the ${timeText} vital as a new entry (${ops.length - 1} fields); held until it can be pushed.${note}`, 'warn');
+      return post('event', { name: 'vitalCopied', ok: true, held: true });
+    }
     const id = run.realId || run.recordId;
-    const res = await handleAutosave({ type: 'autosave', recordId: run.recordId, scope: 'vitals' },
-      { method: 'POST', url: apiUrl(`/PatientCareRecords/${id}/autosave?scope=vitals`), headers: headersFor(true), body: JSON.stringify(ops) });
+    const res = await rawRequest({ method: 'POST', url: apiUrl(`/PatientCareRecords/${id}/autosave?scope=vitals`), headers: headersFor(true), body: rewriteKeys(JSON.stringify(ops), run.keyMap), timeout: 30000 });
     const o = outcome(res);
-    if (o === 'ok') { log(run, `Copied the ${timeText} vital as a new entry (${ops.length - 1} fields).`, 'good'); return post('event', { name: 'vitalCopied', ok: true }); }
-    log(run, `Could not copy the ${timeText} vital: ${summarize(res)}`, 'error');
-    post('event', { name: 'vitalCopied', ok: false, error: summarize(res) });
+    if (o === 'ok') {
+      run.batches.push(batch); ack(run, batch, res); setOnline(true); setLoggedOut(false); persist(run); emit();
+      log(run, `Copied the ${timeText} vital as a new entry (${ops.length - 1} fields).${note}`, 'good');
+      return post('event', { name: 'vitalCopied', ok: true });
+    }
+    if (o === 'auth') setLoggedOut(true);
+    const why = o === 'net' ? 'ESO did not answer. Check the signal and try again.' : `ESO refused the copy: ${summarize(res)}`;
+    log(run, `Could not copy the ${timeText} vital: ${why}${note}`, 'error');
+    fail(why);
   }
 
   async function handleAutosave(kind, req) {

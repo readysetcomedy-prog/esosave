@@ -11,7 +11,7 @@
  * Strictness that matters for the extension: every ADD of a complex item gets a server key, and any
  * later op that references an unknown item key is rejected, exactly like a stale temporary key would be.
  *
- * Test controls: POST /__control {loggedOut, rejectValue, failAutosaves}, GET /__record/:id, GET /__records
+ * Test controls: POST /__control {loggedOut, rejectValue, failAutosaves, refuseAutosaves}, GET /__record/:id, GET /__records
  */
 import http from 'node:http';
 import { readFileSync } from 'node:fs';
@@ -63,7 +63,7 @@ export function applyToTree(tree, op) {
 
 export function createMockEso() {
   const records = new Map();
-  const control = { loggedOut: false, rejectValue: null, failAutosaves: 0, log: [] };
+  const control = { loggedOut: false, rejectValue: null, failAutosaves: 0, refuseAutosaves: 0, log: [] };
   let seq = 0;
 
   function newRecord() {
@@ -81,6 +81,7 @@ export function createMockEso() {
   function autosave(rec, ops) {
     if (rec.locked) return [400, { result: 'Failure', message: 'Record is locked' }];
     if (control.failAutosaves > 0) { control.failAutosaves--; return [502, '<html><body>502 Bad Gateway</body></html>', 'text/html']; }
+    if (control.refuseAutosaves > 0) { control.refuseAutosaves--; return [500, { result: 'Failure', message: 'Object reference not set to an instance of an object.' }]; }
     if (!Array.isArray(ops)) return [400, { result: 'Failure', message: 'Body must be an array of operations' }];
     const mappings = [];
     const localMap = {};
