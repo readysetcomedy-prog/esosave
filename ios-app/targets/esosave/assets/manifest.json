@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "ESO Save",
   "version": "0.1.0",
-  "description": "Keeps every ESO EHR change on this device until ESO confirms it saved. Warns when signal drops, pushes everything back when it returns, and can restore a whole run by incident number.",
+  "description": "Keeps every ESO EHR change on this device until ESO confirms it saved. Warns on lost signal and restores runs.",
   "permissions": [
     "storage",
     "unlimitedStorage",
