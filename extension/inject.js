@@ -640,6 +640,7 @@
       const j = tryJSON(res.text);
       run.views[kind.view] = { text: res.text, ts: Date.now() };
       S.lastView = { view: kind.view, recordId: kind.recordId, ts: Date.now() };
+      emit();
       cachePut('GET', req.url, undefined, res);
       learnTab(kind.view, kind.recordId, req);
       if (!run.prefetchedAt) schedulePrefetch(run);

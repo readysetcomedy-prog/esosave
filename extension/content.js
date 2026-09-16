@@ -127,6 +127,16 @@
     .bar .btns { display: flex; gap: 6px; margin-top: 7px; }
     .bar .btn { background: rgba(255,255,255,.2); border: 1px solid rgba(255,255,255,.55); color: #fff; border-radius: 6px; padding: 3px 9px; font-size: 12px; font-weight: 600; cursor: pointer; }
     @media (max-width: 640px) { .bar { left: 0; right: 0; bottom: 0; width: auto; border-radius: 0; } }
+    .veil { position: fixed; inset: 0; z-index: 2147483645; background: rgba(15, 23, 42, .55); display: flex; align-items: center; justify-content: center; cursor: wait; }
+    .veil .box { background: #fff; color: #111; border-radius: 14px; padding: 22px 26px; width: min(420px, calc(100vw - 32px)); box-shadow: 0 16px 48px rgba(0,0,0,.4); text-align: center; }
+    .veil .spin { width: 44px; height: 44px; border: 5px solid #d1fae5; border-top-color: #15803d; border-radius: 50%; margin: 0 auto 12px; animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .veil h2 { font-size: 18px; margin: 0 0 6px; }
+    .veil .prog { font-size: 15px; font-weight: 600; color: #15803d; margin: 6px 0; min-height: 20px; }
+    .veil .why { font-size: 13px; color: #555; line-height: 1.4; }
+    .veil .track { height: 6px; background: #e5e7eb; border-radius: 3px; margin: 10px 0 12px; overflow: hidden; }
+    .veil .fill { height: 100%; background: #15803d; width: 0; transition: width .3s; }
+    .veil button.a { margin-top: 4px; }
     .panel { position: fixed; left: 212px; bottom: 8px; width: min(560px, calc(100vw - 228px)); max-height: min(85vh, 720px); overflow: auto; z-index: 2147483647;
              background: #fff; color: #111; border-radius: 12px; box-shadow: 0 12px 40px rgba(0,0,0,.35); padding: 14px 16px; font-size: 14px; line-height: 1.4; }
     .panel h1 { font-size: 16px; margin: 0 0 6px; display: flex; align-items: center; justify-content: space-between; }
@@ -330,7 +340,7 @@
     if (!run || run.locked || run.tmp) return;
     if (!s.lastView || s.lastView.recordId !== id) return; // wait until the app has shown the first tab
     warmed.add(id);
-    setTimeout(() => warmTabs(id), 1500);
+    setTimeout(() => warmTabs(id), 600);
   }
   const idle = () => Date.now() - lastInputAt > 1500;
   function waitIdle(maxWait) {
@@ -352,33 +362,55 @@
       tick();
     });
   }
+  let veil = null, skipRequested = false;
+  function showVeil(total) {
+    if (!shadow) return;
+    veil = document.createElement('div');
+    veil.className = 'veil';
+    veil.innerHTML = `<div class="box"><div class="spin"></div><h2>Getting this run ready for no signal</h2>
+      <div class="prog">Opening tabs…</div><div class="track"><div class="fill"></div></div>
+      <div class="why">ESO Save opens every tab once so each one still works if signal drops mid-call. Takes a few seconds. Please don't tap yet.</div>
+      <button class="a sec" data-act="skip">Skip, I need the screen now</button></div>`;
+    veil.addEventListener('click', (e) => { e.stopPropagation(); if (e.target.dataset && e.target.dataset.act === 'skip') skipRequested = true; });
+    veil.addEventListener('pointerdown', (e) => e.stopPropagation());
+    shadow.appendChild(veil);
+    veil._total = total;
+  }
+  function veilProgress(n, label) {
+    if (!veil) return;
+    veil.querySelector('.prog').textContent = `Opening ${label} (${n} of ${veil._total})`;
+    veil.querySelector('.fill').style.width = Math.round((n / veil._total) * 100) + '%';
+  }
+  function hideVeil() { if (veil) { veil.remove(); veil = null; } }
+
   async function warmTabs(id) {
     if (warming) return;
     warming = true;
+    skipRequested = false;
     try {
-      if (!(await waitIdle(60000))) { warmed.delete(id); return; }
       if (!lastStatus || lastStatus.currentRecordId !== id || !lastStatus.online) { warmed.delete(id); return; }
       const startLabel = currentTabLabel(lastStatus);
-      const views = Object.keys(TAB_LABELS);
+      const views = Object.keys(TAB_LABELS).filter(v => TAB_LABELS[v] !== startLabel);
+      showVeil(views.length);
       let opened = 0, missing = [];
       for (const view of views) {
         const label = TAB_LABELS[view];
-        if (label === startLabel) continue;
-        if (!idle() || !lastStatus.online || lastStatus.currentRecordId !== id) break; // the medic is working: stop
+        if (skipRequested || !lastStatus.online || lastStatus.currentRecordId !== id) break;
         const el = tabElement(label);
         if (!el) { missing.push(label); continue; }
+        veilProgress(opened + 1, label);
         el.click();
-        // The tab's code is requested on the click and keeps loading in the background even after we
-        // move on, so waiting is only to be polite to the app: move on as soon as its data arrives,
-        // or after a second at most.
+        // The tab's code is requested on the click and keeps loading even after we move on; the
+        // wait is only to let the app settle. Move on when its data arrives, or after a moment.
         await waitViewLoaded(view, id, 400);
         opened++;
       }
       const back = tabElement(startLabel);
-      if (back) back.click();
-      if (opened) toPage('action', { name: 'note', recordId: id, msg: `Opened ${opened} tab${opened === 1 ? '' : 's'} once so they work with no signal.${missing.length ? ' Could not find: ' + missing.join(', ') + '.' : ''}`, level: 'info' });
-      if (opened < views.length - 1) warmed.delete(id); // try again later if we stopped early
+      if (back) { back.click(); await waitViewLoaded(Object.keys(TAB_LABELS).find(v => TAB_LABELS[v] === startLabel) || 'Incident', id, 1500); }
+      if (opened) toPage('action', { name: 'note', recordId: id, msg: `Opened ${opened} tab${opened === 1 ? '' : 's'} once so they work with no signal.${missing.length ? ' Could not find: ' + missing.join(', ') + '.' : ''}${skipRequested ? ' (skipped early)' : ''}`, level: 'info' });
+      // stopped early because signal dropped: try again when it is back and the run is reopened
+      if (!skipRequested && opened < views.length) warmed.delete(id);
     } catch (e) { warmed.delete(id); }
-    finally { warming = false; }
+    finally { hideVeil(); warming = false; }
   }
 })();

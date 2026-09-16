@@ -8,6 +8,15 @@ after(async () => { if (T) await T.close(); });
 beforeEach(async () => { await T.context.setOffline(false); await T.control({ loggedOut: false, rejectValue: null, failAutosaves: 0 }); });
 
 const app = (fn, ...args) => T.page.evaluate(fn, ...args);
+// A fresh page and a fresh run, with the tab warm-up finished, so a test does not inherit clicks
+// or tab state from the one before it.
+async function freshRun() {
+  await T.page.goto(T.url);
+  await waitFor(() => T.page.evaluate(() => !!window.__esosave), { label: 'interceptor' });
+  const id = await app(() => window.app.start());
+  await waitFor(async () => { const r = await T.run(id); return r && r.log.some(l => /Opened \d+ tabs? once/.test(l.msg)) && r.prefetchedAt ? r : null; }, { label: 'warm-up done', timeout: 30000 });
+  return id;
+}
 
 test('extension installs on the page and sees the run', async () => {
   await T.page.goto(T.url);
@@ -116,17 +125,6 @@ test('every tab and its companion requests are prefetched when a run opens, so a
   assert.ok(learned.some(r => /custom\/lookup/.test(r.url) && r.url.includes('{id}')), 'companion recorded as a template: ' + JSON.stringify(learned));
 });
 
-test('the extension clicks through every tab once after a run opens, then returns to the original tab', async () => {
-  const id = await app(() => window.app.recordId);
-  const clicks = await waitFor(async () => { const c = await app(() => window.app.clicks); return c.length >= 9 ? c : null; }, { label: 'tabs clicked', timeout: 30000 });
-  for (const v of ['Patient', 'Vitals', 'FlowchartTreatments', 'Assessments', 'Narrative', 'Forms', 'Billing', 'Signatures']) assert.ok(clicks.includes(v), 'clicked ' + v);
-  assert.equal(clicks[clicks.length - 1], 'Incident', 'returned to the tab the medic was on');
-  const active = await app(() => document.querySelector('.tab.active').dataset.view);
-  assert.equal(active, 'Incident');
-  const run = await T.run(id);
-  assert.ok(run.log.some(l => /Opened 8 tabs once/.test(l.msg)), 'logged: ' + JSON.stringify(run.log.map(l => l.msg)));
-});
-
 test('offline tab switch is served from the cached view with held changes applied', async () => {
   const id = await app(() => window.app.recordId);
   await app(() => window.app.openTab('Vitals'));
@@ -165,6 +163,19 @@ test('a reload after an outage pushes what was held before the reload', async ()
   assert.ok(run.batches.length >= 8, 'history survived the reload');
 });
 
+test('the extension clicks through every tab once after a run opens, then returns to the original tab', async () => {
+  const id = await freshRun();
+  const clicks = await waitFor(async () => { const c = await app(() => window.app.clicks); return c.length >= 9 ? c : null; }, { label: 'tabs clicked', timeout: 30000 });
+  for (const v of ['Patient', 'Vitals', 'FlowchartTreatments', 'Assessments', 'Narrative', 'Forms', 'Billing', 'Signatures']) assert.ok(clicks.includes(v), 'clicked ' + v);
+  assert.equal(clicks[clicks.length - 1], 'Incident', 'returned to the tab the medic was on');
+  const active = await app(() => document.querySelector('.tab.active').dataset.view);
+  assert.equal(active, 'Incident');
+  const run = await waitFor(async () => { const r = await T.run(id); return r.log.some(l => /Opened 8 tabs once/.test(l.msg)) ? r : null; }, { label: 'warm-up logged' });
+  assert.ok(run);
+  const veilGone = await waitFor(() => T.page.evaluate(() => !document.getElementById('esosave-host').shadowRoot.querySelector('.veil')), { label: 'overlay removed' });
+  assert.ok(veilGone);
+});
+
 test('a save ESO rejects turns the banner red and stays in the list; other saves keep flowing', async () => {
   const id = await app(() => window.app.recordId);
   await T.control({ rejectValue: 'REJECT-ME' });
@@ -181,7 +192,7 @@ test('a save ESO rejects turns the banner red and stays in the list; other saves
 });
 
 test('restore: push a whole recorded run into a brand-new run, crew and item keys remapped', async () => {
-  const srcId = await app(() => window.app.recordId);
+  const srcId = await freshRun();
   // reference the crew member the way signatures do
   const crewItemId = (await T.record(srcId)).crew[0].itemId;
   await app((c) => { window.app.edit('signatures', 'signatures.standardSignatures.providerSignatures.firstProviderId', c, 'singleselect'); }, crewItemId);
