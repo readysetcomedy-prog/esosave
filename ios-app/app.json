@@ -16,7 +16,16 @@
       }
     },
     "plugins": [
-      "@bacons/apple-targets"
+      "@bacons/apple-targets",
+      [
+        "react-native-ble-plx",
+        {
+          "isBackgroundEnabled": false,
+          "modes": [],
+          "bluetoothAlwaysPermission": "ESO Save uses Bluetooth only for the optional monitor test, to list what a paired monitor exposes.",
+          "neverForLocation": true
+        }
+      ]
     ]
   }
 }
