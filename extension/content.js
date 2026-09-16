@@ -371,7 +371,7 @@
         // The tab's code is requested on the click and keeps loading in the background even after we
         // move on, so waiting is only to be polite to the app: move on as soon as its data arrives,
         // or after a second at most.
-        await waitViewLoaded(view, id, 1000);
+        await waitViewLoaded(view, id, 400);
         opened++;
       }
       const back = tabElement(startLabel);
