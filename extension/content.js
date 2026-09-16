@@ -330,9 +330,9 @@
     if (!run || run.locked || run.tmp) return;
     if (!s.lastView || s.lastView.recordId !== id) return; // wait until the app has shown the first tab
     warmed.add(id);
-    setTimeout(() => warmTabs(id), 2500);
+    setTimeout(() => warmTabs(id), 1500);
   }
-  const idle = () => Date.now() - lastInputAt > 2500;
+  const idle = () => Date.now() - lastInputAt > 1500;
   function waitIdle(maxWait) {
     return new Promise((resolve) => {
       const t0 = Date.now();
@@ -368,8 +368,10 @@
         const el = tabElement(label);
         if (!el) { missing.push(label); continue; }
         el.click();
-        const ok = await waitViewLoaded(view, id, 4000);
-        if (!ok) await new Promise(r => setTimeout(r, 400));
+        // The tab's code is requested on the click and keeps loading in the background even after we
+        // move on, so waiting is only to be polite to the app: move on as soon as its data arrives,
+        // or after a second at most.
+        await waitViewLoaded(view, id, 1000);
         opened++;
       }
       const back = tabElement(startLabel);

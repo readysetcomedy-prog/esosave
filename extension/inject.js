@@ -586,7 +586,12 @@
           setOnline(false, 'request failed');
           const hit = cacheGet(req.method, req.url, req.body);
           if (hit) return cachedResponse(hit, req.url);
-        } else { setOnline(true); if (o === 'auth') setLoggedOut(true); else { setLoggedOut(false); cachePut(req.method, req.url, req.body, res); } }
+        } else {
+          // A GET here may have been answered by the browser's own cache while offline, so only a
+          // POST (never cached) counts as proof that ESO is reachable.
+          if (req.method.toUpperCase() === 'POST') setOnline(true);
+          if (o === 'auth') setLoggedOut(true); else { setLoggedOut(false); cachePut(req.method, req.url, req.body, res); }
+        }
         return res;
       }
     }
@@ -796,7 +801,7 @@
       if (!virtualizable) {
         if (kind) {
           this.addEventListener('loadend', () => {
-            if (this.status === 0) setOnline(false, 'request failed'); else setOnline(true);
+            if (this.status === 0) setOnline(false, 'request failed');
           });
         }
         return super.send(body);
