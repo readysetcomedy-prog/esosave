@@ -39,6 +39,7 @@
   const S = {
     runs: Object.create(null),   // recordId -> run
     templates: null,             // { recordId, views: { Incident: text, ... } } blank views of a fresh run
+    knownViews: ['Incident', 'Patient', 'Vitals', 'FlowchartTreatments', 'Assessments', 'Narrative', 'Forms', 'Billing', 'Signatures'],
     settings: { purgeHoursAfterLock: 0, probeSec: 20, heldProbeSec: 8 },
     online: navigator.onLine !== false,
     loggedOut: false,
@@ -259,11 +260,56 @@
   }
 
   // ------------------------------------------------------------------ connectivity
+  // ------------------------------------------------------------------ tab prefetch
+  // The moment a run is open (which needs signal), quietly fetch every tab's data so any tab can be
+  // served from the saved copy if signal drops before the medic has opened it.
+  function viewUrl(recordId, view) {
+    const q = view === 'Incident' ? '?getMultiPatientData=true&getPcrHeaderData=true' : '';
+    return apiUrl(`/PatientCareRecords/${recordId}/Views/${view}${q}`);
+  }
+  function learnView(view) {
+    if (!view || S.knownViews.includes(view)) return;
+    S.knownViews.push(view);
+    post('persistViews', { views: S.knownViews });
+  }
+  const prefetchTimers = new Map();
+  function schedulePrefetch(run, { force = false, delay = 1500 } = {}) {
+    if (run.tmp && !run.realId) return;
+    if (run.locked) return;
+    clearTimeout(prefetchTimers.get(run.recordId));
+    prefetchTimers.set(run.recordId, setTimeout(() => { prefetchTimers.delete(run.recordId); prefetchViews(run, force); }, delay));
+  }
+  async function prefetchViews(run, force) {
+    if (!S.online || S.loggedOut || !S.xsrf) return;
+    if (run.prefetching) return;
+    run.prefetching = true;
+    try {
+      let fetched = 0;
+      for (const view of [...S.knownViews]) {
+        if (!S.online || S.loggedOut) break;
+        if (!force && run.views[view]) continue;
+        const res = await rawRequest({ method: 'GET', url: viewUrl(run.realId || run.recordId, view), headers: headersFor(false), timeout: 20000 });
+        const o = outcome(res);
+        if (o === 'net') { setOnline(false, 'tab prefetch failed'); break; }
+        if (o !== 'ok') continue;
+        const j = tryJSON(res.text);
+        if (!j || !j.data || !j.data.model) continue;
+        run.views[view] = { text: res.text, ts: Date.now(), prefetched: true };
+        observeMeta(run, j);
+        if (run.fresh && !run.batches.some(b => String(b.scope).toLowerCase() === view.toLowerCase())) captureTemplate(run, view, res.text);
+        fetched++;
+        await new Promise(r => setTimeout(r, 200));
+      }
+      run.prefetchedAt = Date.now();
+      if (fetched) { persist(run); log(run, `Saved a copy of ${fetched} tab${fetched === 1 ? '' : 's'} for offline use.`, 'info'); }
+    } finally { run.prefetching = false; }
+  }
+
   function setOnline(v, why) {
     if (S.online === v) return;
     S.online = v;
     log(null, v ? 'Signal is back.' : ('NO SIGNAL' + (why ? ' - ' + why : '')), v ? 'good' : 'warn');
-    if (v) kick(0);
+    if (v) { kick(0); const cur = S.currentRecordId && S.runs[S.currentRecordId]; if (cur) schedulePrefetch(cur, { force: true, delay: 4000 }); }
   }
   function setLoggedOut(v) {
     if (S.loggedOut === v) return;
@@ -335,6 +381,7 @@
         run.pendingCreate = null;
         log(run, 'Run created on ESO after signal returned.', 'good');
         await mapCrew(run, run.realId, run.crew);
+        schedulePrefetch(run, { force: true, delay: 3000 });
         persist(run);
       }
       const target = run.realId || run.recordId;
@@ -516,6 +563,8 @@
       setOnline(true); setLoggedOut(false);
       const j = tryJSON(res.text);
       run.views[kind.view] = { text: res.text, ts: Date.now() };
+      learnView(kind.view);
+      if (!run.prefetchedAt) schedulePrefetch(run);
       observeMeta(run, j);
       if (run.fresh && j && j.data && !run.batches.some(b => String(b.scope).toLowerCase() === kind.view.toLowerCase())) captureTemplate(run, kind.view, res.text);
       persist(run);
@@ -796,6 +845,7 @@
       if (type === 'init') {
         mergeStored(payload.runs);
         if (payload.templates && payload.templates.views) S.templates = payload.templates;
+        if (Array.isArray(payload.views)) for (const v of payload.views) if (!S.knownViews.includes(v)) S.knownViews.push(v);
         if (payload.settings) Object.assign(S.settings, payload.settings);
         S.ready = true;
         emit();

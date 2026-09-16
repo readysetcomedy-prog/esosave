@@ -95,6 +95,21 @@ test('offline: saves are held, the app is told "saved", banner warns, then every
   assert.equal((await app(() => window.app.errors)).length, 0);
 });
 
+test('every tab is prefetched when a run opens, so an unopened tab still works offline', async () => {
+  const id = await app(() => window.app.recordId);
+  const run = await waitFor(async () => { const r = await T.run(id); return r && r.prefetchedAt && Object.keys(r.views).length >= 9 ? r : null; }, { label: 'all tabs prefetched', timeout: 20000 });
+  assert.ok(run.views.Signatures && run.views.Billing && run.views.Narrative, 'tabs the app never opened have copies');
+  await T.context.setOffline(true);
+  const v = await app(() => window.app.openTab('Narrative'));
+  assert.equal(v.status, 200, 'never-opened tab served from the prefetched copy');
+  assert.equal(v.body.meta.esosaveOffline, true);
+  await T.context.setOffline(false);
+  // a tab name the extension has never seen is learned from a live load
+  await app(() => window.app.openTab('CustomTab'));
+  const stored = await waitFor(async () => { const s = await T.storage(); return s.knownViews && s.knownViews.includes('CustomTab') ? s.knownViews : null; }, { label: 'new tab learned' });
+  assert.ok(stored.includes('CustomTab'));
+});
+
 test('offline tab switch is served from the cached view with held changes applied', async () => {
   const id = await app(() => window.app.recordId);
   await app(() => window.app.openTab('Vitals'));

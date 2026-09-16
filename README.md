@@ -6,8 +6,9 @@ to bad signal or a hung page.
 - **Every change is kept on the device** the moment ESO's app tries to save it, and stays there until
   ESO's server confirms it.
 - **No signal? Keep charting.** Saves that cannot reach ESO are held, the app is told "saved", and a
-  card in the corner of the page turns amber and says so. Switching tabs keeps working from the last
-  copy of each tab. Even starting a new run works; ESO assigns the incident number when signal returns.
+  card in the corner of the page turns amber and says so. Every tab's data is fetched quietly the
+  moment a run opens, so switching to a tab you never opened still works. Even starting a new run
+  works; ESO assigns the incident number when signal returns.
 - **Signal back? Everything pushes itself**, in the original order, and the card turns green only when
   ESO has really accepted every change. Signatures are just data in those saves, so they go too.
 - **Reloaded page, hung run, ruined run?** Open the run list on the card and push a whole recorded run

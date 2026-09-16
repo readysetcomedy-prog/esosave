@@ -74,7 +74,7 @@
     settings = data.settings;
     await purgeLocked(settings);
     const fresh = await loadAll();
-    toPage('init', { runs: fresh.runs, templates: fresh.templates, settings });
+    toPage('init', { runs: fresh.runs, templates: fresh.templates, settings, views: fresh.all.knownViews || [] });
     setInterval(() => purgeLocked(settings), 10 * 60 * 1000);
   })();
   // The page script may have been injected before our listener existed; ask for a status once ready.
@@ -83,6 +83,8 @@
     const { type, payload } = ev.data;
     if (type === 'persistRun' && payload && payload.run) {
       await sset({ ['run:' + payload.run.recordId]: payload.run });
+    } else if (type === 'persistViews' && payload && Array.isArray(payload.views)) {
+      await sset({ knownViews: payload.views });
     } else if (type === 'persistTemplates') {
       await sset({ templates: payload.templates });
     } else if (type === 'sig' && payload) {
