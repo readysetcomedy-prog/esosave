@@ -441,6 +441,9 @@
     const wrap = document.createElement('div');
     wrap.className = 'veil';
     wrap.style.cursor = 'default';
+    wrap.style.zIndex = '2147483647';
+    if (panel) panel.style.display = 'none';
+    const close = () => { wrap.remove(); if (panel && panelOpen) panel.style.display = 'block'; };
     const render = () => {
       const anySensitive = [...on].some(p => SENSITIVE[p]);
       wrap.innerHTML = `<div class="box pick"><h2>${toNew ? 'Push into a NEW run' : 'Push into the open run'}</h2>
@@ -459,7 +462,7 @@
         const all = PAGES.map(([k]) => k).filter(k => counts[k]);
         if (all.every(k => on.has(k))) on.clear(); else all.forEach(k => on.add(k));
         render();
-      } else if (act === 'cancel') wrap.remove();
+      } else if (act === 'cancel') close();
       else if (act === 'go') {
         const pages = PAGES.map(([k]) => k).filter(k => on.has(k));
         const names = PAGES.filter(([k]) => on.has(k)).map(([, l]) => l).join(', ');
@@ -468,7 +471,7 @@
         const msg = `${toNew ? 'Create a NEW run and copy' : 'Copy'}: ${names}.` + (blank ? `\\nNot copied: ${blank}.` : '') +
           (sensitive ? `\\n\\n⚠ ${SENSITIVE_WARNING}\\nIf this is a different patient, press Cancel and turn those pages off.` : '') + '\\n\\nContinue?';
         if (!confirm(msg)) return;
-        wrap.remove();
+        close();
         toPage('action', { name: toNew ? 'pushIntoNew' : 'pushIntoCurrent', recordId: sourceId, pages });
       }
     });
