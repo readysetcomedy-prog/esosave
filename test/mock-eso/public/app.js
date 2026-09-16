@@ -53,10 +53,18 @@
       render();
     },
     async openTab(view) {
-      const r = await xhr('GET', `/ehr/api/PatientCareRecords/${this.recordId}/Views/${view}${view === 'Incident' ? '?getMultiPatientData=true&getPcrHeaderData=true' : ''}`);
-      this.views[view] = { status: r.status, body: (() => { try { return JSON.parse(r.text); } catch { return null; } })() };
+      const q = view === 'Incident' ? '?getMultiPatientData=true&getPcrHeaderData=true' : view === 'Assessments' ? '?getAssessmentListsData=true' : '';
+      const r = await xhr('GET', `/ehr/api/PatientCareRecords/${this.recordId}/Views/${view}${q}`);
+      const out = { status: r.status, body: (() => { try { return JSON.parse(r.text); } catch { return null; } })(), companions: [] };
+      // the real app asks for more when some tabs open
+      const extra = view === 'Vitals' ? [['GET', `/ehr/api/PatientCareRecords/${this.recordId}/CardiacMonitor`]]
+        : view === 'Patient' ? [['POST', '/ehr/api/WebApi?path=api/LongitudinalRecordDetails', JSON.stringify({ ehrEncounterId: this.recordId })]]
+        : view === 'FlowchartTreatments' ? [['GET', '/ehr/api/thirdpartydata/partners']]
+        : view === 'CustomTab' ? [['GET', `/ehr/api/custom/lookup?record=${this.recordId}`]] : [];
+      for (const [m, u, b] of extra) { const c = await xhr(m, u, b); out.companions.push({ url: u, status: c.status, text: c.text }); }
+      this.views[view] = out;
       render();
-      return this.views[view];
+      return out;
     },
     async lock() { const r = await xhr('POST', `/ehr/api/PatientCareRecords/${this.recordId}/Lock`); await this.openTab('Incident'); return r.status; },
     async attachments() { const r = await xhr('GET', `/ehr/api/PatientCareRecords/${this.recordId}/Attachments`); return JSON.parse(r.text); },

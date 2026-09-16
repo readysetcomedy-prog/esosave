@@ -155,7 +155,9 @@ export function createMockEso() {
       if (!path.startsWith('/ehr/api/')) return send(404, { error: 'not found' });
       if (control.loggedOut) { res.writeHead(302, { location: '/login/?ReturnUrl=' + encodeURIComponent(path) }); return res.end(); }
       const rest = path.slice('/ehr/api/'.length);
-      if (rest === 'thirdpartydata/partners') return send(200, []);
+      if (rest === 'thirdpartydata/partners') return send(200, { partners: [] });
+      if (rest.startsWith('WebApi') && req.method === 'POST') return send(200, { result: '', status: 204 });
+      if (rest.startsWith('custom/lookup')) return send(200, { items: [1, 2, 3] });
       if (rest === 'PatientCareRecords' && req.method === 'POST') { const r = newRecord(); return send(200, { result: 'Success', data: r.id }); }
       const m = /^PatientCareRecords\/([^/]+)(?:\/(.*))?$/.exec(rest);
       if (!m) return send(404, { error: 'unknown api' });
@@ -169,6 +171,7 @@ export function createMockEso() {
       }
       const v = /^Views\/([^/]+)$/.exec(tail);
       if (v && req.method === 'GET') return send(200, view(rec, v[1]));
+      if (tail === 'CardiacMonitor') return send(200, { data: [], hasImportedCases: false });
       if (tail === 'Attachments') return send(200, { data: { model: { attachments: [], incidentNumber: rec.incidentNumber } }, meta: { state: rec.state }, responseStatus: null });
       if (tail.startsWith('Validate')) return send(200, { issues: [] });
       if (tail === 'Lock' && req.method === 'POST') { rec.state = 'locked'; rec.locked = true; return send(200, { result: 'Success', data: null }); }

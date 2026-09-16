@@ -95,19 +95,25 @@ test('offline: saves are held, the app is told "saved", banner warns, then every
   assert.equal((await app(() => window.app.errors)).length, 0);
 });
 
-test('every tab is prefetched when a run opens, so an unopened tab still works offline', async () => {
+test('every tab and its companion requests are prefetched when a run opens, so an unopened tab works offline', async () => {
   const id = await app(() => window.app.recordId);
   const run = await waitFor(async () => { const r = await T.run(id); return r && r.prefetchedAt && Object.keys(r.views).length >= 9 ? r : null; }, { label: 'all tabs prefetched', timeout: 20000 });
   assert.ok(run.views.Signatures && run.views.Billing && run.views.Narrative, 'tabs the app never opened have copies');
   await T.context.setOffline(true);
-  const v = await app(() => window.app.openTab('Narrative'));
+  const v = await app(() => window.app.openTab('Vitals'));
   assert.equal(v.status, 200, 'never-opened tab served from the prefetched copy');
   assert.equal(v.body.meta.esosaveOffline, true);
+  assert.equal(v.companions[0].status, 200, 'companion request (cardiac monitor) served from the prefetched copy');
+  const p = await app(() => window.app.openTab('Patient'));
+  assert.equal(p.status, 200);
+  assert.equal(p.companions[0].status, 200, 'POST companion served from the prefetched copy');
+  const a = await app(() => window.app.openTab('Assessments'));
+  assert.equal(a.status, 200, 'tab whose request carries a query string is served');
   await T.context.setOffline(false);
-  // a tab name the extension has never seen is learned from a live load
+  // a tab the extension has never seen, with its own companion request, is learned from one live load
   await app(() => window.app.openTab('CustomTab'));
-  const stored = await waitFor(async () => { const s = await T.storage(); return s.knownViews && s.knownViews.includes('CustomTab') ? s.knownViews : null; }, { label: 'new tab learned' });
-  assert.ok(stored.includes('CustomTab'));
+  const learned = await waitFor(async () => { const s = await T.storage(); const l = s.tabRequests && s.tabRequests.CustomTab; return l && l.length >= 2 ? l : null; }, { label: 'new tab and companion learned' });
+  assert.ok(learned.some(r => /custom\/lookup/.test(r.url) && r.url.includes('{id}')), 'companion recorded as a template: ' + JSON.stringify(learned));
 });
 
 test('offline tab switch is served from the cached view with held changes applied', async () => {

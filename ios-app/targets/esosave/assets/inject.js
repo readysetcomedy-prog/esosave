@@ -39,7 +39,24 @@
   const S = {
     runs: Object.create(null),   // recordId -> run
     templates: null,             // { recordId, views: { Incident: text, ... } } blank views of a fresh run
-    knownViews: ['Incident', 'Patient', 'Vitals', 'FlowchartTreatments', 'Assessments', 'Narrative', 'Forms', 'Billing', 'Signatures'],
+    // What the app requests when each tab opens (from a recording of the real app; grows as the
+    // extension watches live tab loads). {id} is the record id.
+    tabRequests: {
+      Incident: [{ method: 'GET', url: '/ehr/api/PatientCareRecords/{id}/Views/Incident?getMultiPatientData=true&getPcrHeaderData=true' }],
+      Patient: [{ method: 'GET', url: '/ehr/api/PatientCareRecords/{id}/Views/Patient' },
+                { method: 'POST', url: '/ehr/api/WebApi?path=api/LongitudinalRecordDetails', body: '{"ehrEncounterId":"{id}"}' }],
+      Vitals: [{ method: 'GET', url: '/ehr/api/PatientCareRecords/{id}/Views/Vitals' },
+               { method: 'GET', url: '/ehr/api/PatientCareRecords/{id}/CardiacMonitor' }],
+      FlowchartTreatments: [{ method: 'GET', url: '/ehr/api/PatientCareRecords/{id}/Views/FlowchartTreatments' },
+                            { method: 'GET', url: '/ehr/api/thirdpartydata/partners' }],
+      Assessments: [{ method: 'GET', url: '/ehr/api/PatientCareRecords/{id}/Views/Assessments?getAssessmentListsData=true' }],
+      Narrative: [{ method: 'GET', url: '/ehr/api/PatientCareRecords/{id}/Views/Narrative' }],
+      Forms: [{ method: 'GET', url: '/ehr/api/PatientCareRecords/{id}/Views/Forms' }],
+      Billing: [{ method: 'GET', url: '/ehr/api/PatientCareRecords/{id}/Views/Billing' }],
+      Signatures: [{ method: 'GET', url: '/ehr/api/PatientCareRecords/{id}/Views/Signatures' }],
+    },
+    apiCache: new Map(),         // "METHOD path?query body" -> last good response, served when ESO is unreachable
+    learning: null,              // { view, recordId, until } while a live tab load is being watched
     settings: { purgeHoursAfterLock: 0, probeSec: 20, heldProbeSec: 8 },
     online: navigator.onLine !== false,
     loggedOut: false,
@@ -263,15 +280,51 @@
   // ------------------------------------------------------------------ tab prefetch
   // The moment a run is open (which needs signal), quietly fetch every tab's data so any tab can be
   // served from the saved copy if signal drops before the medic has opened it.
-  function viewUrl(recordId, view) {
-    const q = view === 'Incident' ? '?getMultiPatientData=true&getPcrHeaderData=true' : '';
-    return apiUrl(`/PatientCareRecords/${recordId}/Views/${view}${q}`);
+  const relUrl = (url) => { try { const u = new URL(url, location.href); return u.pathname.replace(/\/{2,}/g, '/') + u.search; } catch { return String(url); } };
+  const templatize = (str, id) => (str && id) ? String(str).split(id).join('{id}') : str;
+  const fill = (tpl, id) => String(tpl).split('{id}').join(id);
+  const cacheKey = (method, url, body) => method.toUpperCase() + ' ' + relUrl(url) + (body ? ' ' + body : '');
+  function cacheable(method, url) {
+    const path = relUrl(url);
+    if (!API_PREFIX_RE.test(path.split('?')[0].replace(/^\/+/, '/'))) return false;
+    if (/\/autosave\b/i.test(path)) return false;
+    const m = method.toUpperCase();
+    if (m === 'GET') return true;
+    return m === 'POST' && /\/WebApi\b/i.test(path);
   }
-  function learnView(view) {
-    if (!view || S.knownViews.includes(view)) return;
-    S.knownViews.push(view);
-    post('persistViews', { views: S.knownViews });
+  function cachePut(method, url, body, res) {
+    if (!cacheable(method, url) || outcome(res) !== 'ok') return;
+    S.apiCache.set(cacheKey(method, url, body), { status: res.status, text: res.text, contentType: res.contentType, ts: Date.now() });
+    if (S.apiCache.size > 400) S.apiCache.delete(S.apiCache.keys().next().value);
   }
+  function cacheGet(method, url, body) { return S.apiCache.get(cacheKey(method, url, body)) || null; }
+  function cachedResponse(entry, url) {
+    return { status: entry.status, statusText: 'OK', text: entry.text, url, netError: false, contentType: entry.contentType || 'application/json; charset=utf-8',
+      headers: `content-type: ${entry.contentType || 'application/json; charset=utf-8'}\r\nx-esosave: cached\r\n` };
+  }
+
+  function noteTabRequest(view, method, urlTpl, bodyTpl) {
+    if (!view || !urlTpl) return false;
+    const list = S.tabRequests[view] || (S.tabRequests[view] = []);
+    if (list.some(r => r.method === method && r.url === urlTpl && (r.body || '') === (bodyTpl || ''))) return false;
+    if (list.length >= 12) return false;
+    list.push(bodyTpl ? { method, url: urlTpl, body: bodyTpl } : { method, url: urlTpl });
+    post('persistTabRequests', { tabRequests: S.tabRequests });
+    return true;
+  }
+  // A live tab load: remember its own request, then watch the next few seconds for the companion
+  // requests the app makes for that tab.
+  function learnTab(view, recordId, req) {
+    noteTabRequest(view, 'GET', templatize(relUrl(req.url), recordId));
+    S.learning = { view, recordId, until: Date.now() + 3000 };
+  }
+  function maybeLearnCompanion(req) {
+    const L = S.learning;
+    if (!L || Date.now() > L.until) { S.learning = null; return; }
+    if (!cacheable(req.method, req.url) || /configurationBundle|\/Views\//i.test(req.url)) return;
+    noteTabRequest(L.view, req.method.toUpperCase(), templatize(relUrl(req.url), L.recordId), templatize(req.body, L.recordId));
+  }
+
   const prefetchTimers = new Map();
   function schedulePrefetch(run, { force = false, delay = 1500 } = {}) {
     if (run.tmp && !run.realId) return;
@@ -283,25 +336,37 @@
     if (!S.online || S.loggedOut || !S.xsrf) return;
     if (run.prefetching) return;
     run.prefetching = true;
+    const id = run.realId || run.recordId;
     try {
-      let fetched = 0;
-      for (const view of [...S.knownViews]) {
+      let tabs = 0;
+      for (const [view, reqs] of Object.entries(S.tabRequests)) {
         if (!S.online || S.loggedOut) break;
-        if (!force && run.views[view]) continue;
-        const res = await rawRequest({ method: 'GET', url: viewUrl(run.realId || run.recordId, view), headers: headersFor(false), timeout: 20000 });
-        const o = outcome(res);
-        if (o === 'net') { setOnline(false, 'tab prefetch failed'); break; }
-        if (o !== 'ok') continue;
-        const j = tryJSON(res.text);
-        if (!j || !j.data || !j.data.model) continue;
-        run.views[view] = { text: res.text, ts: Date.now(), prefetched: true };
-        observeMeta(run, j);
-        if (run.fresh && !run.batches.some(b => String(b.scope).toLowerCase() === view.toLowerCase())) captureTemplate(run, view, res.text);
-        fetched++;
-        await new Promise(r => setTimeout(r, 200));
+        let gotTab = false;
+        for (const r of reqs) {
+          const url = location.origin + fill(r.url, id);
+          const body = r.body ? fill(r.body, id) : undefined;
+          if (!force && cacheGet(r.method, url, body)) { if (/\/Views\//i.test(url)) gotTab = true; continue; }
+          const res = await rawRequest({ method: r.method, url, headers: headersFor(!!body), body, timeout: 20000 });
+          const o = outcome(res);
+          if (o === 'net') { setOnline(false, 'tab prefetch failed'); run.prefetching = false; return; }
+          if (o !== 'ok') continue;
+          cachePut(r.method, url, body, res);
+          if (/\/Views\//i.test(url)) {
+            const j = tryJSON(res.text);
+            if (j && j.data && j.data.model) {
+              run.views[view] = { text: res.text, ts: Date.now(), prefetched: true };
+              observeMeta(run, j);
+              if (run.fresh && !run.batches.some(b => String(b.scope).toLowerCase() === view.toLowerCase())) captureTemplate(run, view, res.text);
+              gotTab = true;
+            }
+          }
+          await new Promise(res2 => setTimeout(res2, 150));
+        }
+        if (gotTab) tabs++;
       }
       run.prefetchedAt = Date.now();
-      if (fetched) { persist(run); log(run, `Saved a copy of ${fetched} tab${fetched === 1 ? '' : 's'} for offline use.`, 'info'); }
+      persist(run);
+      log(run, `Saved a copy of ${tabs} tab${tabs === 1 ? '' : 's'} for offline use.`, 'info');
     } finally { run.prefetching = false; }
   }
 
@@ -507,6 +572,7 @@
     if (req.headers) {
       for (const [k, v] of Object.entries(req.headers)) if (k.toLowerCase() === 'x-custom-xsrf-token' && v) S.xsrf = v;
     }
+    if (kind.type !== 'view' && kind.type !== 'autosave' && kind.type !== 'create') maybeLearnCompanion(req);
     switch (kind.type) {
       case 'autosave': return handleAutosave(kind, req);
       case 'view': return handleView(kind, req);
@@ -515,7 +581,11 @@
       default: {
         const res = await rawRequest(req);
         const o = outcome(res);
-        if (o === 'net') setOnline(false, 'request failed'); else { setOnline(true); if (o === 'auth') setLoggedOut(true); else setLoggedOut(false); }
+        if (o === 'net') {
+          setOnline(false, 'request failed');
+          const hit = cacheGet(req.method, req.url, req.body);
+          if (hit) return cachedResponse(hit, req.url);
+        } else { setOnline(true); if (o === 'auth') setLoggedOut(true); else { setLoggedOut(false); cachePut(req.method, req.url, req.body, res); } }
         return res;
       }
     }
@@ -563,7 +633,8 @@
       setOnline(true); setLoggedOut(false);
       const j = tryJSON(res.text);
       run.views[kind.view] = { text: res.text, ts: Date.now() };
-      learnView(kind.view);
+      cachePut('GET', req.url, undefined, res);
+      learnTab(kind.view, kind.recordId, req);
       if (!run.prefetchedAt) schedulePrefetch(run);
       observeMeta(run, j);
       if (run.fresh && j && j.data && !run.batches.some(b => String(b.scope).toLowerCase() === kind.view.toLowerCase())) captureTemplate(run, kind.view, res.text);
@@ -572,7 +643,8 @@
     }
     if (o === 'net') {
       setOnline(false, 'tab could not load');
-      const cached = run.views[kind.view];
+      const exact = cacheGet('GET', req.url, undefined);
+      const cached = exact ? { text: exact.text } : run.views[kind.view];
       if (cached) {
         log(run, `No signal: showing the saved copy of the ${kind.view} tab.`, 'warn');
         return fakeOk(applyHeldToView(run, kind.view, cached.text), req.url);
@@ -618,6 +690,9 @@
     if (run.tmp && !run.realId) {
       if (/^Attachments$/i.test(kind.tail)) return fakeOk(JSON.stringify({ data: { model: { attachments: [], incidentNumber: run.incidentNumber } }, meta: { state: 'draft' }, responseStatus: null }), req.url);
       if (/^Validate/i.test(kind.tail)) return fakeOk(JSON.stringify({ issues: [] }), req.url);
+      const tplId = S.templates && S.templates.recordId;
+      const hit = tplId ? cacheGet(req.method, req.url.split(run.recordId).join(tplId), req.body ? req.body.split(run.recordId).join(tplId) : undefined) : null;
+      if (hit) return cachedResponse({ ...hit, text: hit.text.split(tplId).join(run.recordId) }, req.url);
       return { status: 0, statusText: '', text: '', headers: '', url: req.url, netError: true, contentType: '' };
     }
     const res = await rawRequest({ ...req, url: rewriteUrl(req.url) });
@@ -625,8 +700,13 @@
     if (o === 'ok') {
       setOnline(true); setLoggedOut(false);
       observeMeta(run, tryJSON(res.text));
+      cachePut(req.method, req.url, req.body, res);
       if (kind.method !== 'GET' && /lock|final|submit/i.test(kind.tail)) { setLocked(run, true); persist(run); }
-    } else if (o === 'net') setOnline(false, 'request failed');
+    } else if (o === 'net') {
+      setOnline(false, 'request failed');
+      const hit = cacheGet(req.method, req.url, req.body);
+      if (hit) return cachedResponse(hit, req.url);
+    }
     else if (o === 'auth') setLoggedOut(true);
     return res;
   }
@@ -845,7 +925,9 @@
       if (type === 'init') {
         mergeStored(payload.runs);
         if (payload.templates && payload.templates.views) S.templates = payload.templates;
-        if (Array.isArray(payload.views)) for (const v of payload.views) if (!S.knownViews.includes(v)) S.knownViews.push(v);
+        if (payload.tabRequests && typeof payload.tabRequests === 'object') {
+          for (const [view, reqs] of Object.entries(payload.tabRequests)) if (Array.isArray(reqs)) for (const r of reqs) if (r && r.url) noteTabRequest(view, r.method || 'GET', r.url, r.body);
+        }
         if (payload.settings) Object.assign(S.settings, payload.settings);
         S.ready = true;
         emit();
