@@ -39,7 +39,7 @@
   const S = {
     runs: Object.create(null),   // recordId -> run
     templates: null,             // { recordId, views: { Incident: text, ... } } blank views of a fresh run
-    settings: { purgeHoursAfterLock: 24, probeSec: 20, heldProbeSec: 8 },
+    settings: { purgeHoursAfterLock: 0, probeSec: 20, heldProbeSec: 8 },
     online: navigator.onLine !== false,
     loggedOut: false,
     pushing: false,
@@ -105,6 +105,7 @@
 
   const persistTimers = new Map();
   function persist(run, now) {
+    if (!run.batches.length && !run.pendingCreate) return; // nothing worth keeping yet
     clearTimeout(persistTimers.get(run.recordId));
     const flush = () => {
       persistTimers.delete(run.recordId);
@@ -421,7 +422,7 @@
     if (model && Array.isArray(model.crew) && model.crew.length && model.crew[0] && 'personnelId' in model.crew[0]) run.crew = model.crew;
   }
   function setLocked(run, locked) {
-    if (locked && !run.locked) { run.locked = true; run.lockedAt = Date.now(); log(run, `Run ${run.incidentNumber || ''} is locked. It will be cleared from this device after ${S.settings.purgeHoursAfterLock} hour(s).`, 'good'); }
+    if (locked && !run.locked) { run.locked = true; run.lockedAt = Date.now(); log(run, `Run ${run.incidentNumber || ''} is locked. It will be cleared from this device${Number(S.settings.purgeHoursAfterLock) ? ' after ' + S.settings.purgeHoursAfterLock + ' hour(s)' : ' now'}.`, 'good'); }
     else if (!locked && run.locked) { run.locked = false; run.lockedAt = null; log(run, 'Run unlocked again.', 'info'); }
   }
 

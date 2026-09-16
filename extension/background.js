@@ -14,7 +14,7 @@ api.runtime.onMessage.addListener((msg) => {
 
 async function purge() {
   const all = await new Promise(res => api.storage.local.get(null, v => res(v || {})));
-  const hours = Number((all.settings && all.settings.purgeHoursAfterLock) ?? 24);
+  const hours = Number((all.settings && all.settings.purgeHoursAfterLock) ?? 0);
   const cutoff = Date.now() - Math.max(0, hours) * 3600 * 1000;
   const keys = [];
   for (const [k, r] of Object.entries(all)) {

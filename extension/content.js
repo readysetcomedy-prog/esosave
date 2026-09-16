@@ -43,7 +43,7 @@
   const sget = (keys) => new Promise(res => storage.get(keys, (v) => res(v || {})));
   const sset = (obj) => new Promise(res => storage.set(obj, () => res()));
   const sremove = (keys) => new Promise(res => storage.remove(keys, () => res()));
-  const DEFAULT_SETTINGS = { purgeHoursAfterLock: 24, probeSec: 20, heldProbeSec: 8 };
+  const DEFAULT_SETTINGS = { purgeHoursAfterLock: 0, probeSec: 20, heldProbeSec: 8 };
 
   async function loadAll() {
     const all = await sget(null);
@@ -55,7 +55,13 @@
     const { runs, all } = await loadAll();
     const hours = Number(settings.purgeHoursAfterLock);
     const cutoff = Date.now() - Math.max(0, hours) * 3600 * 1000;
-    const dead = Object.values(runs).filter(r => r.locked && r.lockedAt && r.lockedAt <= cutoff && !r.batches.some(b => b.status === 'held' || b.status === 'rejected'));
+    const stale = Date.now() - 30 * 24 * 3600 * 1000;
+    const dead = Object.values(runs).filter(r => {
+      if (r.batches.some(b => b.status === 'held' || b.status === 'rejected')) return false;
+      if (r.locked && r.lockedAt && r.lockedAt <= cutoff) return true;
+      if (!r.batches.length && !r.pendingCreate) return true;
+      return (r.lastSeenAt || 0) < stale;
+    });
     if (!dead.length) return;
     const keys = [];
     for (const r of dead) { keys.push('run:' + r.recordId, 'sigs:' + r.recordId); toPage('action', { name: 'forget', recordId: r.recordId }); }
@@ -88,6 +94,7 @@
       if (panelOpen) renderPanel();
     } else if (type === 'status' && payload) {
       lastStatus = payload;
+      if (payload.runs.some(r => r.locked)) purgeLocked(settings);
       renderBar();
       if (panelOpen) renderPanel();
       try { api.runtime.sendMessage({ type: 'badge', held: payload.held, rejected: payload.rejected, online: payload.online }); } catch (e) { /* worker asleep */ }
@@ -105,17 +112,19 @@
   const CSS = `
     :host { all: initial; }
     * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
-    .bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 2147483646; height: 34px; display: flex; align-items: center; gap: 10px;
-           padding: 0 12px; font-size: 14px; font-weight: 600; color: #fff; cursor: pointer; user-select: none;
-           box-shadow: 0 -2px 8px rgba(0,0,0,.25); transition: background .2s; }
+    .bar { position: fixed; left: 8px; bottom: 8px; width: 196px; z-index: 2147483646; border-radius: 10px; padding: 8px 10px;
+           font-size: 12px; color: #fff; cursor: pointer; user-select: none; box-shadow: 0 4px 14px rgba(0,0,0,.3); transition: background .2s; line-height: 1.3; }
     .bar.good { background: #15803d; } .bar.warn { background: #b45309; } .bar.bad { background: #b91c1c; } .bar.info { background: #1d4ed8; }
     .bar.warn, .bar.bad { animation: pulse 1.6s ease-in-out infinite; }
     @keyframes pulse { 0%,100% { filter: brightness(1); } 50% { filter: brightness(1.25); } }
-    .dot { width: 10px; height: 10px; border-radius: 50%; background: #fff; flex: none; }
-    .bar .msg { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .bar .small { font-weight: 400; opacity: .9; font-size: 12px; }
-    .bar .btn { background: rgba(255,255,255,.2); border: 1px solid rgba(255,255,255,.5); color: #fff; border-radius: 6px; padding: 3px 10px; font-size: 12px; font-weight: 600; cursor: pointer; }
-    .panel { position: fixed; right: 8px; bottom: 42px; width: min(560px, calc(100vw - 16px)); max-height: min(78vh, 720px); overflow: auto; z-index: 2147483647;
+    .bar .title { display: flex; align-items: center; gap: 6px; font-weight: 700; font-size: 13px; }
+    .dot { width: 9px; height: 9px; border-radius: 50%; background: #fff; flex: none; }
+    .bar .msg { margin-top: 3px; opacity: .95; word-break: break-word; }
+    .bar .num { font-weight: 700; }
+    .bar .btns { display: flex; gap: 6px; margin-top: 7px; }
+    .bar .btn { background: rgba(255,255,255,.2); border: 1px solid rgba(255,255,255,.55); color: #fff; border-radius: 6px; padding: 3px 9px; font-size: 12px; font-weight: 600; cursor: pointer; }
+    @media (max-width: 640px) { .bar { left: 0; right: 0; bottom: 0; width: auto; border-radius: 0; } }
+    .panel { position: fixed; left: 212px; bottom: 8px; width: min(560px, calc(100vw - 228px)); max-height: min(85vh, 720px); overflow: auto; z-index: 2147483647;
              background: #fff; color: #111; border-radius: 12px; box-shadow: 0 12px 40px rgba(0,0,0,.35); padding: 14px 16px; font-size: 14px; line-height: 1.4; }
     .panel h1 { font-size: 16px; margin: 0 0 6px; display: flex; align-items: center; justify-content: space-between; }
     .panel h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: #555; margin: 14px 0 6px; }
@@ -137,6 +146,7 @@
     .sig img { width: 100%; height: 60px; object-fit: contain; background: #fff; border-bottom: 1px solid #eee; margin-bottom: 4px; }
     .sig a { color: #1d4ed8; }
     .muted { color: #666; font-size: 12px; }
+    @media (max-width: 640px) { .panel { left: 8px; right: 8px; width: auto; bottom: 8px; max-height: 80vh; } }
     label.s { display: flex; align-items: center; gap: 8px; margin: 6px 0; font-size: 13px; }
     input[type=number] { width: 70px; padding: 4px; }
   `;
@@ -147,7 +157,7 @@
     host.id = 'esosave-host';
     shadow = host.attachShadow({ mode: 'open' });
     const style = document.createElement('style'); style.textContent = CSS; shadow.appendChild(style);
-    bar = document.createElement('div'); bar.className = 'bar info'; bar.innerHTML = '<span class="dot"></span><span class="msg">ESO Save starting…</span>';
+    bar = document.createElement('div'); bar.className = 'bar info';
     bar.addEventListener('click', (e) => { if (e.target.closest('.btn')) return; togglePanel(); });
     shadow.appendChild(bar);
     document.body.appendChild(host);
@@ -158,25 +168,24 @@
   setInterval(() => { if (host && !document.body.contains(host)) document.body.appendChild(host); }, 3000);
 
   function barState(s) {
-    if (!s) return { cls: 'info', msg: 'ESO Save starting…' };
+    if (!s) return { cls: 'info', title: 'ESO Save', msg: 'starting…' };
     const cur = s.runs.find(r => r.recordId === s.currentRecordId);
     const num = cur && cur.incidentNumber ? cur.incidentNumber : null;
-    const heldTxt = s.held ? `${s.held} change${s.held === 1 ? '' : 's'} held on this device` : '';
-    if (s.rejected) return { cls: 'bad', msg: `ESO REJECTED ${s.rejected} change${s.rejected === 1 ? '' : 's'}${num ? ' for ' + num : ''} - tap for details`, btn: 'Details' };
-    if (s.loggedOut) return { cls: 'bad', msg: `LOGGED OUT of ESO${s.held ? ' - ' + heldTxt + ', will push after you log in' : ''}`, btn: 'Details' };
-    if (!s.online) return { cls: 'warn', msg: `NO SIGNAL${s.held ? ' - ' + heldTxt : ' - keep working, changes are being kept here'}${num ? ' (' + num + ')' : ''}`, btn: s.held ? 'Push now' : null };
-    if (s.pushing) return { cls: 'info', msg: `Pushing held changes to ESO…${num ? ' (' + num + ')' : ''}` };
-    if (s.held) return { cls: 'warn', msg: `${heldTxt}${num ? ' for ' + num : ''} - pushing shortly`, btn: 'Push now' };
-    const saved = cur && cur.lastSavedAt ? ` · last save ${fmtTime(cur.lastSavedAt)}` : '';
-    return { cls: 'good', msg: `ESO Save · signal OK${num ? ' · ' + num : ''}${saved}`, small: true };
+    const held = s.held ? `${s.held} change${s.held === 1 ? '' : 's'} held on this device` : '';
+    if (s.rejected) return { cls: 'bad', title: 'ESO REJECTED a save', msg: `${s.rejected} change${s.rejected === 1 ? '' : 's'} not accepted. Tap for details.`, num, btn: 'Details' };
+    if (s.loggedOut) return { cls: 'bad', title: 'LOGGED OUT of ESO', msg: s.held ? held + '. Will push after you log in.' : 'Log in again to keep saving.', num, btn: 'Details' };
+    if (!s.online) return { cls: 'warn', title: 'NO SIGNAL', msg: s.held ? held + '. Keep working.' : 'Keep working. Changes are being kept here.', num, btn: s.held ? 'Push now' : null };
+    if (s.pushing) return { cls: 'info', title: 'Pushing to ESO…', msg: held, num };
+    if (s.held) return { cls: 'warn', title: 'Changes held', msg: held + '. Pushing shortly.', num, btn: 'Push now' };
+    return { cls: 'good', title: 'ESO Save · signal OK', msg: cur && cur.lastSavedAt ? `last save ${fmtTime(cur.lastSavedAt)}` : 'all saved', num };
   }
   function renderBar() {
     if (!bar) return;
     const st = barState(lastStatus);
     bar.className = 'bar ' + st.cls;
-    bar.innerHTML = `<span class="dot"></span><span class="msg ${st.small ? 'small' : ''}">${esc(st.msg)}</span>` +
-      (st.btn ? `<span class="btn" data-act="${st.btn === 'Push now' ? 'push' : 'open'}">${esc(st.btn)}</span>` : '') +
-      `<span class="btn" data-act="open">Runs</span>`;
+    bar.innerHTML = `<div class="title"><span class="dot"></span><span>${esc(st.title)}</span></div>` +
+      `<div class="msg">${st.num ? `<span class="num">${esc(st.num)}</span> · ` : ''}${esc(st.msg)}</div>` +
+      `<div class="btns">${st.btn ? `<span class="btn" data-act="${st.btn === 'Push now' ? 'push' : 'open'}">${esc(st.btn)}</span>` : ''}<span class="btn" data-act="open">Runs</span></div>`;
     bar.querySelectorAll('.btn').forEach(b => b.addEventListener('click', (e) => {
       e.stopPropagation();
       if (b.dataset.act === 'push') toPage('action', { name: 'pushNow' }); else togglePanel(true);
@@ -193,15 +202,16 @@
     const all = await sget(null);
     const parts = [];
     parts.push(`<h1><span>ESO Save</span><span class="x" data-act="close">×</span></h1>`);
-    parts.push(`<div class="muted">${s.online ? 'Signal OK' : 'NO SIGNAL'}${s.loggedOut ? ' · logged out' : ''}${s.pushing ? ' · pushing' : ''} · ${s.runs.length} run${s.runs.length === 1 ? '' : 's'} on this device` +
+    parts.push(`<div class="muted">${s.online ? 'Signal OK' : 'NO SIGNAL'}${s.loggedOut ? ' · logged out' : ''}${s.pushing ? ' · pushing' : ''} · ${s.runs.filter(r => r.counts.total || r.pendingCreate).length} run${s.runs.filter(r => r.counts.total || r.pendingCreate).length === 1 ? '' : 's'} on this device` +
       `${s.hasTemplates ? '' : ' · <span title="Start one run with signal so a blank-run template is saved">no offline new-run template yet</span>'}</div>`);
     parts.push(`<div class="actions"><button class="a" data-act="push">Push all held changes now</button><button class="a sec" data-act="export-all">Export everything</button><button class="a sec" data-act="settings">Settings</button></div>`);
     if (settingsOpen) {
-      parts.push(`<div class="run"><label class="s">Clear a run from this device <input type="number" min="0" max="720" id="purge" value="${esc(settings.purgeHoursAfterLock)}"> hours after it is locked (0 = right away)</label>` +
+      parts.push(`<div class="run"><label class="s">Clear a run from this device <input type="number" min="0" max="720" id="purge" value="${esc(settings.purgeHoursAfterLock)}"> hours after it is locked (0 = as soon as the lock is seen)</label>` +
         `<div class="actions"><button class="a" data-act="save-settings">Save</button></div></div>`);
     }
-    if (!s.runs.length) parts.push(`<p class="muted">No runs recorded yet. Open a run in ESO and every save will be recorded here.</p>`);
-    for (const r of s.runs) {
+    const listed = s.runs.filter(r => r.counts.total || r.pendingCreate);
+    if (!listed.length) parts.push(`<p class="muted">No runs recorded yet. Open a run in ESO and every save will be recorded here.</p>`);
+    for (const r of listed) {
       const sigs = all['sigs:' + r.recordId] || [];
       const c = r.counts;
       const pills = [];
@@ -227,7 +237,7 @@
         ${openLogs.has(r.recordId) && sigs.length ? `<div class="sigs">${sigs.map((g, i) => `<div class="sig"><img src="${g.dataUrl}" alt=""><div>${esc(g.label)}</div><div class="muted">${esc(fmtWhen(g.ts))} · <a href="${g.dataUrl}" download="signature-${esc(r.incidentNumber || r.recordId)}-${i + 1}.png">save image</a></div></div>`).join('')}</div>` : ''}
       </div>`);
     }
-    parts.push(`<p class="muted">Everything here stays on this device until ESO confirms it. Locked runs clear after ${esc(settings.purgeHoursAfterLock)} hour(s). Signature images are a backup in case a signature never reaches ESO.</p>`);
+    parts.push(`<p class="muted">Everything here stays on this device until ESO confirms it. Locked runs clear ${Number(settings.purgeHoursAfterLock) ? esc(settings.purgeHoursAfterLock) + ' hour(s) after locking' : 'as soon as the lock is seen'}. Runs untouched for 30 days clear too. Signature images are a backup in case a signature never reaches ESO.</p>`);
     panel.innerHTML = parts.join('');
     panel.querySelectorAll('[data-act]').forEach(el => el.addEventListener('click', onPanelAction));
   }
@@ -243,7 +253,7 @@
     else if (act === 'settings') { settingsOpen = !settingsOpen; renderPanel(); }
     else if (act === 'save-settings') {
       const v = Number(panel.querySelector('#purge').value);
-      settings.purgeHoursAfterLock = Number.isFinite(v) && v >= 0 ? v : 24;
+      settings.purgeHoursAfterLock = Number.isFinite(v) && v >= 0 ? v : 0;
       await sset({ settings }); toPage('settings', settings); settingsOpen = false; renderPanel();
     }
     else if (act === 'toggle-log') { if (openLogs.has(id)) openLogs.delete(id); else openLogs.add(id); renderPanel(); }

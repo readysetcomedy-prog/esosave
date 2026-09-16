@@ -44,7 +44,7 @@ Restoring into a different run reuses the same machinery: every recorded batch i
 target run, with item keys and crew row ids remapped, then pushed.
 
 Locked runs are detected from the state ESO returns and are cleared from the device after a
-configurable number of hours (default 24, settable to 0).
+configurable number of hours (default 0: cleared as soon as the lock is seen).
 
 ## What is verified and what is not
 
@@ -103,9 +103,9 @@ script from its bundle instead (tested).
 
 ## Using it
 
-- The bar at the bottom of every ESO page shows the state: green (signal OK, everything saved),
+- The card in the bottom-left corner of every ESO page shows the state: green (signal OK, everything saved),
   amber (no signal, or changes held), blue (pushing), red (logged out or ESO rejected a change).
-- Tap the bar or **Runs** to open the panel: every run recorded on the device, how many saves are
+- Tap the card or **Runs** to open the panel: every run recorded on the device, how many saves are
   held, the log, signature images, and the restore buttons:
   - **Push into the open run** — replay everything recorded for a run into the run open in ESO now.
   - **Push into a NEW run** — create a fresh run on ESO and replay everything into it. Open it from
@@ -117,8 +117,8 @@ script from its bundle instead (tested).
 ## Privacy
 
 Everything recorded is protected health information and stays in the extension's local storage on
-that device only. It is never sent anywhere but ESO. Locked runs are purged automatically; the
-retention window is in Settings. Exports are plain JSON files: treat them like a printed chart.
+that device only. It is never sent anywhere but ESO. Locked runs are purged automatically as soon as the lock is seen; a
+retention window can be set in Settings. Exports are plain JSON files: treat them like a printed chart.
 
 ## Development
 
