@@ -256,6 +256,7 @@ test('the page picker opens from the panel with Incident and Narrative on, warns
 });
 
 test('a copy button on a saved vital re-enters it as a new vital with the current time', async () => {
+  await T.setStorage({ fieldDefs: { mobileToMobile: ['MOBILETOMOBILE', 'boolean'] } }); // left behind by an earlier version
   const id = await freshRun();
   const k = await app(() => window.app.uuid());
   await app((k) => {
@@ -267,6 +268,9 @@ test('a copy button on a saved vital re-enters it as a new vital with the curren
     window.app.addScalar('vitals', `vitals.vitalSigns.['${k}'].glasgowComaScale.glasgowComaQualifierIds.['5690']`, 5690);
   }, k);
   await waitFor(async () => (await T.record(id)).tree.vitals?.vitalSigns?.[0]?.pulse?.pulseRate === '72', { label: 'vital saved' });
+  // an earlier version remembered field names it had guessed itself; that memory must be ignored
+  const stored = await T.storage();
+  assert.equal(stored.fieldDefs, undefined, 'old learned-field key was removed');
   // the entry form shows a time next to its own controls: it must not get a button
   await T.page.evaluate(() => { document.body.insertAdjacentHTML('beforeend', '<div id="entry" class="vital-entry-modal" style="position:fixed;right:20px;top:20px;background:#fff;border:1px solid #000;padding:8px"><div><span>15:39:12</span><input value="x"></div></div>'); });
   await app(() => window.app.openTab('Vitals'));
@@ -277,7 +281,7 @@ test('a copy button on a saved vital re-enters it as a new vital with the curren
   // nothing was inserted into the page; the button floats just left of the time cell
   assert.equal(await T.page.evaluate(() => document.querySelectorAll('.esosave-copy').length), 0, 'page DOM untouched');
   const cell = await T.page.evaluate(() => document.querySelector('#vitals td.t').getBoundingClientRect().toJSON());
-  assert.ok(btn.rect.right <= cell.left && btn.rect.right >= cell.left - 12, `button (right ${btn.rect.right}) sits just left of the cell (left ${cell.left})`);
+  assert.ok(btn.rect.right <= cell.left - 4 && btn.rect.right >= cell.left - 14, `button (right ${btn.rect.right}) sits just left of the cell (left ${cell.left}), clear of its border`);
   assert.ok(btn.rect.top >= cell.top - 2 && btn.rect.bottom <= cell.bottom + 2, 'vertically on the row');
   await T.page.mouse.click(btn.rect.x + btn.rect.width / 2, btn.rect.y + btn.rect.height / 2);
   const rec = await waitFor(async () => { const r = await T.record(id); return r.tree.vitals.vitalSigns.length === 2 ? r : null; }, { label: 'second vital on ESO', timeout: 20000 });
@@ -292,6 +296,9 @@ test('a copy button on a saved vital re-enters it as a new vital with the curren
   // the field naming matched what the app itself uses
   const op = rec.ops.find(o => /pulse\.pulseRate$/.test(o.address) && o.address.includes(b.itemId));
   assert.equal(op.fieldRef, 'PULSERATE'); assert.equal(op.dataType, 'string');
+  assert.equal(typeof op.value, 'string', 'text fields are sent as text, as the app does, even though the view returns a number');
+  // ESO's bookkeeping fields on the vital (mobileToMobile etc.) were not sent
+  assert.ok(!rec.ops.some(o => o.address.includes(b.itemId) && /mobileToMobile|softDeleted|fileId|imageType/.test(o.address)), 'no bookkeeping fields copied');
   // the tab was refreshed so the new row shows, with its own copy button; card still green
   await waitFor(async () => (await buttons()).length === 2, { label: 'two rows with copy buttons' });
   await waitFor(() => T.page.evaluate(() => !document.getElementById('esosave-host').shadowRoot.querySelector('.veil')), { label: 'overlay gone' });

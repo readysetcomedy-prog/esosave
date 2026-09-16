@@ -27,7 +27,7 @@
   if (ext) return;
   if (window.__esosave) return;
 
-  const VERSION = '0.2.0';
+  const VERSION = '0.2.1';
   const API_PREFIX_RE = /^\/ehr\/api\/+/i;
   const FAKE_OK_TEXT = '{"result":"Success","data":[]}';
   const PROBE_PATH = '/ehr/api/thirdpartydata/partners';
@@ -74,6 +74,16 @@
       'painScaleTypeId': ['PAINSCALETYPEID', 'singleselect'], 'painScale': ['PAINSCALE', 'integer'], 'cardiacMonitoring.ecgTypeId': ['ECGTYPEID', 'singleselect'],
       'cardiacMonitoring.ecgRhythm': ['ECGRHYTHM', 'multiselect'], 'cardiacMonitoring.ecgMethodOfInterpretationIds': ['ECGMETHODOFINTERPRETATIONIDS', 'multiselect'],
       'cardiacMonitoring.ecgNotes': ['ECGNOTES', 'string'], 'cardiacMonitoring.isMISuspected': ['ISMISUSPECTED', 'boolean'],
+      'avpuId': ['AVPUID', 'singleselect'], 'patientSide': ['PATIENTSIDE', 'integer'], 'patientPosture': ['PATIENTPOSTURE', 'integer'],
+      'etCO2SPO2CO.spO2': ['SPO2', 'string'], 'etCO2SPO2CO.onOxygen': ['ONOXYGEN', 'boolean'], 'etCO2SPO2CO.etCO2mmHg': ['ETCO2MMHG', 'string'],
+      'etCO2SPO2CO.etCO2Percentage': ['ETCO2PERCENTAGE', 'string'], 'etCO2SPO2CO.etCO2kPa': ['ETCO2KPA', 'string'], 'etCO2SPO2CO.coDecimal': ['CODECIMAL', 'string'],
+      'flaccPainScale.flaccFaceId': ['FLACCFACEID', 'singleselect'], 'flaccPainScale.flaccLegsId': ['FLACCLEGSID', 'singleselect'], 'flaccPainScale.flaccActivityId': ['FLACCACTIVITYID', 'singleselect'],
+      'flaccPainScale.flaccConsolabilityId': ['FLACCCONSOLABILITYID', 'singleselect'], 'flaccPainScale.flaccCryId': ['FLACCCRYID', 'singleselect'],
+      'rassScore.rassScoreId': ['RASSSCOREID', 'singleselect'], 'rassScore.barsScoreId': ['BARSSCOREID', 'singleselect'],
+      'pediatricTraumaScore.pediatricTraumaAirwayId': ['PEDIATRICTRAUMAAIRWAYID', 'singleselect'], 'pediatricTraumaScore.pediatricTraumaCnsId': ['PEDIATRICTRAUMACNSID', 'singleselect'],
+      'pediatricTraumaScore.pediatricTraumaWoundsId': ['PEDIATRICTRAUMAWOUNDSID', 'singleselect'], 'pediatricTraumaScore.pediatricTraumaSizeId': ['PEDIATRICTRAUMASIZEID', 'singleselect'],
+      'pediatricTraumaScore.pediatricTraumaBpId': ['PEDIATRICTRAUMABPID', 'singleselect'], 'pediatricTraumaScore.pediatricTraumaSkeletalId': ['PEDIATRICTRAUMASKELETALID', 'singleselect'],
+      'pediatricTraumaScore.pediatricTraumaTotalScore': ['PEDIATRICTRAUMATOTALSCORE', 'integer'],
     },
     settings: { purgeHoursAfterLock: 0, probeSec: 20, heldProbeSec: 8 },
     online: navigator.onLine !== false,
@@ -485,7 +495,10 @@
         if (b.synthetic) { b.status = 'dropped'; b.error = summarize(res); log(run, `ESO refused the copied vital, so it was dropped (${b.error}). Enter it by hand.`, 'error'); persist(run); emit(); continue; }
         reject(run, b, res); persist(run); emit();
       }
-      if (!hasHeld(run)) log(run, `All changes for ${run.incidentNumber || 'this run'} are on ESO.`, 'good');
+      if (!hasHeld(run)) {
+        const bad = run.batches.filter(b => b.status === 'rejected').length;
+        log(run, bad ? `Pushed everything ESO would take for ${run.incidentNumber || 'this run'}; ${bad} change${bad === 1 ? '' : 's'} rejected (see above).` : `All changes for ${run.incidentNumber || 'this run'} are on ESO.`, bad ? 'warn' : 'good');
+      }
       return true;
     } finally { run.pushing = false; }
   }
@@ -651,14 +664,18 @@
   // The saves the app itself would make to enter this vital again, with a new time. Only fields the
   // app has been seen saving (seeded from a recording, grown from live saves) are sent: a made-up
   // field name would make ESO refuse the whole batch. Anything else in the vital is reported back.
+  // ESO's own bookkeeping on a vital (seen in the Vitals view); the app never saves these.
+  const VITAL_META = new Set(['itemId', 'vitalSignDateTime', 'mobileToMobile', 'softDeleted', 'fileId', 'imageType', 'version']);
   function vitalCopyOps(vital, newKey) {
     const base = `vitals.vitalSigns.['${newKey}']`;
     const ops = [{ verb: 'ADD', address: base, fieldRef: 'VITALSIGN', value: { vitalSignDateTime: fmtEsoLocal(new Date()) }, dataType: 'collectionWithData', isComplexType: true }];
     const skipped = [];
+    // the app sends text fields as text even when they hold a number; the view returns numbers
+    const coerce = (v, type) => type === 'string' ? String(v) : type === 'integer' && typeof v === 'string' && v.trim() !== '' && !isNaN(Number(v)) ? Number(v) : v;
     const walk = (obj, path) => {
       for (const [k, v] of Object.entries(obj)) {
         if (v === null || v === undefined || v === '') continue;
-        if (!path && (k === 'itemId' || k === 'vitalSignDateTime')) continue;
+        if (!path && VITAL_META.has(k)) continue;
         const p = path ? path + '.' + k : k;
         const def = S.fieldDefs[p];
         if (Array.isArray(v)) {
@@ -669,7 +686,7 @@
         } else if (typeof v === 'object') walk(v, p);
         else if (!def) skipped.push(p);
         else if (def[1] === 'multiselect') ops.push({ verb: 'ADD', address: `${base}.${p}.['${v}']`, fieldRef: def[0], value: v, dataType: 'multiselect' });
-        else ops.push({ verb: 'EDIT', address: `${base}.${p}`, fieldRef: def[0], value: v, dataType: def[1] });
+        else ops.push({ verb: 'EDIT', address: `${base}.${p}`, fieldRef: def[0], value: coerce(v, def[1]), dataType: def[1] });
       }
     };
     walk(vital, '');

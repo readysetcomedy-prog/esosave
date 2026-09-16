@@ -74,8 +74,9 @@
     settings = data.settings;
     renderBar();
     await purgeLocked(settings);
+    await sremove(['fieldDefs', 'knownViews']).catch(() => {}); // superseded keys from earlier versions
     const fresh = await loadAll();
-    toPage('init', { runs: fresh.runs, templates: fresh.templates, settings, tabRequests: fresh.all.tabRequests || null, fieldDefs: fresh.all.fieldDefs || null });
+    toPage('init', { runs: fresh.runs, templates: fresh.templates, settings, tabRequests: fresh.all.tabRequests || null, fieldDefs: fresh.all.fieldDefs2 || null });
     setInterval(() => purgeLocked(settings), 10 * 60 * 1000);
   })();
   // The page script may have been injected before our listener existed; ask for a status once ready.
@@ -85,7 +86,7 @@
     if (type === 'persistRun' && payload && payload.run) {
       await sset({ ['run:' + payload.run.recordId]: payload.run });
     } else if (type === 'persistFieldDefs' && payload && payload.fieldDefs) {
-      await sset({ fieldDefs: payload.fieldDefs });
+      await sset({ fieldDefs2: payload.fieldDefs });
     } else if (type === 'event' && payload && payload.name === 'vitalCopied') {
       onVitalCopied(payload);
     } else if (type === 'persistTabRequests' && payload && payload.tabRequests) {
@@ -528,6 +529,7 @@
   const NOT_A_ROW = '[role="dialog"], [aria-modal="true"], [class*="modal" i], [class*="dialog" i], [class*="popover" i], [class*="dropdown" i], [class*="picker" i], [class*="menu" i], [class*="overlay" i], label';
   let copyBusy = false;
   let copyLayer = null;
+  let copyHiddenAt = 0; // set when a tab is tapped; the buttons stay hidden until the next tab has loaded
   const copyButtons = new Map(); // time element -> button in our layer
   function vitalTimeCells() {
     const out = [];
@@ -549,7 +551,17 @@
       if (formy) continue;
       const r = el.getBoundingClientRect();
       if (!r.width || !r.height) continue;
-      out.push({ el, text, rect: r });
+      // the cell the time sits in (a td, or the nearest wrapper that is still just this cell)
+      let cell = el.closest('td');
+      if (!cell) {
+        cell = el;
+        for (let a = el.parentElement, i = 0; a && i < 3; a = a.parentElement, i++) {
+          const ar = a.getBoundingClientRect();
+          if (ar.height > r.height + 28 || ar.width > Math.max(3 * r.width, 160)) break;
+          cell = a;
+        }
+      }
+      out.push({ el, text, rect: r, cell: cell.getBoundingClientRect() });
     }
     return out;
   }
@@ -584,7 +596,8 @@
     if (!layer) return;
     const keep = new Set();
     const seen = {};
-    for (const { el, text, rect } of cells) {
+    layer.style.display = copyHiddenAt && !(lastStatus.lastView && lastStatus.lastView.ts > copyHiddenAt) ? 'none' : '';
+    for (const { el, text, rect, cell } of cells) {
       const time = text.padStart(8, '0');
       const nth = seen[time] = (seen[time] || 0);
       seen[time]++;
@@ -602,11 +615,11 @@
       // just left of the cell; if the cell hugs the screen edge, in the cell's own padding before
       // the text when that fits, otherwise just right of the cell. Never on top of the time itself.
       let left;
-      if (rect.left - w - 6 >= 2) left = rect.left - w - 6;
+      if (cell.left - w - 8 >= 2) left = cell.left - w - 8;
       else {
         let textLeft = rect.left;
         try { const rg = document.createRange(); rg.selectNodeContents(el); const tr = rg.getBoundingClientRect(); if (tr.width) textLeft = tr.left; } catch (e) { /* ignore */ }
-        left = textLeft - rect.left >= w + 4 ? textLeft - w - 2 : rect.right + 6;
+        left = textLeft - cell.left >= w + 4 ? textLeft - w - 2 : cell.right + 6;
       }
       btn.style.display = 'block';
       btn.style.left = Math.round(left) + 'px';
@@ -645,6 +658,12 @@
   const startRowObserver = () => { if (document.body) rowObserver.observe(document.body, { childList: true, subtree: true, characterData: true }); };
   if (document.body) startRowObserver(); else document.addEventListener('DOMContentLoaded', startRowObserver);
   addEventListener('scroll', () => scheduleRows(30), { capture: true, passive: true });
+  document.addEventListener('pointerdown', (e) => {
+    if (!copyButtons.size || (host && e.composedPath().includes(host))) return;
+    const t = e.target && e.target.closest ? e.target.closest('a, button, [role="tab"], li') : null;
+    const label = t && (t.innerText || t.textContent || '').trim().toUpperCase();
+    if (label && Object.values(TAB_LABELS).includes(label) && t.getBoundingClientRect().top <= 260) { copyHiddenAt = Date.now(); if (copyLayer) copyLayer.style.display = 'none'; }
+  }, true);
   addEventListener('resize', () => scheduleRows(60));
   setInterval(decorateVitalRows, 700);
 })();

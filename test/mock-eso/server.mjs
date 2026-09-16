@@ -82,6 +82,8 @@ export function createMockEso() {
     if (rec.locked) return [400, { result: 'Failure', message: 'Record is locked' }];
     if (control.failAutosaves > 0) { control.failAutosaves--; return [502, '<html><body>502 Bad Gateway</body></html>', 'text/html']; }
     if (control.refuseAutosaves > 0) { control.refuseAutosaves--; return [500, { result: 'Failure', message: 'Object reference not set to an instance of an object.' }]; }
+    // ESO's bookkeeping on a vital is returned in the view but is not a field the app can set
+    if (ops.some && ops.some(o => o && /^(MOBILETOMOBILE|SOFTDELETED|FILEID|IMAGETYPE)$/.test(o.fieldRef))) return [500, { errorCode: 'OTHER', correlationId: randomUUID().replace(/-/g, '') }];
     if (!Array.isArray(ops)) return [400, { result: 'Failure', message: 'Body must be an array of operations' }];
     const mappings = [];
     const localMap = {};
@@ -115,12 +117,29 @@ export function createMockEso() {
     rec.autosaves++;
     return [200, { result: 'Success', data: mappings }];
   }
+  const VITAL_SHAPE = { avpuId: null, patientSide: null, patientPosture: null, painScale: null, painScaleTypeId: null, mobileToMobile: false, softDeleted: null, fileId: null, imageType: null,
+    bloodPressure: { bloodPressureSystolic: null, bloodPressureDiastolic: null, bloodPressureMethodId: null, shockIndex: null },
+    pulse: { pulseRate: null, pulseRhythmId: null, pulseStrengthId: null, pulseRateMethodID: null },
+    respiration: { respirationRate: null, respirationRhythmId: null, respirationQualityId: null },
+    etCO2SPO2CO: { spO2: null, etCO2: null, etCO2mmHg: null, etCO2Percentage: null, etCO2kPa: null, co: null, coDecimal: null, onOxygen: null },
+    glucoseAndTemp: { temperatureF: null, temperatureC: null, glucose: null, temperatureMethodId: null },
+    cardiacMonitoring: { ecg12LeadIschemia: [], ecg12LeadComments: null, ecgTypeId: null, ecgRhythm: [], ecgMethodOfInterpretationIds: [], ecgNotes: null, isMISuspected: null },
+    glasgowComaScale: { glascowComaEyesId: null, glascowComaVerbalId: null, glascowComaMotorId: null, glascowComaTotalScore: null, glasgowComaQualifierIds: [] },
+    revisedTraumaScore: { revisedTraumaGcs: null, revisedTraumaBp: null, revisedTraumaRr: null, revisedTraumaTotalScore: null } };
+  function realVital(v) {
+    const num = (x) => (typeof x === 'string' && x.trim() !== '' && !isNaN(Number(x))) ? Number(x) : x;
+    const merge = (shape, val) => { const out = { ...shape }; for (const [k, x] of Object.entries(val || {})) out[k] = (x && typeof x === 'object' && !Array.isArray(x)) ? merge(shape[k] || {}, x) : num(x); return out; };
+    return merge(VITAL_SHAPE, v);
+  }
   function view(rec, name) {
     const scope = name.charAt(0).toLowerCase() + name.slice(1);
     const model = JSON.parse(JSON.stringify(rec.tree[scope] || {}));
     if (name === 'Incident') { model.response = { incidentNumber: rec.incidentNumber, ...(model.response || {}) }; model.crew = rec.crew; }
     if (name === 'Signatures' || name === 'Narrative' || name === 'FlowchartTreatments') model.crew = rec.crew;
     if (!('version' in model)) model.version = null;
+    // a saved vital comes back the way ESO returns it: numbers for numeric text, every group
+    // present with nulls, plus bookkeeping fields the app never saves
+    if (name === 'Vitals' && Array.isArray(model.vitalSigns)) model.vitalSigns = model.vitalSigns.map(realVital);
     return {
       data: { model, optionalData: { patients: [{ patientCareRecordId: rec.id, isLocked: rec.locked, firstName: null, lastName: null }], pcrHeader: { isPositiveIdEnabled: true, positiveIdVerified: null } } },
       meta: { configVersion: '5.3.19', state: rec.state, user: { fullName: 'TEST, MEDIC' } },
