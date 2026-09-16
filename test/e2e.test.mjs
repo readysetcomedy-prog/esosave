@@ -387,3 +387,22 @@ test('an identical batch re-sent by the app while the first is still held is not
   const rec = await T.record(realId);
   assert.equal(rec.tree.vitals.vitalSigns.filter(v => v.vitalSignDateTime === 'dup-test').length, 1);
 });
+
+test('the card collapses to the logo, expands on tap, and re-expands by itself when signal drops', async () => {
+  const q = (sel) => T.page.evaluate((s) => { const el = document.getElementById('esosave-host').shadowRoot.querySelector(s); return el ? { cls: el.className, html: el.innerHTML.slice(0, 200) } : null; }, sel);
+  await waitFor(async () => (await q('.bar')) && !/collapsed/.test((await q('.bar')).cls), { label: 'expanded card' });
+  await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.fold').click());
+  let b = await waitFor(async () => { const x = await q('.bar'); return x && /collapsed/.test(x.cls) ? x : null; }, { label: 'collapsed' });
+  assert.match(b.html, /icons\/logo\.png/, 'collapsed card shows the logo');
+  const stored = await T.storage();
+  assert.equal(stored.settings.cardCollapsed, true, 'collapsed state remembered');
+  await T.context.setOffline(true);
+  await app(() => { window.app.edit('incident', 'incident.scene.callNature', 'collapsed test'); });
+  b = await waitFor(async () => { const x = await q('.bar'); return x && !/collapsed/.test(x.cls) && /warn/.test(x.cls) ? x : null; }, { label: 'auto-expanded on no signal', timeout: 20000 });
+  await T.context.setOffline(false);
+  await waitFor(async () => (await T.status()).held === 0, { label: 'pushed', timeout: 30000 });
+  await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.fold').click());
+  await waitFor(async () => /collapsed/.test((await q('.bar')).cls), { label: 'collapsed again' });
+  await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.bar').click());
+  await waitFor(async () => !/collapsed/.test((await q('.bar')).cls), { label: 'expanded by tap' });
+});

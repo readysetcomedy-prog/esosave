@@ -43,7 +43,7 @@
   const sget = (keys) => new Promise(res => storage.get(keys, (v) => res(v || {})));
   const sset = (obj) => new Promise(res => storage.set(obj, () => res()));
   const sremove = (keys) => new Promise(res => storage.remove(keys, () => res()));
-  const DEFAULT_SETTINGS = { purgeHoursAfterLock: 0, probeSec: 20, heldProbeSec: 8, warmTabs: true };
+  const DEFAULT_SETTINGS = { purgeHoursAfterLock: 0, probeSec: 20, heldProbeSec: 8, warmTabs: true, cardCollapsed: false };
 
   async function loadAll() {
     const all = await sget(null);
@@ -72,6 +72,7 @@
   (async () => {
     const data = await loadAll();
     settings = data.settings;
+    renderBar();
     await purgeLocked(settings);
     const fresh = await loadAll();
     toPage('init', { runs: fresh.runs, templates: fresh.templates, settings, tabRequests: fresh.all.tabRequests || null, fieldDefs: fresh.all.fieldDefs || null });
@@ -129,6 +130,15 @@
     .bar .msg { margin-top: 3px; opacity: .95; word-break: break-word; }
     .bar .num { font-weight: 700; }
     .bar .btns { display: flex; gap: 6px; margin-top: 7px; }
+    .bar .title { justify-content: space-between; }
+    .bar .fold { margin-left: auto; width: 22px; height: 22px; border-radius: 6px; border: 1px solid rgba(255,255,255,.5); background: rgba(255,255,255,.15); color: #fff; font-size: 14px; line-height: 20px; text-align: center; cursor: pointer; flex: none; }
+    .bar.collapsed { width: 56px; height: 56px; padding: 0; border-radius: 14px; background: #fff; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 14px rgba(0,0,0,.35); }
+    .bar.collapsed img { width: 48px; height: 48px; display: block; }
+    .bar.collapsed .ring { position: absolute; inset: -3px; border-radius: 17px; border: 3px solid #15803d; pointer-events: none; }
+    .bar.collapsed.warn .ring { border-color: #b45309; } .bar.collapsed.bad .ring { border-color: #b91c1c; } .bar.collapsed.info .ring { border-color: #1d4ed8; }
+    .bar.collapsed .pip { position: absolute; top: -6px; right: -6px; min-width: 20px; height: 20px; border-radius: 10px; background: #b45309; color: #fff; font-size: 12px; font-weight: 700; line-height: 20px; text-align: center; padding: 0 5px; }
+    .bar.collapsed.bad .pip { background: #b91c1c; }
+    @media (max-width: 640px) { .bar.collapsed { left: 8px; right: auto; bottom: 8px; width: 56px; border-radius: 14px; } }
     .bar .btn { background: rgba(255,255,255,.2); border: 1px solid rgba(255,255,255,.55); color: #fff; border-radius: 6px; padding: 3px 9px; font-size: 12px; font-weight: 600; cursor: pointer; }
     @media (max-width: 640px) { .bar { left: 0; right: 0; bottom: 0; width: auto; border-radius: 0; } }
     .veil { position: fixed; inset: 0; z-index: 2147483645; background: rgba(15, 23, 42, .55); display: flex; align-items: center; justify-content: center; cursor: wait; }
@@ -187,7 +197,7 @@
     shadow = host.attachShadow({ mode: 'open' });
     const style = document.createElement('style'); style.textContent = CSS; shadow.appendChild(style);
     bar = document.createElement('div'); bar.className = 'bar info';
-    bar.addEventListener('click', (e) => { if (e.target.closest('.btn')) return; togglePanel(); });
+    bar.addEventListener('click', (e) => { if (e.target.closest('.btn, .fold')) return; if (settings.cardCollapsed) { setCollapsed(false, true); return; } togglePanel(); });
     shadow.appendChild(bar);
     document.body.appendChild(host);
     renderBar();
@@ -208,17 +218,38 @@
     if (s.held) return { cls: 'warn', title: 'Changes held', msg: held + '. Pushing shortly.', num, btn: 'Push now' };
     return { cls: 'good', title: 'ESO Save · signal OK', msg: cur && cur.lastSavedAt ? `last save ${fmtTime(cur.lastSavedAt)}` : 'all saved', num };
   }
+  let lastCls = null;
   function renderBar() {
     if (!bar) return;
     const st = barState(lastStatus);
+    // a change for the worse un-collapses the card so nobody misses it
+    if (settings.cardCollapsed && lastCls && lastCls !== st.cls && (st.cls === 'warn' || st.cls === 'bad')) setCollapsed(false, false);
+    lastCls = st.cls;
+    if (settings.cardCollapsed) {
+      const held = lastStatus && (lastStatus.held || 0);
+      const rejected = lastStatus && (lastStatus.rejected || 0);
+      bar.className = 'bar collapsed ' + st.cls;
+      bar.title = st.title + (st.msg ? ' · ' + st.msg : '') + ' (tap to expand)';
+      bar.innerHTML = `<img src="${api.runtime.getURL('icons/logo.png')}" alt="ESO Save"><span class="ring"></span>${rejected ? '<span class="pip">!</span>' : held ? `<span class="pip">${held}</span>` : ''}`;
+      return;
+    }
     bar.className = 'bar ' + st.cls;
-    bar.innerHTML = `<div class="title"><span class="dot"></span><span>${esc(st.title)}</span></div>` +
+    bar.title = '';
+    bar.innerHTML = `<div class="title"><span class="dot"></span><span>${esc(st.title)}</span><span class="fold" data-act="collapse" title="Collapse to just the logo">–</span></div>` +
       `<div class="msg">${st.num ? `<span class="num">${esc(st.num)}</span> · ` : ''}${esc(st.msg)}</div>` +
       `<div class="btns">${st.btn ? `<span class="btn" data-act="${st.btn === 'Push now' ? 'push' : 'open'}">${esc(st.btn)}</span>` : ''}<span class="btn" data-act="open">Runs</span></div>`;
-    bar.querySelectorAll('.btn').forEach(b => b.addEventListener('click', (e) => {
+    bar.querySelectorAll('.btn, .fold').forEach(b => b.addEventListener('click', (e) => {
       e.stopPropagation();
-      if (b.dataset.act === 'push') toPage('action', { name: 'pushNow' }); else togglePanel(true);
+      if (b.dataset.act === 'push') toPage('action', { name: 'pushNow' });
+      else if (b.dataset.act === 'collapse') setCollapsed(true, true);
+      else togglePanel(true);
     }));
+  }
+  async function setCollapsed(v, save) {
+    settings.cardCollapsed = !!v;
+    if (save) await sset({ settings });
+    if (!v && panel) panel.style.display = panelOpen ? 'block' : 'none';
+    renderBar();
   }
   function togglePanel(force) {
     panelOpen = force === undefined ? !panelOpen : !!force;

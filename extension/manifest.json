@@ -40,7 +40,8 @@
   "web_accessible_resources": [
     {
       "resources": [
-        "inject.js"
+        "inject.js",
+        "icons/logo.png"
       ],
       "matches": [
         "https://www.esosuite.net/*"

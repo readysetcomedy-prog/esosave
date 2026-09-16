@@ -131,7 +131,9 @@ Notes:
 ## Using it
 
 - The card in the bottom-left corner of every ESO page shows the state: green (signal OK, everything saved),
-  amber (no signal, or changes held), blue (pushing), red (logged out or ESO rejected a change).
+  amber (no signal, or changes held), blue (pushing), red (logged out or ESO rejected a change). The
+  "–" collapses it to just the logo with a coloured ring (and a count of held changes); tap the logo
+  to expand. It expands by itself when something goes wrong.
 - Tap the card or **Runs** to open the panel: every run recorded on the device, how many saves are
   held, the log, signature images, and the restore buttons:
   - **Push into the open run** / **Push into a NEW run** — first pick which pages to copy (Incident
@@ -167,3 +169,4 @@ Layout:
 - `test/mock-eso/` — mock of ESO's API and a fake app that saves exactly like the real one
 - `test/e2e.test.mjs` — scenarios; `test/recording.test.mjs` — real-recording replay
 - `ios-app/` — Expo wrapper that carries the extension onto iPads through EAS Build and TestFlight
+- `scripts/make-icons.mjs` — regenerates every icon size and the iOS icon from one square logo image
