@@ -44,3 +44,16 @@ emit('test-inline', (m) => {
   for (const cs of m.content_scripts) cs.matches.push(...extra);
   for (const w of m.web_accessible_resources) w.matches.push(...extra);
 });
+
+// Safari build: identical extension, but a non-persistent background page instead of a service
+// worker (Safari before 16.4 has no service-worker backgrounds, and on iOS they get killed anyway).
+// It is copied into the Expo wrapper's Safari target so EAS Build ships it inside the iOS app.
+emit('safari', (m) => {
+  m.background = { scripts: ['background.js'], persistent: false };
+});
+{
+  const target = join(root, 'ios-app', 'targets', 'esosave', 'assets');
+  if (existsSync(target)) rmSync(target, { recursive: true });
+  cpSync(join(dist, 'safari'), target, { recursive: true });
+  console.log('copied Safari build to', target);
+}

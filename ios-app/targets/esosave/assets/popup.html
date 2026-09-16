@@ -1,0 +1,26 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>ESO Save</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; font-size: 13px; margin: 0; padding: 12px; width: 340px; color: #111; }
+  h1 { font-size: 15px; margin: 0 0 8px; }
+  .run { border: 1px solid #ddd; border-radius: 8px; padding: 8px 10px; margin: 6px 0; }
+  .num { font-weight: 700; }
+  .pill { display: inline-block; border-radius: 999px; padding: 1px 8px; font-size: 11px; font-weight: 600; margin-left: 4px; }
+  .good { background: #dcfce7; color: #166534; } .warn { background: #fef3c7; color: #92400e; } .bad { background: #fee2e2; color: #991b1b; }
+  .muted { color: #666; font-size: 12px; }
+  button { background: #1d4ed8; color: #fff; border: 0; border-radius: 6px; padding: 5px 9px; font-size: 12px; font-weight: 600; cursor: pointer; margin-right: 4px; margin-top: 6px; }
+  button.sec { background: #e5e7eb; color: #111; } button.danger { background: #b91c1c; }
+  p { margin: 6px 0; }
+</style>
+</head>
+<body>
+<h1>ESO Save</h1>
+<div id="list"></div>
+<p class="muted">Restore buttons live in the bar at the bottom of the ESO page. This list is here so you can export or clear runs even when ESO is not open.</p>
+<button class="sec" id="export">Export everything</button>
+<script src="popup.js"></script>
+</body>
+</html>

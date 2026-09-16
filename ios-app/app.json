@@ -1,0 +1,19 @@
+{
+  "expo": {
+    "name": "ESO Save",
+    "slug": "esosave",
+    "version": "1.0.0",
+    "orientation": "default",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": { "image": "./assets/splash-icon.png", "resizeMode": "contain", "backgroundColor": "#15803d" },
+    "ios": {
+      "bundleIdentifier": "com.ruralmedems.esosave",
+      "appleTeamId": "REPLACE_WITH_YOUR_TEAM_ID",
+      "supportsTablet": true,
+      "buildNumber": "1",
+      "infoPlist": { "ITSAppUsesNonExemptEncryption": false }
+    },
+    "plugins": ["@bacons/apple-targets"]
+  }
+}
