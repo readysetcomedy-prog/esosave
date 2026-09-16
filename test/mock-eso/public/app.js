@@ -64,6 +64,7 @@
       for (const [m, u, b] of extra) { const c = await xhr(m, u, b); out.companions.push({ url: u, status: c.status, text: c.text }); }
       this.views[view] = out;
       render();
+      if (view === 'Vitals') renderVitals(out.body);
       return out;
     },
     async lock() { const r = await xhr('POST', `/ehr/api/PatientCareRecords/${this.recordId}/Lock`); await this.openTab('Incident'); return r.status; },
@@ -78,6 +79,12 @@
     document.querySelectorAll('.tab').forEach(x => x.classList.toggle('active', x === t));
     app.openTab(t.dataset.view);
   });
+  function renderVitals(body) {
+    const list = (body && body.data && body.data.model && body.data.model.vitalSigns) || [];
+    const table = document.getElementById('vitals');
+    table.innerHTML = '<tr><th>Time</th><th>BP</th><th>Pulse</th><th></th></tr>' + list.map(v =>
+      `<tr><td class="t">${(v.vitalSignDateTime || '').slice(-8)}</td><td>${(v.bloodPressure && v.bloodPressure.bloodPressureSystolic) || '--'}/${(v.bloodPressure && v.bloodPressure.bloodPressureDiastolic) || '--'}</td><td>${(v.pulse && v.pulse.pulseRate) || '--'}</td><td><button class="x">×</button></td></tr>`).join('');
+  }
   function render() {
     const el = document.getElementById('status');
     if (el) el.textContent = `record ${app.recordId}\nresponses ${app.responses.length} errors ${app.errors.length}\nkeyMap ${JSON.stringify(app.keyMap)}`;

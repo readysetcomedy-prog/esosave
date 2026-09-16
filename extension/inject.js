@@ -57,6 +57,24 @@
     },
     apiCache: new Map(),         // "METHOD path?query body" -> last good response, served when ESO is unreachable
     learning: null,              // { view, recordId, until } while a live tab load is being watched
+    // How the app names each vitals field when it saves it (path below the vital -> fieldRef, dataType).
+    // Seeded from a recording of the real app; grows as live saves are observed.
+    fieldDefs: {
+      'bloodPressure.bloodPressureSystolic': ['BLOODPRESSURESYSTOLIC', 'string'], 'bloodPressure.bloodPressureDiastolic': ['BLOODPRESSUREDIASTOLIC', 'string'],
+      'bloodPressure.bloodPressureMethodId': ['BLOODPRESSUREMETHODID', 'singleselect'], 'bloodPressure.shockIndex': ['SHOCKINDEX', 'string'],
+      'revisedTraumaScore.revisedTraumaBp': ['REVISEDTRAUMABP', 'integer'], 'revisedTraumaScore.revisedTraumaRr': ['REVISEDTRAUMARR', 'integer'],
+      'revisedTraumaScore.revisedTraumaGcs': ['REVISEDTRAUMAGCS', 'integer'], 'revisedTraumaScore.revisedTraumaTotalScore': ['REVISEDTRAUMATOTALSCORE', 'integer'],
+      'pulse.pulseRate': ['PULSERATE', 'string'], 'pulse.pulseRhythmId': ['PULSERHYTHMID', 'singleselect'], 'pulse.pulseRateMethodID': ['PULSERATEMETHODID', 'singleselect'],
+      'pulse.pulseStrengthId': ['PULSESTRENGTHID', 'singleselect'], 'glucoseAndTemp.temperatureF': ['TEMPERATUREF', 'string'],
+      'glucoseAndTemp.temperatureMethodId': ['TEMPERATUREMETHODID', 'singleselect'], 'glucoseAndTemp.glucose': ['GLUCOSE', 'string'],
+      'respiration.respirationRate': ['RESPIRATIONRATE', 'string'], 'respiration.respirationQualityId': ['RESPIRATIONQUALITYID', 'singleselect'],
+      'respiration.respirationRhythmId': ['RESPIRATIONRHYTHMID', 'singleselect'], 'glasgowComaScale.glascowComaEyesId': ['GLASCOWCOMAEYESID', 'singleselect'],
+      'glasgowComaScale.glascowComaMotorId': ['GLASCOWCOMAMOTORID', 'singleselect'], 'glasgowComaScale.glascowComaVerbalId': ['GLASCOWCOMAVERBALID', 'singleselect'],
+      'glasgowComaScale.glascowComaTotalScore': ['GLASCOWCOMATOTALSCORE', 'integer'], 'glasgowComaScale.glasgowComaQualifierIds': ['GLASGOWCOMAQUALIFIERIDS', 'multiselect'],
+      'painScaleTypeId': ['PAINSCALETYPEID', 'singleselect'], 'painScale': ['PAINSCALE', 'integer'], 'cardiacMonitoring.ecgTypeId': ['ECGTYPEID', 'singleselect'],
+      'cardiacMonitoring.ecgRhythm': ['ECGRHYTHM', 'multiselect'], 'cardiacMonitoring.ecgMethodOfInterpretationIds': ['ECGMETHODOFINTERPRETATIONIDS', 'multiselect'],
+      'cardiacMonitoring.ecgNotes': ['ECGNOTES', 'string'], 'cardiacMonitoring.isMISuspected': ['ISMISUSPECTED', 'boolean'],
+    },
     settings: { purgeHoursAfterLock: 0, probeSec: 20, heldProbeSec: 8 },
     online: navigator.onLine !== false,
     loggedOut: false,
@@ -606,6 +624,75 @@
       }
     }
   }
+  // ------------------------------------------------------------------ copy a vital
+  const VITAL_ITEM_RE = /^vitals\.vitalSigns\.\['[^']+'\]\.(.+)$/;
+  function learnFieldDefs(ops) {
+    let changed = false;
+    for (const op of ops) {
+      const m = VITAL_ITEM_RE.exec(op.address || '');
+      if (!m || !op.fieldRef) continue;
+      let path = m[1];
+      if (op.dataType === 'multiselect') path = path.replace(/\.\['[^']*'\]$/, '');
+      if (S.fieldDefs[path]) continue;
+      S.fieldDefs[path] = [op.fieldRef, op.dataType || 'string'];
+      changed = true;
+    }
+    if (changed) post('persistFieldDefs', { fieldDefs: S.fieldDefs });
+  }
+  function fmtEsoLocal(d) {
+    return `${pad(d.getMonth() + 1)}/${pad(d.getDate())}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  }
+  // The saves the app itself would make to enter this vital again, with a new time.
+  function vitalCopyOps(vital, newKey) {
+    const base = `vitals.vitalSigns.['${newKey}']`;
+    const ops = [{ verb: 'ADD', address: base, fieldRef: 'VITALSIGN', value: { vitalSignDateTime: fmtEsoLocal(new Date()) }, dataType: 'collectionWithData', isComplexType: true }];
+    const def = (p) => S.fieldDefs[p] || null;
+    const refFor = (p) => (def(p) && def(p)[0]) || p.split('.').pop().toUpperCase();
+    const typeFor = (p, v) => (def(p) && def(p)[1]) || (typeof v === 'boolean' ? 'boolean' : typeof v === 'number' ? (/id$/i.test(p) ? 'singleselect' : 'integer') : 'string');
+    const walk = (obj, path) => {
+      for (const [k, v] of Object.entries(obj)) {
+        if (v === null || v === undefined || v === '') continue;
+        if (!path && (k === 'itemId' || k === 'vitalSignDateTime')) continue;
+        const p = path ? path + '.' + k : k;
+        if (Array.isArray(v)) {
+          for (const el of v) { if (el === null || typeof el === 'object') continue; ops.push({ verb: 'ADD', address: `${base}.${p}.['${el}']`, fieldRef: refFor(p), value: el, dataType: 'multiselect' }); }
+        } else if (typeof v === 'object') walk(v, p);
+        else ops.push({ verb: 'EDIT', address: `${base}.${p}`, fieldRef: refFor(p), value: v, dataType: typeFor(p, v) });
+      }
+    };
+    walk(vital, '');
+    return ops;
+  }
+  async function currentVitals(run) {
+    const id = run.realId || run.recordId;
+    if (S.online && !S.loggedOut && !(run.tmp && !run.realId)) {
+      const res = await rawRequest({ method: 'GET', url: apiUrl(`/PatientCareRecords/${id}/Views/Vitals`), headers: headersFor(false), timeout: 15000 });
+      if (outcome(res) === 'ok') { run.views.Vitals = { text: res.text, ts: Date.now() }; cachePut('GET', apiUrl(`/PatientCareRecords/${id}/Views/Vitals`), undefined, res); }
+    }
+    const cached = run.views.Vitals;
+    if (!cached) return null;
+    const j = tryJSON(applyHeldToView(run, 'Vitals', cached.text));
+    return j && j.data && j.data.model && Array.isArray(j.data.model.vitalSigns) ? j.data.model.vitalSigns : null;
+  }
+  async function copyVital(recordId, timeText, nth) {
+    const run = S.runs[recordId];
+    if (!run) return post('event', { name: 'vitalCopied', ok: false, error: 'Run not found.' });
+    const list = await currentVitals(run);
+    if (!list) return post('event', { name: 'vitalCopied', ok: false, error: 'Could not read the vitals list.' });
+    const matches = list.filter(v => v && typeof v.vitalSignDateTime === 'string' && v.vitalSignDateTime.slice(-8) === timeText);
+    const vital = matches[nth || 0] || matches[0];
+    if (!vital) return post('event', { name: 'vitalCopied', ok: false, error: 'That vital has not been saved by ESO yet. Wait a moment and try again.' });
+    const newKey = uuid();
+    const ops = vitalCopyOps(vital, newKey);
+    const id = run.realId || run.recordId;
+    const res = await handleAutosave({ type: 'autosave', recordId: run.recordId, scope: 'vitals' },
+      { method: 'POST', url: apiUrl(`/PatientCareRecords/${id}/autosave?scope=vitals`), headers: headersFor(true), body: JSON.stringify(ops) });
+    const o = outcome(res);
+    if (o === 'ok') { log(run, `Copied the ${timeText} vital as a new entry (${ops.length - 1} fields).`, 'good'); return post('event', { name: 'vitalCopied', ok: true }); }
+    log(run, `Could not copy the ${timeText} vital: ${summarize(res)}`, 'error');
+    post('event', { name: 'vitalCopied', ok: false, error: summarize(res) });
+  }
+
   async function handleAutosave(kind, req) {
     const run = getRun(kind.recordId);
     touchCurrent(run);
@@ -617,6 +704,7 @@
     if (run.batches.some(b => b.status === 'held' && b.scope === kind.scope && JSON.stringify(b.ops) === opsText)) {
       return fakeOk(FAKE_OK_TEXT, req.url);
     }
+    learnFieldDefs(ops);
     const batch = { seq: run.nextSeq++, ts: Date.now(), scope: kind.scope, ops, status: 'pending', attempts: 0 };
     run.batches.push(batch);
     const hold = (why) => {
@@ -944,6 +1032,7 @@
       if (type === 'init') {
         mergeStored(payload.runs);
         if (payload.templates && payload.templates.views) S.templates = payload.templates;
+        if (payload.fieldDefs && typeof payload.fieldDefs === 'object') for (const [k, v] of Object.entries(payload.fieldDefs)) if (Array.isArray(v) && !S.fieldDefs[k]) S.fieldDefs[k] = v;
         if (payload.tabRequests && typeof payload.tabRequests === 'object') {
           for (const [view, reqs] of Object.entries(payload.tabRequests)) if (Array.isArray(reqs)) for (const r of reqs) if (r && r.url) noteTabRequest(view, r.method || 'GET', r.url, r.body);
         }
@@ -963,6 +1052,7 @@
         else if (a.name === 'forget') { delete S.runs[a.recordId]; if (S.currentRecordId === a.recordId) S.currentRecordId = null; emit(); }
         else if (a.name === 'status') { emit(); }
         else if (a.name === 'note') { const run = S.runs[a.recordId]; if (run) log(run, String(a.msg || ''), a.level || 'info'); }
+        else if (a.name === 'copyVital') { copyVital(a.recordId || S.currentRecordId, String(a.time || ''), Number(a.nth) || 0); }
       }
     } catch (e) { log(null, 'ESO Save internal error: ' + (e && e.message), 'error'); }
   });

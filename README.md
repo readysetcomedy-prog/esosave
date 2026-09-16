@@ -19,6 +19,8 @@ to bad signal or a hung page.
   that was sent and when.
 - **Signature images as a backup.** Every signature pad is snapshotted as a PNG when the pen lifts,
   in case one never makes it into ESO.
+- **Copy a vital.** A small copy button in front of each saved vital re-enters it as a new vital with
+  the current time, every other value the same.
 
 Nothing is invented. The extension only replays what ESO's own app tried to send.
 

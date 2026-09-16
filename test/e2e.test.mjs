@@ -255,6 +255,41 @@ test('the page picker opens from the panel with Incident and Narrative on, warns
   await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.pick [data-act=cancel]').click());
 });
 
+test('a copy button on a saved vital re-enters it as a new vital with the current time', async () => {
+  const id = await freshRun();
+  const k = await app(() => window.app.uuid());
+  await app((k) => {
+    window.app.add('vitals', `vitals.vitalSigns.['${k}']`, { vitalSignDateTime: '09/16/2026 15:39:12' });
+    window.app.edit('vitals', `vitals.vitalSigns.['${k}'].bloodPressure.bloodPressureSystolic`, '120');
+    window.app.edit('vitals', `vitals.vitalSigns.['${k}'].bloodPressure.bloodPressureDiastolic`, '80');
+    window.app.edit('vitals', `vitals.vitalSigns.['${k}'].pulse.pulseRate`, '72');
+    window.app.edit('vitals', `vitals.vitalSigns.['${k}'].glasgowComaScale.glascowComaTotalScore`, 15, 'integer');
+    window.app.addScalar('vitals', `vitals.vitalSigns.['${k}'].glasgowComaScale.glasgowComaQualifierIds.['5690']`, 5690);
+  }, k);
+  await waitFor(async () => (await T.record(id)).tree.vitals?.vitalSigns?.[0]?.pulse?.pulseRate === '72', { label: 'vital saved' });
+  await app(() => window.app.openTab('Vitals'));
+  await waitFor(() => T.page.evaluate(() => !!document.querySelector('button.esosave-copy')), { label: 'copy button injected' });
+  const btn = await T.page.evaluate(() => { const b = document.querySelector('button.esosave-copy'); return { time: b.dataset.time, next: b.nextElementSibling.textContent }; });
+  assert.equal(btn.time, '15:39:12');
+  assert.equal(btn.next, '15:39:12', 'button sits right in front of the time');
+  await T.page.click('button.esosave-copy');
+  const rec = await waitFor(async () => { const r = await T.record(id); return r.tree.vitals.vitalSigns.length === 2 ? r : null; }, { label: 'second vital on ESO', timeout: 20000 });
+  const [a, b] = rec.tree.vitals.vitalSigns;
+  assert.equal(b.bloodPressure.bloodPressureSystolic, '120');
+  assert.equal(b.bloodPressure.bloodPressureDiastolic, '80');
+  assert.equal(b.pulse.pulseRate, '72');
+  assert.equal(b.glasgowComaScale.glascowComaTotalScore, 15);
+  assert.deepEqual(b.glasgowComaScale.glasgowComaQualifierIds, [5690]);
+  assert.notEqual(b.vitalSignDateTime, a.vitalSignDateTime, 'new time');
+  assert.notEqual(b.itemId, a.itemId);
+  // the field naming matched what the app itself uses
+  const op = rec.ops.find(o => /pulse\.pulseRate$/.test(o.address) && o.address.includes(b.itemId));
+  assert.equal(op.fieldRef, 'PULSERATE'); assert.equal(op.dataType, 'string');
+  // the tab was refreshed so the new row shows, with its own copy button
+  await waitFor(() => T.page.evaluate(() => document.querySelectorAll('button.esosave-copy').length === 2), { label: 'two rows with copy buttons' });
+  await waitFor(() => T.page.evaluate(() => !document.getElementById('esosave-host').shadowRoot.querySelector('.veil')), { label: 'overlay gone' });
+});
+
 test('locking a run marks it and it is cleared from the device after the retention window', async () => {
   const id = await app(() => window.app.recordId);
   await app(() => window.app.lock());

@@ -74,7 +74,7 @@
     settings = data.settings;
     await purgeLocked(settings);
     const fresh = await loadAll();
-    toPage('init', { runs: fresh.runs, templates: fresh.templates, settings, tabRequests: fresh.all.tabRequests || null });
+    toPage('init', { runs: fresh.runs, templates: fresh.templates, settings, tabRequests: fresh.all.tabRequests || null, fieldDefs: fresh.all.fieldDefs || null });
     setInterval(() => purgeLocked(settings), 10 * 60 * 1000);
   })();
   // The page script may have been injected before our listener existed; ask for a status once ready.
@@ -83,6 +83,10 @@
     const { type, payload } = ev.data;
     if (type === 'persistRun' && payload && payload.run) {
       await sset({ ['run:' + payload.run.recordId]: payload.run });
+    } else if (type === 'persistFieldDefs' && payload && payload.fieldDefs) {
+      await sset({ fieldDefs: payload.fieldDefs });
+    } else if (type === 'event' && payload && payload.name === 'vitalCopied') {
+      onVitalCopied(payload);
     } else if (type === 'persistTabRequests' && payload && payload.tabRequests) {
       await sset({ tabRequests: payload.tabRequests });
     } else if (type === 'persistTemplates') {
@@ -479,4 +483,72 @@
     render();
     shadow.appendChild(wrap);
   }
+
+  // ---------------------------------------------------------------- copy button on saved vitals
+  // Each saved vital row shows its time (HH:MM:SS) in the Vitals tab. A small copy button goes in
+  // front of it; tapping it re-enters that vital's values as a new row with the current time.
+  const TIME_RE = /^\d{1,2}:\d{2}:\d{2}$/;
+  let copyBusy = false;
+  function decorateVitalRows() {
+    if (!lastStatus || !lastStatus.lastView || lastStatus.lastView.view !== 'Vitals' || !lastStatus.currentRecordId) return;
+    const els = document.querySelectorAll('td, div, span, p, strong, b');
+    const seen = {};
+    for (const el of els) {
+      if (host && host.contains(el)) continue;
+      if (el.children.length > 1) continue;
+      const text = (el.textContent || '').trim();
+      if (!TIME_RE.test(text)) continue;
+      if (el.closest('input, textarea, select, button, [contenteditable]')) continue;
+      if (el.querySelector && el.querySelector('input, textarea, select')) continue;
+      const time = text.padStart(8, '0');
+      const nth = seen[time] = (seen[time] || 0);
+      seen[time]++;
+      let btn = el.previousElementSibling && el.previousElementSibling.classList && el.previousElementSibling.classList.contains('esosave-copy') ? el.previousElementSibling : null;
+      if (btn) { btn.dataset.nth = String(nth); continue; }
+      btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'esosave-copy';
+      btn.title = 'Copy this vital as a new entry with the current time';
+      btn.textContent = '⧉';
+      btn.dataset.time = time; btn.dataset.nth = String(nth);
+      btn.setAttribute('style', 'all:unset;cursor:pointer;display:inline-block;margin:0 8px 0 4px;padding:2px 8px;border-radius:6px;background:#15803d;color:#fff;font-size:15px;line-height:1.2;vertical-align:middle;');
+      btn.addEventListener('click', (e) => {
+        e.preventDefault(); e.stopPropagation();
+        if (copyBusy) return;
+        copyBusy = true;
+        showVeilMessage('Copying vital…', 'Entering the same values as a new vital with the current time.');
+        toPage('action', { name: 'copyVital', recordId: lastStatus.currentRecordId, time: btn.dataset.time, nth: Number(btn.dataset.nth) });
+        setTimeout(() => { if (copyBusy) { copyBusy = false; hideVeil(); } }, 20000);
+      }, true);
+      el.parentNode.insertBefore(btn, el);
+    }
+  }
+  function showVeilMessage(title, text) {
+    hideVeil();
+    if (!shadow) return;
+    veil = document.createElement('div');
+    veil.className = 'veil';
+    veil.innerHTML = `<div class="box"><div class="spin"></div><h2>${esc(title)}</h2><div class="why">${esc(text)}</div></div>`;
+    shadow.appendChild(veil);
+  }
+  async function onVitalCopied(p) {
+    if (!p.ok) { copyBusy = false; hideVeil(); alert('ESO Save: ' + (p.error || 'could not copy the vital')); return; }
+    // The app only shows what it has loaded: step off the tab and back so it re-reads the list.
+    const id = lastStatus && lastStatus.currentRecordId;
+    const away = tabElement('INCIDENT') || tabElement('PATIENT');
+    const back = tabElement('VITALS');
+    if (away && back) {
+      away.click();
+      await waitViewLoaded('Incident', id, 1500).catch(() => {});
+      back.click();
+      await waitViewLoaded('Vitals', id, 3000).catch(() => {});
+    }
+    copyBusy = false;
+    hideVeil();
+    setTimeout(decorateVitalRows, 300);
+  }
+  const rowObserver = new MutationObserver(() => { clearTimeout(rowObserver._t); rowObserver._t = setTimeout(decorateVitalRows, 150); });
+  const startRowObserver = () => { if (document.body) rowObserver.observe(document.body, { childList: true, subtree: true, characterData: true }); };
+  if (document.body) startRowObserver(); else document.addEventListener('DOMContentLoaded', startRowObserver);
+  setInterval(decorateVitalRows, 2000);
 })();
