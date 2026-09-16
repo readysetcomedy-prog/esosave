@@ -265,7 +265,7 @@
     const s = lastStatus || { runs: [], online: true };
     const all = await sget(null);
     const parts = [];
-    parts.push(`<h1><span>ESO Save</span><span class="x" data-act="close">×</span></h1>`);
+    parts.push(`<h1><span>ESO Save <span class="muted" style="font-weight:400;font-size:11px">v${esc(api.runtime.getManifest().version)}</span></span><span class="x" data-act="close">×</span></h1>`);
     parts.push(`<div class="muted">${s.online ? 'Signal OK' : 'NO SIGNAL'}${s.loggedOut ? ' · logged out' : ''}${s.pushing ? ' · pushing' : ''} · ${s.runs.filter(r => r.counts.total || r.pendingCreate).length} run${s.runs.filter(r => r.counts.total || r.pendingCreate).length === 1 ? '' : 's'} on this device` +
       `${s.hasTemplates ? '' : ' · <span title="Start one run with signal so a blank-run template is saved">no offline new-run template yet</span>'}</div>`);
     parts.push(`<div class="actions"><button class="a" data-act="push">Push all held changes now</button><button class="a sec" data-act="export-all">Export everything</button><button class="a sec" data-act="settings">Settings</button></div>`);
