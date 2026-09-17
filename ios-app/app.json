@@ -8,7 +8,7 @@
     "userInterfaceStyle": "light",
     "ios": {
       "bundleIdentifier": "com.ruralmedems.esosave",
-      "appleTeamId": "REPLACE_WITH_YOUR_TEAM_ID",
+      "appleTeamId": "UG9SN323ZU",
       "supportsTablet": true,
       "buildNumber": "1",
       "infoPlist": {
