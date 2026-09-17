@@ -43,7 +43,7 @@
   const sget = (keys) => new Promise(res => storage.get(keys, (v) => res(v || {})));
   const sset = (obj) => new Promise(res => storage.set(obj, () => res()));
   const sremove = (keys) => new Promise(res => storage.remove(keys, () => res()));
-  const DEFAULT_SETTINGS = { purgeHoursAfterLock: 0, probeSec: 20, heldProbeSec: 8, warmTabs: true, cardCollapsed: false, showTimes: true, sendPrompt: true, unsentList: true, quickHistory: true, quickMeds: true, quickAllergies: true, quickAcuity: true };
+  const DEFAULT_SETTINGS = { purgeHoursAfterLock: 0, probeSec: 20, heldProbeSec: 8, warmTabs: true, cardCollapsed: false, showTimes: true, sendPrompt: true, unsentList: true, quickHistory: true, quickMeds: true, quickAllergies: true, quickAcuity: true, quickDelays: true };
 
   async function loadAll() {
     const all = await sget(null);
@@ -150,6 +150,9 @@
     .quick .sw.red { background: #dc2626; } .quick .sw.yellow { background: #facc15; } .quick .sw.green { background: #16a34a; }
     .quick .sw.cur { border-color: #0f172a; box-shadow: 0 0 0 2px #fff, 0 0 0 4px #0f172a; }
     .quick .sw.busy { opacity: .5; cursor: wait; }
+    .quick .allnone { position: fixed; pointer-events: auto; height: 30px; padding: 0 14px; border-radius: 8px; border: 1px solid #15803d; background: #fff; color: #15803d; font: inherit; font-weight: 700; cursor: pointer; white-space: nowrap; box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+    .quick .allnone:hover { background: #f0fdf4; }
+    .quick .allnone.done { background: #dcfce7; border-color: #86efac; color: #166534; cursor: default; }
     .times { position: fixed; z-index: 2147483639; display: flex; gap: 4px; align-items: stretch; pointer-events: none; font: 12px/1.15 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; white-space: nowrap; overflow: hidden; }
     .times .t { display: flex; flex-direction: column; align-items: center; justify-content: center; min-width: 46px; padding: 3px 6px; border-radius: 7px; background: rgba(255,255,255,.10); color: #fff; }
     .times .t .l { font-size: 10px; letter-spacing: .04em; text-transform: uppercase; opacity: .75; }
@@ -317,6 +320,7 @@
         `<label class="s"><input type="checkbox" id="sendprompt" ${settings.sendPrompt === false ? '' : 'checked'}> When a run is locked, offer to fax or email it to the destination if it has not been sent yet</label>` +
         `<label class="s"><input type="checkbox" id="unsentlist" ${settings.unsentList === false ? '' : 'checked'}> Keep a list of locked runs from the last 15 days that have a fax or email destination but were never sent</label>` +
         `<div class="s" style="margin-top:8px;font-weight:700">Quick buttons</div>` +
+        `<label class="s"><input type="checkbox" id="qdelays" ${settings.quickDelays === false ? '' : 'checked'}> Delays: one "All: None/No Delay" button above the delay fields (Incident tab) that presses ESO's own None button on every delay still empty</label>` +
         `<label class="s"><input type="checkbox" id="qhistory" ${settings.quickHistory === false ? '' : 'checked'}> History: one-tap chips for common conditions under Add History (Patient tab)</label>` +
         `<label class="s"><input type="checkbox" id="qmeds" ${settings.quickMeds === false ? '' : 'checked'}> Medications: chips for common home meds under Add Medications (Patient tab)</label>` +
         `<label class="s"><input type="checkbox" id="qallergies" ${settings.quickAllergies === false ? '' : 'checked'}> Allergies: chips for common allergies under Add Allergies (Patient tab)</label>` +
@@ -381,6 +385,7 @@
       settings.showTimes = !!panel.querySelector('#times').checked;
       settings.sendPrompt = !!panel.querySelector('#sendprompt').checked;
       settings.unsentList = !!panel.querySelector('#unsentlist').checked;
+      settings.quickDelays = !!panel.querySelector('#qdelays').checked;
       settings.quickHistory = !!panel.querySelector('#qhistory').checked;
       settings.quickMeds = !!panel.querySelector('#qmeds').checked;
       settings.quickAllergies = !!panel.querySelector('#qallergies').checked;
@@ -908,7 +913,15 @@
   }
 
   // ---- acuity: red / yellow / green next to the label, opens ESO's picker and picks the colour
+  const ACUITY_REF = { 'Initial Patient Acuity': 'INITIALPATIENTACUITYID', 'Final Patient Acuity': 'FINALPATIENTACUITYID' };
   function acuityField(label) {
+    // ESO marks every field with its ref; the click indicator inside opens the picker
+    const f = document.querySelector(`eso-field[data-field-ref="${ACUITY_REF[label]}"]`);
+    if (f && visible(f)) {
+      const lab = f.querySelector('label') || f;
+      const ctl = f.querySelector('.shelf-click-indicator') || f.querySelector('.field-area') || f;
+      return { lab, box: f, ctl };
+    }
     const lab = findByText('label, span, div, p, legend', label, { notInShelf: true });
     if (!lab) return null;
     // the field block: nearest ancestor that is wide and holds a picker control
@@ -973,8 +986,53 @@
     }
     quickBusy = false; layoutAcuity();
   }
+  // ---- delays: one button above the delay fields presses ESO's own "None/No Delay" on each empty one
+  const DELAY_REFS = ['DISPATCHDELAYS', 'RESPONSEDELAYS', 'SCENEDELAYS', 'TRANSPORTDELAYS', 'TURNAROUNDDELAYS'];
+  const delayField = (ref) => { const f = document.querySelector(`eso-field[data-field-ref="${ref}"]`); return f && visible(f) ? f : null; };
+  const delayEmpty = (f) => { const v = f.querySelector('.display-value'); return !v || !norm(v.textContent); };
+  let delaysDoneAt = 0;
+  function layoutDelays() {
+    const run = currentRun();
+    const first = settings.quickDelays === false || !run || run.locked || !onTab('Incident') || shelfOpen() ? null : delayField(DELAY_REFS[0]);
+    if (!first) { dropQuick('d:'); return; }
+    const fields = DELAY_REFS.map(delayField).filter(Boolean);
+    const empty = fields.filter(delayEmpty).length;
+    if (!empty && Date.now() - delaysDoneAt > 2500) { dropQuick('d:'); return; }
+    const r = first.getBoundingClientRect();
+    const btn = quickEl('d:all', () => {
+      const b = document.createElement('button'); b.type = 'button'; b.className = 'allnone'; b.title = 'Press None/No Delay on every delay field that is still empty';
+      b.addEventListener('pointerdown', (e) => e.stopPropagation());
+      b.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); allNoDelay(); });
+      return b;
+    });
+    const done = !empty;
+    btn.classList.toggle('done', done);
+    btn.textContent = done ? '✓ All: None/No Delay' : `All: None/No Delay${empty < fields.length ? ` (${empty} left)` : ''}`;
+    btn.style.visibility = 'hidden'; btn.style.display = 'block';
+    const w = btn.getBoundingClientRect().width || 160;
+    btn.style.left = Math.round(r.right - w) + 'px';
+    btn.style.top = Math.round(r.top - 36) + 'px';
+    btn.style.visibility = '';
+  }
+  async function allNoDelay() {
+    if (quickBusy) return;
+    quickBusy = true;
+    let pressed = 0;
+    try {
+      for (const ref of DELAY_REFS) {
+        const f = delayField(ref);
+        if (!f || !delayEmpty(f)) continue;
+        const none = f.querySelector('button.none-or-pn-btn');
+        if (!none) continue;
+        none.click(); pressed++;
+        await wait(120);
+      }
+    } finally { quickBusy = false; delaysDoneAt = Date.now(); layoutDelays(); }
+    if (!pressed) return;
+  }
   function layoutQuick() {
     for (const gk of Object.keys(CHIP_GROUPS)) { try { layoutChips(gk); } catch (e) { /* keep going */ } }
+    try { layoutDelays(); } catch (e) { /* keep going */ }
     try { layoutAcuity(); } catch (e) { /* keep going */ }
   }
 

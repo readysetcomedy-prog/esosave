@@ -582,6 +582,25 @@ test('quick chips for medications and allergies work the same way, and every qui
   await app(() => document.querySelector('shelf-panel header button').click());
 });
 
+test('quick delays: one button presses ESO\'s own None/No Delay on every delay still empty, and leaves a set one alone', async () => {
+  const id = await freshRun();
+  // one delay already answered by hand
+  await app(() => { window.app.addScalar('incident', "incident.additionalFactors.sceneDelays.['365']", 365); });
+  await waitFor(async () => ((await T.record(id)).tree.incident?.additionalFactors?.sceneDelays || []).length === 1, { label: 'scene delay saved' });
+  await app(() => window.app.openTab('Incident'));
+  const btn = () => T.page.evaluate(() => { const b = document.getElementById('esosave-host').shadowRoot.querySelector('.quick .allnone'); return b ? { text: b.textContent, cls: b.className, rect: b.getBoundingClientRect().toJSON() } : null; });
+  const b0 = await waitFor(async () => { const b = await btn(); return b && /\(4 left\)/.test(b.text) ? b : null; }, { label: 'All: None/No Delay button, counting the four still empty' });
+  const field = await T.page.evaluate(() => document.querySelector('eso-field[data-field-ref=DISPATCHDELAYS]').getBoundingClientRect().toJSON());
+  assert.ok(b0.rect.bottom <= field.top && Math.abs(b0.rect.right - field.right) < 4, 'sits just above the first delay field, right-aligned');
+  await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.quick .allnone').click());
+  const rec = await waitFor(async () => { const r = await T.record(id); const a = r.tree.incident?.additionalFactors || {}; return a.dispatchDelays && a.responseDelays && a.transportDelays && a.turnAroundDelays ? r : null; }, { label: 'four delays saved by the app', timeout: 15000 });
+  const a = rec.tree.incident.additionalFactors;
+  assert.deepEqual([a.dispatchDelays, a.responseDelays, a.transportDelays, a.turnAroundDelays].map(x => x.map(Number)), [[6430], [357], [385], [399]]);
+  assert.deepEqual(a.sceneDelays.map(Number), [365], 'the hand-entered delay was left alone');
+  await waitFor(async () => { const b = await btn(); return b && /done/.test(b.cls); }, { label: 'button shows done' });
+  await waitFor(async () => !(await btn()), { label: 'button gone once every delay is answered', timeout: 8000 });
+});
+
 test('quick acuity: red, yellow, green next to each acuity field, one tap picks it in ESO\'s list', async () => {
   const id = await app(() => window.app.recordId);
   await app(() => window.app.openTab('Narrative'));
@@ -590,7 +609,10 @@ test('quick acuity: red, yellow, green next to each acuity field, one tap picks 
   const lab = await T.page.evaluate(() => document.querySelector('#narrative label').getBoundingClientRect().toJSON());
   const first = (await sws())[0];
   assert.ok(first.rect.left > lab.right && Math.abs(first.rect.top + first.rect.height / 2 - (lab.top + lab.height / 2)) < 8, 'swatches sit right after the label, on its line');
-  const tapSw = (i) => T.page.evaluate((n) => document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .sw')[n].click(), i);
+  const tapSw = async (i) => {
+    await waitFor(() => T.page.evaluate((n) => { const b = document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .sw')[n]; return !!b && !/busy/.test(b.className); }, i), { label: 'swatch free' });
+    await T.page.evaluate((n) => document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .sw')[n].click(), i);
+  };
   await tapSw(0); // initial red
   await waitFor(async () => (await T.record(id)).tree.narrative?.patientComplaint?.initialPatientAcuityId === 10586, { label: 'initial red saved by the app' });
   assert.equal(await app(() => document.getElementById('ia').textContent), 'Critical (Red)');

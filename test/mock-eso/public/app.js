@@ -67,6 +67,8 @@
       render();
       if (view === 'Vitals') renderVitals(out.body);
       document.getElementById('patient').style.display = view === 'Patient' ? 'block' : 'none';
+      document.getElementById('incident').style.display = view === 'Incident' ? 'block' : 'none';
+      if (view === 'Incident') renderDelays(out.body);
       document.getElementById('narrative').style.display = view === 'Narrative' ? 'block' : 'none';
       if (view === 'Patient') renderHistory(out.body);
       if (view === 'Narrative') renderAcuity(out.body);
@@ -128,6 +130,22 @@
     document.getElementById('ia').textContent = (ACUITY.initial.find(a => a[0] === app.acuity.initial) || [0, ''])[1];
     document.getElementById('fa').textContent = (ACUITY.final.find(a => a[0] === app.acuity.final) || [0, ''])[1];
   }
+  // delays: ESO's own None/No Delay button is shown while the field is empty and saves a multiselect ADD
+  const DELAY_ADDR = { DISPATCHDELAYS: 'dispatchDelays', RESPONSEDELAYS: 'responseDelays', SCENEDELAYS: 'sceneDelays', TRANSPORTDELAYS: 'transportDelays', TURNAROUNDDELAYS: 'turnAroundDelays' };
+  const DELAY_NAMES = { 6430: 'None/No Delay', 357: 'None/No Delay', 372: 'None/No Delay', 385: 'None/No Delay', 399: 'None/No Delay', 365: 'Crowd' };
+  function renderDelays(body) {
+    const m = body && body.data && body.data.model && body.data.model.additionalFactors;
+    for (const f of document.querySelectorAll('#incident eso-field')) {
+      const ids = (m && m[DELAY_ADDR[f.dataset.fieldRef]]) || [];
+      f.querySelector('.display-value').textContent = ids.map(id => DELAY_NAMES[id] || id).join(', ');
+      f.querySelector('.none-or-pn-btn').style.display = ids.length ? 'none' : '';
+    }
+  }
+  document.querySelectorAll('#incident .none-or-pn-btn').forEach(b => b.addEventListener('click', () => {
+    const f = b.closest('eso-field'); const id = Number(f.dataset.list);
+    app.addScalar('incident', `incident.additionalFactors.${DELAY_ADDR[f.dataset.fieldRef]}.['${id}']`, id);
+    f.querySelector('.display-value').textContent = 'None/No Delay'; b.style.display = 'none';
+  }));
   const shelfHost = document.getElementById('shelfhost');
   function openShelf({ title, items, multi, checked, onOk, onPick }) {
     app.shelfOpens++;
