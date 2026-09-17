@@ -416,20 +416,38 @@
   let lastInputAt = 0;
   for (const t of ['keydown', 'pointerdown', 'touchstart']) document.addEventListener(t, (e) => { if (!host || !e.composedPath().includes(host)) lastInputAt = Date.now(); }, true);
 
+  // The tab strip: the clickable control whose whole label is exactly this word, in the row that
+  // also holds the other tabs. A control like "QUICK VITALS" has an inner piece reading "VITALS",
+  // so the match is made on the whole control, not on a fragment.
+  const ALL_LABELS = Object.values(TAB_LABELS);
   function tabElement(label) {
     const want = label.toUpperCase();
-    const all = document.querySelectorAll('a, button, [role="tab"], li, div, span');
-    let best = null;
-    for (const el of all) {
+    const text = (el) => (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim().toUpperCase();
+    const candidates = [];
+    for (const el of document.querySelectorAll('a, button, [role="tab"], li, div, span')) {
       if (host && host.contains(el)) continue;
-      const text = (el.innerText || el.textContent || '').trim().toUpperCase();
-      if (text !== want) continue;
+      if (text(el) !== want) continue;
       const r = el.getBoundingClientRect();
       if (!r.width || !r.height || r.top > 260) continue;
-      if (!best || el.contains(best) === false && best.contains(el)) best = el; // prefer the innermost match
+      const ctl = el.closest('a, button, [role="tab"], li') || el;
+      if (text(ctl) !== want) continue; // part of a longer label, e.g. QUICK VITALS
+      candidates.push(ctl);
     }
-    if (!best) return null;
-    return best.closest('a, button, [role="tab"], li') || best;
+    if (!candidates.length) return null;
+    // prefer the one whose row also holds the other tab labels
+    const score = (ctl) => {
+      // how many other tab labels sit in the nearest container that holds any of them
+      let a = ctl.parentElement;
+      for (let i = 0; a && a !== document.body && i < 5; a = a.parentElement, i++) {
+        const t = text(a);
+        const n = ALL_LABELS.filter(l => l !== want && new RegExp('(^|\\s)' + l + '(\\s|$)').test(t)).length;
+        if (n) return n;
+      }
+      return 0;
+    };
+    const uniq = [...new Set(candidates)];
+    uniq.sort((x, y) => score(y) - score(x));
+    return uniq[0];
   }
   function currentTabLabel(s) {
     const v = s.lastView && s.lastView.recordId === s.currentRecordId ? s.lastView.view : 'Incident';

@@ -301,6 +301,8 @@ test('a copy button on a saved vital re-enters it as a new vital with the curren
   assert.ok(!rec.ops.some(o => o.address.includes(b.itemId) && /mobileToMobile|softDeleted|fileId|imageType/.test(o.address)), 'no bookkeeping fields copied');
   // the tab was refreshed so the new row shows, with its own copy button; card still green
   await waitFor(async () => (await buttons()).length === 2, { label: 'two rows with copy buttons' });
+  assert.equal(await app(() => window.app.quickOpened), 0, 'the refresh clicked the real tabs, not the QUICK VITALS control or a lookalike');
+  assert.deepEqual((await app(() => window.app.clicks)).slice(-2), ['Incident', 'Vitals']);
   await waitFor(() => T.page.evaluate(() => !document.getElementById('esosave-host').shadowRoot.querySelector('.veil')), { label: 'overlay gone' });
   const s = await T.status();
   assert.equal(s.online, true); assert.equal(s.held, 0);

@@ -81,6 +81,9 @@
   };
   setInterval(() => app.flush(), app.autosaveMs);
   app.clicks = [];
+  app.quickOpened = 0;
+  document.getElementById('quick').addEventListener('click', () => { app.quickOpened++; });
+  document.getElementById('quickincident').addEventListener('click', () => { app.quickOpened++; });
   document.getElementById('tabs').addEventListener('click', (e) => {
     const t = e.target.closest('.tab'); if (!t) return;
     app.clicks.push(t.dataset.view);
