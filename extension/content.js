@@ -143,7 +143,8 @@
     .times .t .l { font-size: 10px; letter-spacing: .04em; text-transform: uppercase; opacity: .75; }
     .times .t .v { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: 1px; }
     .times .t.empty .v { opacity: .35; font-weight: 400; }
-    .times.tight { gap: 3px; } .times.tight .t { min-width: 36px; padding: 2px 3px; } .times.tight .t .v { font-size: 13px; } .times.tight .t .l { font-size: 9px; }
+    .times.tight { gap: 3px; } .times.tight .t { min-width: 40px; padding: 2px 3px; } .times.tight .t .v { font-size: 13px; } .times.tight .t .l { font-size: 9px; }
+    .times.micro { gap: 2px; } .times.micro .t { min-width: 33px; padding: 1px 2px; border-radius: 5px; } .times.micro .t .v { font-size: 11px; } .times.micro .t .l { font-size: 7px; letter-spacing: 0; }
     .copylayer .esosave-copy { position: fixed; pointer-events: auto; width: 26px; height: 22px; margin: 0; padding: 0; border: 0; border-radius: 6px; background: #15803d; color: #fff; font: 15px/22px system-ui, sans-serif; text-align: center; cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,.35); }
     .copylayer .esosave-copy:hover { background: #166534; }
     @keyframes pulse { 0%,100% { filter: brightness(1); } 50% { filter: brightness(1.25); } }
@@ -618,6 +619,27 @@
     if (bar.rect.right - cursor > (best ? best[1] - best[0] : 0)) best = [cursor, bar.rect.right];
     return best;
   }
+  // Make a little room in ESO's bar: cap the widest text on the left (the patient name) and shrink
+  // the label on the right ("POSITIVE IDENTIFICATION"). Undone the moment there is room again.
+  const squeezed = new Map(); // element -> original inline style
+  function squeezeNeighbours(bar, on) {
+    if (!on) { for (const [el, st] of squeezed) el.setAttribute('style', st); squeezed.clear(); return false; }
+    if (squeezed.size) return false;
+    const mid = bar.rect.left + bar.rect.width / 2;
+    const leaves = [];
+    for (const el of bar.el.querySelectorAll('*')) {
+      if (host && host.contains(el)) continue;
+      if (!Array.from(el.childNodes).some(n => n.nodeType === 3 && n.textContent.trim())) continue;
+      const r = el.getBoundingClientRect();
+      if (!r.width || r.bottom <= bar.rect.top || r.top >= bar.rect.bottom) continue;
+      leaves.push({ el, r, text: el.textContent.trim() });
+    }
+    const label = leaves.find(l => /^POSITIVE\s+ID/i.test(l.text));
+    if (label) { squeezed.set(label.el, label.el.getAttribute('style') || ''); label.el.style.fontSize = '8px'; label.el.style.lineHeight = '1.1'; label.el.style.maxWidth = '54px'; label.el.style.letterSpacing = '0'; }
+    const left = leaves.filter(l => l.r.right < mid && l.r.width > 60 && !/^PATIENT$/i.test(l.text)).sort((a, b) => b.r.width - a.r.width)[0];
+    if (left) { squeezed.set(left.el, left.el.getAttribute('style') || ''); left.el.style.maxWidth = '110px'; left.el.style.overflow = 'hidden'; left.el.style.textOverflow = 'ellipsis'; left.el.style.whiteSpace = 'nowrap'; left.el.style.display = 'inline-block'; left.el.style.verticalAlign = 'bottom'; }
+    return squeezed.size > 0;
+  }
   function renderTimes() {
     if (!shadow) return;
     const s = lastStatus;
@@ -625,7 +647,7 @@
     // only while the page is actually inside that run (ESO keeps the run id in the address)
     const inRun = run && (location.href.includes(run.recordId) || (run.realId && location.href.includes(run.realId)));
     const bar = settings.showTimes !== false && inRun && !run.locked ? topBarRect() : null;
-    if (!bar) { if (timesEl) { timesEl.remove(); timesEl = null; timesKey = ''; } return; }
+    if (!bar) { if (timesEl) { timesEl.remove(); timesEl = null; timesKey = ''; } if (squeezed.size) squeezeNeighbours(null, false); return; }
     if (!timesEl) { timesEl = document.createElement('div'); timesEl.className = 'times'; shadow.appendChild(timesEl); }
     const times = run.times || {};
     const key = TIME_FIELDS.map(([k]) => times[k] || '').join('|');
@@ -633,11 +655,16 @@
       timesKey = key;
       timesEl.innerHTML = TIME_FIELDS.map(([k, l]) => `<div class="t${times[k] ? '' : ' empty'}"><span class="l">${l}</span><span class="v">${esc(times[k] || '--:--')}</span></div>`).join('');
     }
-    // centred in the empty stretch of the bar
-    const gap = topBarGap(bar);
-    const room = gap ? gap[1] - gap[0] - 24 : 0;
-    if (room < 200) { timesEl.style.display = 'none'; return; }
-    timesEl.classList.toggle('tight', room < 7 * 54);
+    // centred in the empty stretch of the bar; on a narrow screen the tiles shrink, and if they
+    // still do not fit, ESO's neighbours (patient name, positive ID label) give up a little width
+    let gap = topBarGap(bar);
+    let room = gap ? gap[1] - gap[0] - 24 : 0;
+    const NEED = { full: 7 * 54 + 6 * 4, tight: 7 * 40 + 6 * 3, micro: 7 * 33 + 6 * 2 };
+    if (room < NEED.tight) { if (squeezeNeighbours(bar, true)) { gap = topBarGap(bar); room = gap ? gap[1] - gap[0] - 24 : 0; } }
+    else squeezeNeighbours(bar, false);
+    if (room < NEED.micro - 20) { timesEl.style.display = 'none'; return; }
+    timesEl.classList.toggle('tight', room < NEED.full && room >= NEED.tight);
+    timesEl.classList.toggle('micro', room < NEED.tight);
     timesEl.style.display = 'flex';
     timesEl.style.top = Math.round(bar.rect.top + 6) + 'px';
     timesEl.style.height = Math.round(bar.rect.height - 12) + 'px';

@@ -26,7 +26,7 @@ test('extension installs on the page and sees the run', async () => {
   const st = await T.status();
   assert.equal(st.online, true);
   assert.equal(st.hasToken, true);
-  const bar = await waitFor(async () => { const b = await T.bar(); return b && /good/.test(b.cls) ? b : null; }, { label: 'bar green' });
+  const bar = await waitFor(async () => { const b = await T.bar(); return b && /good/.test(b.cls) && /TEST-0001/.test(b.text) ? b : null; }, { label: 'bar green with the incident number' });
   assert.match(bar.text, /TEST-0001/);
 });
 
@@ -374,7 +374,7 @@ test('the call times show in the top bar as they are entered, and the setting hi
   const bar = await T.page.evaluate(() => document.getElementById('topbar').getBoundingClientRect().toJSON());
   assert.ok(s0.rect.top >= bar.top && s0.rect.bottom <= bar.bottom, 'inside the top bar');
   // centred in the gap between what ESO shows on the left and on the right of the bar
-  const ends = await T.page.evaluate(() => { const [l, r] = document.querySelectorAll('#topbar > span'); return { l: l.getBoundingClientRect().right, r: r.getBoundingClientRect().left }; });
+  const ends = await T.page.evaluate(() => ({ l: document.getElementById('pt').getBoundingClientRect().right, r: document.getElementById('pid').getBoundingClientRect().left }));
   assert.ok(s0.rect.left > ends.l && s0.rect.right < ends.r, 'between the left and right content');
   assert.ok(Math.abs((s0.rect.left + s0.rect.right) / 2 - (ends.l + ends.r) / 2) < 20, `centred (strip ${(s0.rect.left + s0.rect.right) / 2}, gap ${(ends.l + ends.r) / 2})`);
   // the app saves a time the way ESO's app does: only the clock part is real
@@ -386,6 +386,17 @@ test('the call times show in the top bar as they are entered, and the setting hi
   await waitFor(() => T.page.evaluate(() => !!window.__esosave), { label: 'interceptor' });
   await app((id) => window.app.use(id), id);
   await waitFor(async () => { const x = await strip(); return x && /Enr13:05/.test(x.text) && /Scene13:12/.test(x.text); }, { label: 'times from the served tab' });
+  // an iPad-width screen: every tile still fits, because the tiles shrink and ESO's neighbours give up a little
+  await T.page.setViewportSize({ width: 690, height: 700 });
+  const fit = await waitFor(async () => {
+    const x = await T.page.evaluate(() => { const el = document.getElementById('esosave-host').shadowRoot.querySelector('.times'); if (!el || getComputedStyle(el).display === 'none') return null; const r = el.getBoundingClientRect(); return { cls: el.className, right: r.right, scroll: el.scrollWidth, width: el.clientWidth, pid: document.getElementById('pid').getBoundingClientRect().left, pt: document.getElementById('pt').getBoundingClientRect().right, name: getComputedStyle(document.getElementById('ptname')).maxWidth, tiles: el.querySelectorAll('.t').length }; });
+    return x && x.scroll <= x.width + 1 && x.right <= x.pid ? x : null;
+  }, { label: 'fits at iPad width', timeout: 8000 });
+  assert.equal(fit.tiles, 7);
+  assert.match(fit.cls, /tight|micro/);
+  assert.equal(fit.name, '110px', 'patient name was capped to make room');
+  await T.page.setViewportSize({ width: 1280, height: 800 });
+  await waitFor(() => T.page.evaluate(() => getComputedStyle(document.getElementById('ptname')).maxWidth === 'none'), { label: 'patient name restored on a wide screen' });
   // leaving the run (the records list) takes the strip away; coming back brings it back
   await T.page.evaluate(() => { location.hash = '#/records'; });
   await waitFor(async () => !(await strip()), { label: 'hidden outside the run' });
