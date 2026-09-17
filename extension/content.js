@@ -43,7 +43,7 @@
   const sget = (keys) => new Promise(res => storage.get(keys, (v) => res(v || {})));
   const sset = (obj) => new Promise(res => storage.set(obj, () => res()));
   const sremove = (keys) => new Promise(res => storage.remove(keys, () => res()));
-  const DEFAULT_SETTINGS = { purgeHoursAfterLock: 0, probeSec: 20, heldProbeSec: 8, warmTabs: true, cardCollapsed: false, showTimes: true, sendPrompt: true, unsentList: true, quickHistory: true, quickAcuity: true };
+  const DEFAULT_SETTINGS = { purgeHoursAfterLock: 0, probeSec: 20, heldProbeSec: 8, warmTabs: true, cardCollapsed: false, showTimes: true, sendPrompt: true, unsentList: true, quickHistory: true, quickMeds: true, quickAllergies: true, quickAcuity: true };
 
   async function loadAll() {
     const all = await sget(null);
@@ -318,6 +318,8 @@
         `<label class="s"><input type="checkbox" id="unsentlist" ${settings.unsentList === false ? '' : 'checked'}> Keep a list of locked runs from the last 15 days that have a fax or email destination but were never sent</label>` +
         `<div class="s" style="margin-top:8px;font-weight:700">Quick buttons</div>` +
         `<label class="s"><input type="checkbox" id="qhistory" ${settings.quickHistory === false ? '' : 'checked'}> History: one-tap chips for common conditions under Add History (Patient tab)</label>` +
+        `<label class="s"><input type="checkbox" id="qmeds" ${settings.quickMeds === false ? '' : 'checked'}> Medications: chips for common home meds under Add Medications (Patient tab)</label>` +
+        `<label class="s"><input type="checkbox" id="qallergies" ${settings.quickAllergies === false ? '' : 'checked'}> Allergies: chips for common allergies under Add Allergies (Patient tab)</label>` +
         `<label class="s"><input type="checkbox" id="qacuity" ${settings.quickAcuity === false ? '' : 'checked'}> Acuity: red, yellow and green buttons next to Initial and Final Patient Acuity (Narrative tab)</label>` +
         `<div class="actions"><button class="a" data-act="save-settings">Save</button></div></div>`);
     }
@@ -380,6 +382,8 @@
       settings.sendPrompt = !!panel.querySelector('#sendprompt').checked;
       settings.unsentList = !!panel.querySelector('#unsentlist').checked;
       settings.quickHistory = !!panel.querySelector('#qhistory').checked;
+      settings.quickMeds = !!panel.querySelector('#qmeds').checked;
+      settings.quickAllergies = !!panel.querySelector('#qallergies').checked;
       settings.quickAcuity = !!panel.querySelector('#qacuity').checked;
       layoutQuick();
       await sset({ settings }); toPage('settings', settings); settingsOpen = false; renderPanel(); renderTimes();
@@ -721,34 +725,66 @@
   // One-tap chips that do what a finger would do in ESO's own pickers: open the list, tick the
   // item, press OK. Nothing is written behind the app's back, so the screen and the save are ESO's.
   // Names and ids come from ESO's configuration bundle (list SL.MEDICALHISTORY etc.).
-  const HISTORY_CHIPS = [
-    ['HTN', 'Hypertension (HTN)', 547], ['Diabetes', 'Diabetes', 545], ['COPD', 'Chronic Obstructive Pulmonary Disease (COPD)', 541],
-    ['CHF', 'Congestive Heart Failure (CHF)', 540], ['Asthma', 'Asthma', 535], ['CAD', 'Coronary Artery Disease (CAD)', 12846],
-    ['A-fib', 'Atrial Fibrillation', 10103], ['MI', 'Myocardial Infarction (MI)', 12871], ['Pacemaker/AICD', 'Pacemaker/AICD', 550],
-    ['Stroke/CVA', 'Stroke/CVA', 555], ['Seizures', 'Seizures', 553], ['Dementia', 'Dementia', 543],
-    ['Anxiety', 'Anxiety', 10076], ['Depression', 'Depression', 10071], ['Hyperlipidemia', 'Hyperlipidemia', 8212],
-    ['Hypothyroid', 'Hypothyroidism', 10273], ['Renal failure', 'Kidney/Renal Failure', 552], ['Dialysis', 'Dialysis', 11887],
-    ['GERD', 'Gastro-Esophageal Reflux Disease (GERD)', 8214], ['Cancer', 'Cancer, Unspecified', 537], ['Smoking', 'Smoking', 554],
-    ['None reported', 'None Reported', 12224],
-  ];
+  const CHIP_GROUPS = {
+    history: {
+      setting: 'quickHistory', button: /^Add History$/i, title: /^Add History$/i, listKey: 'histories',
+      chips: [
+        ['HTN', 'Hypertension (HTN)', 547], ['Diabetes', 'Diabetes', 545], ['COPD', 'Chronic Obstructive Pulmonary Disease (COPD)', 541],
+        ['CHF', 'Congestive Heart Failure (CHF)', 540], ['Asthma', 'Asthma', 535], ['CAD', 'Coronary Artery Disease (CAD)', 12846],
+        ['A-fib', 'Atrial Fibrillation', 10103], ['MI', 'Myocardial Infarction (MI)', 12871], ['Pacemaker/AICD', 'Pacemaker/AICD', 550],
+        ['Stroke/CVA', 'Stroke/CVA', 555], ['Seizures', 'Seizures', 553], ['Dementia', 'Dementia', 543],
+        ['Anxiety', 'Anxiety', 10076], ['Depression', 'Depression', 10071], ['Hyperlipidemia', 'Hyperlipidemia', 8212],
+        ['Hypothyroid', 'Hypothyroidism', 10273], ['Renal failure', 'Kidney/Renal Failure', 552], ['Dialysis', 'Dialysis', 11887],
+        ['GERD', 'Gastro-Esophageal Reflux Disease (GERD)', 8214], ['Cancer', 'Cancer, Unspecified', 537], ['Smoking', 'Smoking', 554],
+        ['None reported', 'None Reported', 12224],
+      ],
+    },
+    meds: {
+      setting: 'quickMeds', button: /^Add Medications?$/i, title: /^Add Medications?$/i, listKey: 'meds',
+      chips: [
+        ['Lisinopril', 'Lisinopril', 485], ['Metoprolol', 'Metoprolol', 7913], ['Amlodipine', 'Amlodipine', 7594], ['Losartan', 'Losartan', 10118],
+        ['HCTZ', 'Hydrochlorothiazide (Hctz)', 476], ['Carvedilol', 'Carvedilol', 7655], ['Atorvastatin', 'Atorvastatin', 7613], ['Simvastatin', 'Simvastatin', 8015],
+        ['Metformin', 'Metformin', 7905], ['Insulin', 'Insulin', 478], ['Glipizide', 'Glipizide', 7813], ['Aspirin', 'Aspirin', 7608],
+        ['Eliquis', 'Eliquis', 11948], ['Xarelto', 'Xarelto', 10014], ['Warfarin', 'Warfarin', 513], ['Plavix', 'Plavix', 493],
+        ['Furosemide', 'Furosemide', 474], ['Potassium', 'Potassium', 494], ['Levothyroxine', 'Levothyroxine', 7878], ['Omeprazole', 'Omeprazole', 8258],
+        ['Gabapentin', 'Gabapentin', 7801], ['Albuterol', 'Albuterol', 450], ['Prednisone', 'Prednisone', 496], ['Nitroglycerin', 'Nitroglycerin', 488],
+        ['Hydrocodone', 'Hydrocodone', 477], ['Oxycodone', 'Oxycodone', 490], ['Tramadol', 'Tramadol', 506], ['Sertraline', 'Sertraline', 8013],
+        ['Trazodone', 'Trazodone', 507], ['Alprazolam', 'Alprazolam', 7590], ['None reported', 'None Reported', 12223],
+      ],
+    },
+    allergies: {
+      setting: 'quickAllergies', button: /^Add Allergies$/i, title: /^Add Allergies$/i, listKey: 'allergies',
+      chips: [
+        ['NKDA', 'No known allergies', 518], ['Penicillin', 'Penicillin allergy', 528], ['Amoxicillin', 'Amoxicillin', 11990], ['Keflex', 'Keflex', 10245],
+        ['Sulfa', 'Sulfa', 10243], ['Bactrim', 'Bactrim', 10255], ['Codeine', 'Codeine', 524], ['Morphine', 'Morphine', 8200],
+        ['Hydrocodone', 'Hydrocodone', 10068], ['Oxycodone', 'Oxycodone', 11980], ['Tramadol', 'Tramadol', 11983], ['Toradol', 'Toradol', 11981],
+        ['Aspirin', 'Aspirin', 521], ['Ibuprofen', 'Ibuprofen', 11010], ['Latex', 'Latex allergy', 527], ['Iodine', 'Iodine', 10249],
+        ['IV contrast', 'IV Contrast Dye', 1338701], ['Shellfish', 'Shellfish allergy', 11045], ['Peanut', 'Peanut allergy', 10262], ['Egg', 'Egg allergy', 10995],
+        ['Bee sting', 'Bee sting allergy', 10975], ['Adhesive tape', 'Adhesive Tape', 11974], ['Other drug', 'Other drug allergy', 11027],
+      ],
+    },
+  };
   const ACUITY = {
     initial: { label: 'Initial Patient Acuity', key: 'initialAcuity', items: { red: ['Critical (Red)', 10586], yellow: ['Emergent (Yellow)', 10587], green: ['Lower Acuity (Green)', 10588] } },
     final: { label: 'Final Patient Acuity', key: 'finalAcuity', items: { red: ['Critical (Red)', 11838], yellow: ['Emergent (Yellow)', 11839], green: ['Lower Acuity (Green)', 11840] } },
   };
   let quickLayer = null;
   const quickEls = new Map();   // key -> element in our layer
-  const pending = new Set();    // history names tapped, not yet committed
-  let quickBusy = false, commitTimer = null;
+  const pending = { history: new Set(), meds: new Set(), allergies: new Set() }; // names tapped, not yet committed
+  const commitTimers = {};
+  let quickBusy = false;
   const norm = (t) => (t || '').replace(/\s+/g, ' ').trim();
   const visible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+  const inShelf = (el) => !!el.closest('shelf-panel, [class*="shelf" i]');
   function findByText(selector, text, opts) {
-    // the innermost visible element whose whole text is exactly this
-    const want = norm(text).toUpperCase();
+    // the innermost visible element whose whole text is exactly this (a string or a RegExp)
+    const test = text instanceof RegExp ? (t) => text.test(t) : (t) => t.toUpperCase() === norm(text).toUpperCase();
     let best = null;
     for (const el of document.querySelectorAll(selector)) {
       if (host && host.contains(el)) continue;
-      if (norm(el.textContent).toUpperCase() !== want) continue;
+      if (!test(norm(el.textContent))) continue;
       if (opts && opts.visible !== false && !visible(el)) continue;
+      if (opts && opts.notInShelf && inShelf(el)) continue;
       if (!best || best.contains(el)) best = el;
     }
     return best;
@@ -773,30 +809,36 @@
   }
   function currentRun() { const s = lastStatus; return s && s.currentRecordId ? s.runs.find(r => r.recordId === s.currentRecordId) : null; }
   function onTab(view) { const s = lastStatus; return s && s.lastView && s.lastView.view === view && s.lastView.recordId === s.currentRecordId; }
+  // ESO's pickers slide over the page; while one is open no quick button is shown
+  const shelfOpen = () => Array.from(document.querySelectorAll('shelf-panel')).some(visible);
 
-  // ---- history chips: to the right of the Add History button and in rows under it
-  function layoutHistory() {
+  // ---- chips: to the right of the group's Add button and in rows under it
+  function anchorButton(group) {
+    const el = findByText('button, a', group.button, { notInShelf: true });
+    return el ? (el.closest('button, a') || el) : null;
+  }
+  function layoutChips(gk) {
+    const g = CHIP_GROUPS[gk];
     const run = currentRun();
-    const anchor = settings.quickHistory !== false && run && !run.locked && onTab('Patient') ? findByText('button, a, div, span', 'Add History') : null;
-    const btn = anchor && (anchor.closest('button, a') || anchor);
-    if (!btn) { dropQuick('h:'); return; }
+    const btn = settings[g.setting] !== false && run && !run.locked && onTab('Patient') && !shelfOpen() ? anchorButton(g) : null;
+    if (!btn) { dropQuick(gk + ':'); return; }
     const r = btn.getBoundingClientRect();
-    if (!r.width) { dropQuick('h:'); return; }
+    if (!r.width) { dropQuick(gk + ':'); return; }
     const box = btn.parentElement ? btn.parentElement.getBoundingClientRect() : r;
     const right = Math.max(r.right + 200, box.right - 8);
-    const have = new Set(((run.lists && run.lists.histories) || []).map(Number));
+    const have = new Set(((run.lists && run.lists[g.listKey]) || []).map(Number));
     const gap = 6, rowH = 34;
     let x = r.left + r.width + 12, y = r.top + (r.height - 28) / 2, row = 0;
     const layer = ensureQuickLayer();
-    for (const [short, name, id] of HISTORY_CHIPS) {
-      const chip = quickEl('h:' + id, () => {
-        const c = document.createElement('button'); c.type = 'button'; c.className = 'chip'; c.textContent = short; c.title = name;
+    for (const [short, name, id] of g.chips) {
+      const chip = quickEl(`${gk}:${id}`, () => {
+        const c = document.createElement('button'); c.type = 'button'; c.className = 'chip'; c.textContent = short; c.title = name; c.dataset.group = gk;
         c.addEventListener('pointerdown', (e) => e.stopPropagation());
-        c.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); tapHistory(name, id); });
+        c.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); tapChip(gk, name, id); });
         return c;
       });
       chip.classList.toggle('added', have.has(id));
-      chip.classList.toggle('on', pending.has(name));
+      chip.classList.toggle('on', pending[gk].has(name));
       chip.classList.toggle('busy', quickBusy);
       chip.style.display = 'block';
       chip.style.visibility = 'hidden';
@@ -811,60 +853,63 @@
     const need = row ? row * rowH + 8 : 0;
     if (btn.style.marginBottom !== need + 'px') btn.style.marginBottom = need + 'px';
   }
-  function tapHistory(name, id) {
+  function tapChip(gk, name, id) {
     if (quickBusy) return;
+    const g = CHIP_GROUPS[gk];
     const run = currentRun();
-    if (run && run.lists && (run.lists.histories || []).map(Number).includes(id)) return; // already on the run
-    if (pending.has(name)) pending.delete(name); else pending.add(name);
-    layoutHistory();
-    clearTimeout(commitTimer);
-    if (pending.size) commitTimer = setTimeout(commitHistory, 1500);
+    if (run && run.lists && (run.lists[g.listKey] || []).map(Number).includes(id)) return; // already on the run
+    if (pending[gk].has(name)) pending[gk].delete(name); else pending[gk].add(name);
+    layoutChips(gk);
+    clearTimeout(commitTimers[gk]);
+    if (pending[gk].size) commitTimers[gk] = setTimeout(() => commitChips(gk), 1500);
   }
-  async function commitHistory() {
-    if (quickBusy || !pending.size) return;
-    const names = [...pending];
-    quickBusy = true; layoutHistory();
+  async function commitChips(gk) {
+    const g = CHIP_GROUPS[gk];
+    if (quickBusy || !pending[gk].size) return;
+    const names = [...pending[gk]];
+    quickBusy = true; layoutChips(gk);
     const missed = [];
+    const what = gk === 'history' ? 'history' : gk === 'meds' ? 'medications' : 'allergies';
     try {
-      const anchor = findByText('button, a, div, span', 'Add History');
-      const btn = anchor && (anchor.closest('button, a') || anchor);
-      if (!btn) throw new Error('Add History button not found');
-      showVeilMessage('Adding history…', names.join(', '));
+      const btn = anchorButton(g);
+      if (!btn) throw new Error('the Add button was not found');
+      showVeilMessage(`Adding ${what}…`, names.join(', '));
       btn.click();
-      const shelf = await until(() => { const h = findByText('shelf-panel h1, shelf-panel header', 'Add History') || Array.from(document.querySelectorAll('shelf-panel')).find(p => /Add History/i.test(p.textContent)); return h ? (h.closest('shelf-panel') || h) : null; }, 5000);
-      if (!shelf) throw new Error('the Add History list did not open');
+      const shelf = await until(() => Array.from(document.querySelectorAll('shelf-panel')).find(p => visible(p) && Array.from(p.querySelectorAll('h1, header')).some(h => g.title.test(norm(h.textContent)))), 5000);
+      if (!shelf) throw new Error(`the ${what} list did not open`);
       const input = await until(() => shelf.querySelector('eso-search-input input, input[type=text]'), 3000);
       if (!input) throw new Error('no search box in the list');
       const setSearch = async (t) => { input.focus(); input.value = t; input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event('change', { bubbles: true })); await wait(120); };
+      const labelOf = (l) => { const d = l.querySelector('.label-container > div, .label-container div'); return norm((d || l).textContent).toUpperCase(); };
       for (const name of names) {
         await setSearch(name);
-        const li = await until(() => Array.from(shelf.querySelectorAll('li')).find(l => visible(l) && norm(l.querySelector('.label-container > div, .label-container div') ? l.querySelector('.label-container > div, .label-container div').textContent : l.textContent).toUpperCase() === name.toUpperCase()), 3000);
+        const li = await until(() => Array.from(shelf.querySelectorAll('li')).find(l => visible(l) && labelOf(l) === name.toUpperCase()), 3000);
         if (!li) { missed.push(name); continue; }
         const mark = li.querySelector('check-mark');
-        if (mark && mark.classList.contains('selected')) { pending.delete(name); continue; } // already ticked
+        if (mark && mark.classList.contains('selected')) { pending[gk].delete(name); continue; } // already ticked
         (li.querySelector('.label-content') || li).click();
         const ok = await until(() => { const m = li.querySelector('check-mark'); return m && m.classList.contains('selected'); }, 1500);
-        if (!ok) missed.push(name); else pending.delete(name);
+        if (!ok) missed.push(name); else pending[gk].delete(name);
       }
       await setSearch('');
-      const okBtn = Array.from(shelf.querySelectorAll('header button')).find(b => /^OK$/i.test(norm(b.textContent)));
+      const okBtn = Array.from(shelf.querySelectorAll('header button, button')).find(b => /^OK$/i.test(norm(b.textContent)));
       if (!okBtn) throw new Error('no OK button');
       okBtn.click();
       await until(() => !document.body.contains(shelf) || !visible(shelf), 4000);
     } catch (e) {
-      hideVeil(); quickBusy = false; layoutHistory();
-      alert('ESO Save: could not add the history. ' + (e && e.message ? e.message : '') + ' The list is left as ESO shows it; finish it by hand.');
+      hideVeil(); quickBusy = false; layoutChips(gk);
+      alert(`ESO Save: could not add the ${what}. ` + (e && e.message ? e.message : '') + ' The list is left as ESO shows it; finish it by hand.');
       return;
     }
     hideVeil(); quickBusy = false;
-    for (const n of names) if (!missed.includes(n)) pending.delete(n);
-    layoutHistory();
+    for (const n of names) if (!missed.includes(n)) pending[gk].delete(n);
+    layoutChips(gk);
     if (missed.length) alert('ESO Save: not found in ESO\'s list, add by hand: ' + missed.join(', '));
   }
 
   // ---- acuity: red / yellow / green next to the label, opens ESO's picker and picks the colour
   function acuityField(label) {
-    const lab = findByText('label, span, div, p, legend', label);
+    const lab = findByText('label, span, div, p, legend', label, { notInShelf: true });
     if (!lab) return null;
     // the field block: nearest ancestor that is wide and holds a picker control
     let box = lab.parentElement;
@@ -878,7 +923,7 @@
   }
   function layoutAcuity() {
     const run = currentRun();
-    if (settings.quickAcuity === false || !run || run.locked || !onTab('Narrative')) { dropQuick('a:'); return; }
+    if (settings.quickAcuity === false || !run || run.locked || !onTab('Narrative') || shelfOpen()) { dropQuick('a:'); return; }
     for (const [which, def] of Object.entries(ACUITY)) {
       const f = acuityField(def.label);
       if (!f) { dropQuick('a:' + which); continue; }
@@ -928,7 +973,10 @@
     }
     quickBusy = false; layoutAcuity();
   }
-  function layoutQuick() { try { layoutHistory(); } catch (e) { /* keep going */ } try { layoutAcuity(); } catch (e) { /* keep going */ } }
+  function layoutQuick() {
+    for (const gk of Object.keys(CHIP_GROUPS)) { try { layoutChips(gk); } catch (e) { /* keep going */ } }
+    try { layoutAcuity(); } catch (e) { /* keep going */ }
+  }
 
   // ---------------------------------------------------------------- copy button on saved vitals
   // Each saved vital row in the Vitals tab shows its time (HH:MM:SS). A small copy button floats

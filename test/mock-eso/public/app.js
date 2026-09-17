@@ -107,11 +107,19 @@
     [547, 'Hypertension (HTN)'], [1337844, 'Pulmonary Hypertension, Other Secondary'], [553, 'Seizures'], [555, 'Stroke/CVA']];
   const ACUITY = { initial: [[10586, 'Critical (Red)'], [10587, 'Emergent (Yellow)'], [10588, 'Lower Acuity (Green)'], [14756, 'Non-Acute/Routine']],
     final: [[11838, 'Critical (Red)'], [11839, 'Emergent (Yellow)'], [11840, 'Lower Acuity (Green)'], [14755, 'Non-Acute/Routine']] };
-  app.histories = []; app.acuity = { initial: null, final: null }; app.shelfOpens = 0;
+  const MEDS = [[12223, 'None Reported'], [485, 'Lisinopril'], [7913, 'Metoprolol'], [7905, 'Metformin'], [1338755, 'Insulin Detemir'], [478, 'Insulin'], [7608, 'Aspirin']];
+  const ALLERGIES = [[518, 'No known allergies'], [11027, 'Other drug allergy'], [528, 'Penicillin allergy'], [10243, 'Sulfa'], [1338104, 'Sulfamethoxazole'], [527, 'Latex allergy']];
+  const GROUPS = { hist: { addr: 'patientMedicalHistories', items: HISTORY, list: 'histlist', btn: 'addhist', title: 'Add History' },
+    allergy: { addr: 'patientAllergies', items: ALLERGIES, list: 'allergylist', btn: 'addallergy', title: 'Add Allergies' },
+    med: { addr: 'patientMedications', items: MEDS, list: 'medlist', btn: 'addmed', title: 'Add Medications' } };
+  app.histories = []; app.allergies = []; app.meds = []; app.acuity = { initial: null, final: null }; app.shelfOpens = 0;
+  const held = { hist: 'histories', allergy: 'allergies', med: 'meds' };
   function renderHistory(body) {
     const m = body && body.data && body.data.model;
-    app.histories = ((m && m.patientMedicalHistories) || []).map(h => h.itemId);
-    document.getElementById('histlist').innerHTML = app.histories.map(id => `<li>${(HISTORY.find(h => h[0] === id) || [0, id])[1]}</li>`).join('');
+    for (const [k, g] of Object.entries(GROUPS)) {
+      app[held[k]] = ((m && m[g.addr]) || []).map(h => h.itemId);
+      document.getElementById(g.list).innerHTML = app[held[k]].map(id => `<li>${(g.items.find(h => h[0] === id) || [0, id])[1]}</li>`).join('');
+    }
   }
   function renderAcuity(body) {
     const m = body && body.data && body.data.model;
@@ -146,14 +154,16 @@
     draw();
     shelfHost.appendChild(el);
   }
-  document.getElementById('addhist').addEventListener('click', () => {
-    openShelf({ title: 'Add History', items: HISTORY, multi: true, checked: app.histories, onOk: (ids) => {
-      for (const id of ids) if (!app.histories.includes(id)) app.add('patient', `patient.patientMedicalHistories.['${id}']`, { itemId: id }, 'fieldGroup');
-      for (const id of app.histories) if (!ids.includes(id)) app.del('patient', `patient.patientMedicalHistories.['${id}']`, 'fieldGroup');
-      app.histories = ids;
-      document.getElementById('histlist').innerHTML = ids.map(id => `<li>${(HISTORY.find(h => h[0] === id) || [0, id])[1]}</li>`).join('');
-    } });
-  });
+  for (const [k, g] of Object.entries(GROUPS)) {
+    document.getElementById(g.btn).addEventListener('click', () => {
+      openShelf({ title: g.title, items: g.items, multi: true, checked: app[held[k]], onOk: (ids) => {
+        for (const id of ids) if (!app[held[k]].includes(id)) app.add('patient', `patient.${g.addr}.['${id}']`, { itemId: id }, 'fieldGroup');
+        for (const id of app[held[k]]) if (!ids.includes(id)) app.del('patient', `patient.${g.addr}.['${id}']`, 'fieldGroup');
+        app[held[k]] = ids;
+        document.getElementById(g.list).innerHTML = ids.map(id => `<li>${(g.items.find(h => h[0] === id) || [0, id])[1]}</li>`).join('');
+      } });
+    });
+  }
   document.querySelectorAll('.picker-icon').forEach(ic => ic.addEventListener('click', () => {
     const which = ic.dataset.field;
     openShelf({ title: which === 'initial' ? 'Initial Patient Acuity' : 'Final Patient Acuity', items: ACUITY[which], multi: false, checked: app.acuity[which] ? [app.acuity[which]] : [], onPick: (id) => {

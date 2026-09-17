@@ -525,7 +525,7 @@ test('the Not sent list is agency-wide: locked runs from other devices with a de
 test('quick history chips: tap several, one open of ESO\'s Add History list ticks them all and presses OK', async () => {
   const id = await freshRun();
   await app(() => window.app.openTab('Patient'));
-  const chips = () => T.page.evaluate(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .chip')).map(c => ({ short: c.textContent, name: c.title, cls: c.className, rect: c.getBoundingClientRect().toJSON() })));
+  const chips = () => T.page.evaluate(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .chip[data-group=history]')).map(c => ({ short: c.textContent, name: c.title, cls: c.className, rect: c.getBoundingClientRect().toJSON() })));
   await waitFor(async () => (await chips()).length >= 20, { label: 'chips drawn' });
   const all = await chips();
   const btn = await T.page.evaluate(() => document.getElementById('addhist').getBoundingClientRect().toJSON());
@@ -533,7 +533,7 @@ test('quick history chips: tap several, one open of ESO\'s Add History list tick
   assert.ok(all[0].rect.left > btn.right, 'first chip sits to the right of Add History');
   assert.ok(all.some(c => c.rect.top > btn.bottom), 'later chips wrap under the button');
   assert.ok(all.every(c => c.rect.bottom < next.top), 'no chip sits on the next field: the button made room');
-  const tap = (name) => T.page.evaluate((n) => { const c = Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .chip')).find(x => x.title === n); c.click(); }, name);
+  const tap = async (name) => { await waitFor(() => T.page.evaluate((n) => !!Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .chip')).find(x => x.title === n), name), { label: 'chip ' + name }); await T.page.evaluate((n) => { Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .chip')).find(x => x.title === n).click(); }, name); };
   await tap('Hypertension (HTN)');
   await tap('Diabetes');
   await tap('Chronic Obstructive Pulmonary Disease (COPD)');
@@ -554,6 +554,32 @@ test('quick history chips: tap several, one open of ESO\'s Add History list tick
   const ops = rec.ops.filter(o => /patientMedicalHistories/.test(o.address));
   assert.deepEqual(ops.map(o => o.verb), ['ADD', 'ADD']);
   await waitFor(() => T.page.evaluate(() => !document.getElementById('esosave-host').shadowRoot.querySelector('.veil')), { label: 'overlay gone' });
+});
+
+test('quick chips for medications and allergies work the same way, and every quick button hides while a picker is open', async () => {
+  const id = await app(() => window.app.recordId);
+  await app(() => window.app.openTab('Patient'));
+  const chips = () => T.page.evaluate(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .chip')).map(c => ({ short: c.textContent, name: c.title, cls: c.className, rect: c.getBoundingClientRect().toJSON() })));
+  await waitFor(async () => (await chips()).length >= 70, { label: 'all three groups drawn' });
+  const tap = async (name) => { await waitFor(() => T.page.evaluate((n) => !!Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .chip')).find(x => x.title === n), name), { label: 'chip ' + name }); await T.page.evaluate((n) => { Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .chip')).find(x => x.title === n).click(); }, name); };
+  // meds: the exact names win over lookalikes ("Insulin" not "Insulin Detemir")
+  await tap('Lisinopril'); await tap('Insulin');
+  await waitFor(async () => ((await T.record(id)).tree.patient?.patientMedications || []).length === 2, { label: 'two meds on ESO', timeout: 15000 });
+  assert.deepEqual((await T.record(id)).tree.patient.patientMedications.map(m => Number(m.itemId)).sort(), [478, 485]);
+  // allergies
+  await tap('No known allergies');
+  await waitFor(async () => ((await T.record(id)).tree.patient?.patientAllergies || []).length === 1, { label: 'allergy on ESO', timeout: 15000 });
+  assert.equal(Number((await T.record(id)).tree.patient.patientAllergies[0].itemId), 518);
+  await waitFor(async () => (await chips()).filter(c => /added/.test(c.cls) && /Lisinopril|Insulin|No known/.test(c.name)).length === 3, { label: 'chips show added' });
+  // a picker the medic opens by hand: no quick button anywhere until it closes
+  await app(() => document.getElementById('addallergy').click());
+  await waitFor(async () => (await chips()).length === 0, { label: 'chips gone while the list is open' });
+  await app(() => document.querySelector('shelf-panel header button').click());
+  await waitFor(async () => (await chips()).length >= 70, { label: 'chips back' });
+  // history chips do not anchor to the open list's own "Add History" title
+  await app(() => document.getElementById('addhist').click());
+  await waitFor(async () => (await chips()).length === 0, { label: 'none while Add History is open' });
+  await app(() => document.querySelector('shelf-panel header button').click());
 });
 
 test('quick acuity: red, yellow, green next to each acuity field, one tap picks it in ESO\'s list', async () => {

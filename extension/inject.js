@@ -27,7 +27,7 @@
   if (ext) return;
   if (window.__esosave) return;
 
-  const VERSION = '0.5.0';
+  const VERSION = '0.5.1';
   const API_PREFIX_RE = /^\/ehr\/api\/+/i;
   const FAKE_OK_TEXT = '{"result":"Success","data":[]}';
   const PROBE_PATH = '/ehr/api/thirdpartydata/partners';
@@ -618,9 +618,12 @@
   function noteLists(run, view, j) {
     const model = j && j.data && j.data.model;
     if (!model) return;
-    if (view === 'Patient' && Array.isArray(model.patientMedicalHistories)) {
+    if (view === 'Patient') {
       run.lists = run.lists || {};
-      run.lists.histories = model.patientMedicalHistories.map(x => x && x.itemId).filter(x => x != null);
+      const ids = (a) => Array.isArray(a) ? a.map(x => x && x.itemId).filter(x => x != null) : [];
+      if (Array.isArray(model.patientMedicalHistories)) run.lists.histories = ids(model.patientMedicalHistories);
+      if (Array.isArray(model.patientMedications)) run.lists.meds = ids(model.patientMedications);
+      if (Array.isArray(model.patientAllergies)) run.lists.allergies = ids(model.patientAllergies);
       run.lists.historyNone = model.patientHistoriesPertinentNegativeId || null;
     }
     if (view === 'Narrative' && model.patientComplaint) {
@@ -629,16 +632,18 @@
       run.lists.finalAcuity = model.patientComplaint.finalPatientAcuityId || null;
     }
   }
-  const HIST_ADDR_RE = /^patient\.patientMedicalHistories\.\['(\d+)'\]$/;
+  const LIST_ADDR_RE = /^patient\.(patientMedicalHistories|patientMedications|patientAllergies)\.\['(\d+)'\]$/;
+  const LIST_KEY = { patientMedicalHistories: 'histories', patientMedications: 'meds', patientAllergies: 'allergies' };
   function noteListOps(run, ops) {
     let changed = false;
     for (const op of ops) {
-      const m = HIST_ADDR_RE.exec(op.address || '');
+      const m = LIST_ADDR_RE.exec(op.address || '');
       if (m) {
-        run.lists = run.lists || {}; run.lists.histories = run.lists.histories || [];
-        const id = Number(m[1]);
-        if (op.verb === 'ADD' && !run.lists.histories.includes(id)) { run.lists.histories.push(id); changed = true; }
-        if (op.verb === 'DELETE' && run.lists.histories.includes(id)) { run.lists.histories = run.lists.histories.filter(x => x !== id); changed = true; }
+        const k = LIST_KEY[m[1]];
+        run.lists = run.lists || {}; run.lists[k] = run.lists[k] || [];
+        const id = Number(m[2]);
+        if (op.verb === 'ADD' && !run.lists[k].includes(id)) { run.lists[k].push(id); changed = true; }
+        if (op.verb === 'DELETE' && run.lists[k].includes(id)) { run.lists[k] = run.lists[k].filter(x => x !== id); changed = true; }
         continue;
       }
       if (op.address === 'narrative.patientComplaint.initialPatientAcuityId') { run.lists = run.lists || {}; run.lists.initialAcuity = op.value == null ? null : op.value; changed = true; }

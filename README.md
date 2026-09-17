@@ -32,9 +32,10 @@ to bad signal or a hung page.
   email destination and no fax in ESO's history, with Fax and Email buttons. The card shows the count.
   Emails leave no history in ESO, so a run emailed from a device without the extension still shows.
   Both are settings, on by default.
-- **Quick buttons.** One-tap chips for the common history items sit beside Add History on the Patient
-  tab; tap several and, a moment later, ESO's own Add History list is opened once, each one ticked,
-  and OK pressed. Red, yellow and green buttons next to Initial and Final Patient Acuity pick the
+- **Quick buttons.** One-tap chips for the common history items, home medications and allergies sit
+  beside Add History, Add Medications and Add Allergies on the Patient tab; tap several and, a
+  moment later, ESO's own list is opened once, each one ticked, and OK pressed. They hide while any
+  ESO picker is open. Red, yellow and green buttons next to Initial and Final Patient Acuity pick the
   colour in ESO's list. Nothing is written behind the app's back: the buttons do what a finger would
   in ESO's pickers, so the screen and the save are ESO's. Each group is a setting, on by default.
 - **Copy a vital.** A small copy button floats just left of each saved vital's time in the Vitals
