@@ -522,14 +522,81 @@ test('the Not sent list is agency-wide: locked runs from other devices with a de
   await shClick('.panel [data-act=close]');
 });
 
+test('quick history chips: tap several, one open of ESO\'s Add History list ticks them all and presses OK', async () => {
+  const id = await freshRun();
+  await app(() => window.app.openTab('Patient'));
+  const chips = () => T.page.evaluate(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .chip')).map(c => ({ short: c.textContent, name: c.title, cls: c.className, rect: c.getBoundingClientRect().toJSON() })));
+  await waitFor(async () => (await chips()).length >= 20, { label: 'chips drawn' });
+  const all = await chips();
+  const btn = await T.page.evaluate(() => document.getElementById('addhist').getBoundingClientRect().toJSON());
+  const next = await T.page.evaluate(() => document.querySelector('#patient label').getBoundingClientRect().toJSON());
+  assert.ok(all[0].rect.left > btn.right, 'first chip sits to the right of Add History');
+  assert.ok(all.some(c => c.rect.top > btn.bottom), 'later chips wrap under the button');
+  assert.ok(all.every(c => c.rect.bottom < next.top), 'no chip sits on the next field: the button made room');
+  const tap = (name) => T.page.evaluate((n) => { const c = Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .chip')).find(x => x.title === n); c.click(); }, name);
+  await tap('Hypertension (HTN)');
+  await tap('Diabetes');
+  await tap('Chronic Obstructive Pulmonary Disease (COPD)');
+  await tap('Chronic Obstructive Pulmonary Disease (COPD)'); // tapped twice = off again
+  assert.deepEqual((await chips()).filter(c => /\bon\b/.test(c.cls)).map(c => c.short), ['HTN', 'Diabetes']);
+  const rec = await waitFor(async () => { const r = await T.record(id); const h = (r.tree.patient && r.tree.patient.patientMedicalHistories) || []; return h.length === 2 ? r : null; }, { label: 'both on ESO', timeout: 15000 });
+  assert.deepEqual(rec.tree.patient.patientMedicalHistories.map(h => Number(h.itemId)).sort(), [545, 547]);
+  assert.equal(await app(() => window.app.shelfOpens), 1, 'one open for two chips');
+  assert.equal(await app(() => document.querySelectorAll('shelf-panel').length), 0, 'list closed with OK');
+  assert.match(await app(() => document.getElementById('histlist').textContent), /Hypertension \(HTN\)Diabetes/);
+  await waitFor(async () => (await chips()).filter(c => /added/.test(c.cls)).length === 2, { label: 'chips show added' });
+  // an added chip is inert; the app's own list is left alone
+  await tap('Hypertension (HTN)');
+  await sleep(2000);
+  assert.equal(await app(() => window.app.shelfOpens), 1);
+  assert.equal((await T.record(id)).tree.patient.patientMedicalHistories.length, 2);
+  // the search matched the exact name, not a lookalike ("Pulmonary Hypertension", "Type 1 Diabetes")
+  const ops = rec.ops.filter(o => /patientMedicalHistories/.test(o.address));
+  assert.deepEqual(ops.map(o => o.verb), ['ADD', 'ADD']);
+  await waitFor(() => T.page.evaluate(() => !document.getElementById('esosave-host').shadowRoot.querySelector('.veil')), { label: 'overlay gone' });
+});
+
+test('quick acuity: red, yellow, green next to each acuity field, one tap picks it in ESO\'s list', async () => {
+  const id = await app(() => window.app.recordId);
+  await app(() => window.app.openTab('Narrative'));
+  const sws = () => T.page.evaluate(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .sw')).map(c => ({ title: c.title, cls: c.className, rect: c.getBoundingClientRect().toJSON() })));
+  await waitFor(async () => (await sws()).length === 6, { label: 'six swatches' });
+  const lab = await T.page.evaluate(() => document.querySelector('#narrative label').getBoundingClientRect().toJSON());
+  const first = (await sws())[0];
+  assert.ok(first.rect.left > lab.right && Math.abs(first.rect.top + first.rect.height / 2 - (lab.top + lab.height / 2)) < 8, 'swatches sit right after the label, on its line');
+  const tapSw = (i) => T.page.evaluate((n) => document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .sw')[n].click(), i);
+  await tapSw(0); // initial red
+  await waitFor(async () => (await T.record(id)).tree.narrative?.patientComplaint?.initialPatientAcuityId === 10586, { label: 'initial red saved by the app' });
+  assert.equal(await app(() => document.getElementById('ia').textContent), 'Critical (Red)');
+  await waitFor(async () => /\bcur\b/.test((await sws())[0].cls), { label: 'red marked current' });
+  await tapSw(5); // final green
+  await waitFor(async () => (await T.record(id)).tree.narrative?.patientComplaint?.finalPatientAcuityId === 11840, { label: 'final green saved' });
+  assert.equal(await app(() => document.querySelectorAll('shelf-panel').length), 0, 'picker closed');
+  await tapSw(1); // change initial to yellow
+  await waitFor(async () => (await T.record(id)).tree.narrative?.patientComplaint?.initialPatientAcuityId === 10587, { label: 'initial yellow' });
+  await waitFor(async () => { const s = await sws(); return /cur/.test(s[1].cls) && !/cur/.test(s[0].cls); }, { label: 'current moved to yellow' });
+});
+
 test('locking a run marks it and it is cleared from the device after the retention window', async () => {
   const id = await app(() => window.app.recordId);
   await app(() => window.app.lock());
   await waitFor(async () => { const r = (await T.status()).runs.find(x => x.recordId === id); return r && r.locked; }, { label: 'locked seen' });
   await sleep(500);
-  await T.setStorage({ settings: { purgeHoursAfterLock: 0 } });
+  // a just-locked run gets ten minutes so the send prompt can finish; age the lock past that
+  await waitFor(async () => (await T.storage())['run:' + id]?.locked, { label: 'lock stored' });
+  const stored = (await T.storage())['run:' + id];
+  await T.setStorage({ settings: { purgeHoursAfterLock: 0 }, ['run:' + id]: { ...stored, lockedAt: Date.now() - 11 * 60 * 1000 } });
   await T.page.goto(T.url);
   await waitFor(async () => !(await T.storage())['run:' + id], { label: 'purged' });
+  // ...and one locked a moment ago stays until the grace is over
+  const id2 = await freshRun();
+  await app(() => { window.app.edit('incident', 'incident.scene.callNature', 'grace'); });
+  await waitFor(async () => (await T.record(id2)).tree.incident?.scene?.callNature === 'grace', { label: 'saved' });
+  await app(() => window.app.lock());
+  await waitFor(async () => (await T.storage())['run:' + id2]?.locked, { label: 'lock stored' });
+  await T.page.goto(T.url);
+  await sleep(1500);
+  assert.ok((await T.storage())['run:' + id2], 'kept during the grace period');
 });
 
 test('a run started with no signal is created on ESO when signal returns and its saves follow', async () => {

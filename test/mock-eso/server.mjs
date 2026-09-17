@@ -144,6 +144,16 @@ export function createMockEso() {
       model.incidentTimes = { ...t, ...(model.incidentTimes || {}) };
     }
     if (name === 'Signatures' || name === 'Narrative' || name === 'FlowchartTreatments') model.crew = rec.crew;
+    if (name === 'Patient') {
+      // keyed groups come back as arrays of {itemId,...}, the way ESO returns them
+      for (const k of ['patientMedicalHistories', 'patientAllergies', 'patientMedications']) {
+        const v = model[k];
+        const arr = v && typeof v === 'object' && !Array.isArray(v) ? Object.entries(v).map(([id, x]) => ({ itemId: id, comment: null, ...(x && typeof x === 'object' ? x : {}) })) : (Array.isArray(v) ? v : []);
+        model[k] = arr.map(x => ({ comment: null, ...x, itemId: /^\d+$/.test(String(x.itemId)) ? Number(x.itemId) : x.itemId }));
+      }
+      if (!('patientHistoriesPertinentNegativeId' in model)) model.patientHistoriesPertinentNegativeId = null;
+    }
+    if (name === 'Narrative') model.patientComplaint = { initialPatientAcuityId: null, finalPatientAcuityId: null, ...(model.patientComplaint || {}) };
     if (!('version' in model)) model.version = null;
     // a saved vital comes back the way ESO returns it: numbers for numeric text, every group
     // present with nulls, plus bookkeeping fields the app never saves

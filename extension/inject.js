@@ -27,7 +27,7 @@
   if (ext) return;
   if (window.__esosave) return;
 
-  const VERSION = '0.4.3';
+  const VERSION = '0.5.0';
   const API_PREFIX_RE = /^\/ehr\/api\/+/i;
   const FAKE_OK_TEXT = '{"result":"Success","data":[]}';
   const PROBE_PATH = '/ehr/api/thirdpartydata/partners';
@@ -612,6 +612,41 @@
     }
     if (changed) emit();
   }
+  // What the Patient and Narrative tabs hold, for the quick buttons: which history items are on
+  // the run and which acuity is set. Read from the served tab, then kept current from the app's
+  // own saves (and the extension's held ones).
+  function noteLists(run, view, j) {
+    const model = j && j.data && j.data.model;
+    if (!model) return;
+    if (view === 'Patient' && Array.isArray(model.patientMedicalHistories)) {
+      run.lists = run.lists || {};
+      run.lists.histories = model.patientMedicalHistories.map(x => x && x.itemId).filter(x => x != null);
+      run.lists.historyNone = model.patientHistoriesPertinentNegativeId || null;
+    }
+    if (view === 'Narrative' && model.patientComplaint) {
+      run.lists = run.lists || {};
+      run.lists.initialAcuity = model.patientComplaint.initialPatientAcuityId || null;
+      run.lists.finalAcuity = model.patientComplaint.finalPatientAcuityId || null;
+    }
+  }
+  const HIST_ADDR_RE = /^patient\.patientMedicalHistories\.\['(\d+)'\]$/;
+  function noteListOps(run, ops) {
+    let changed = false;
+    for (const op of ops) {
+      const m = HIST_ADDR_RE.exec(op.address || '');
+      if (m) {
+        run.lists = run.lists || {}; run.lists.histories = run.lists.histories || [];
+        const id = Number(m[1]);
+        if (op.verb === 'ADD' && !run.lists.histories.includes(id)) { run.lists.histories.push(id); changed = true; }
+        if (op.verb === 'DELETE' && run.lists.histories.includes(id)) { run.lists.histories = run.lists.histories.filter(x => x !== id); changed = true; }
+        continue;
+      }
+      if (op.address === 'narrative.patientComplaint.initialPatientAcuityId') { run.lists = run.lists || {}; run.lists.initialAcuity = op.value == null ? null : op.value; changed = true; }
+      if (op.address === 'narrative.patientComplaint.finalPatientAcuityId') { run.lists = run.lists || {}; run.lists.finalAcuity = op.value == null ? null : op.value; changed = true; }
+      if (op.address === 'patient.patientHistoriesPertinentNegativeId') { run.lists = run.lists || {}; run.lists.historyNone = op.value == null ? null : op.value; changed = true; }
+    }
+    if (changed) emit();
+  }
   function setLocked(run, locked) {
     if (locked && !run.locked) { run.locked = true; run.lockedAt = Date.now(); log(run, `Run ${run.incidentNumber || ''} is locked. It will be cleared from this device${Number(S.settings.purgeHoursAfterLock) ? ' after ' + S.settings.purgeHoursAfterLock + ' hour(s)' : ' now'}.`, 'good'); }
     else if (!locked && run.locked) { run.locked = false; run.lockedAt = null; log(run, 'Run unlocked again.', 'info'); }
@@ -897,6 +932,7 @@
     }
     learnFieldDefs(ops);
     noteTimes(run, ops);
+    noteListOps(run, ops);
     const batch = { seq: run.nextSeq++, ts: Date.now(), scope: kind.scope, ops, status: 'pending', attempts: 0 };
     run.batches.push(batch);
     const hold = (why) => {
@@ -930,6 +966,7 @@
       const j = tryJSON(res.text);
       run.views[kind.view] = { text: res.text, ts: Date.now() };
       S.lastView = { view: kind.view, recordId: kind.recordId, ts: Date.now() };
+      noteLists(run, kind.view, j);
       emit();
       cachePut('GET', req.url, undefined, res);
       learnTab(kind.view, kind.recordId, req);
@@ -945,7 +982,11 @@
       const cached = exact ? { text: exact.text } : run.views[kind.view];
       if (cached) {
         log(run, `No signal: showing the saved copy of the ${kind.view} tab.`, 'warn');
-        return fakeOk(applyHeldToView(run, kind.view, cached.text), req.url);
+        const text = applyHeldToView(run, kind.view, cached.text);
+        S.lastView = { view: kind.view, recordId: kind.recordId, ts: Date.now() };
+        noteLists(run, kind.view, tryJSON(text));
+        emit();
+        return fakeOk(text, req.url);
       }
       return res;
     }
@@ -1186,6 +1227,7 @@
       createdAt: run.createdAt, lastSeenAt: run.lastSeenAt, lastSavedAt: run.lastSavedAt,
       restoredFrom: run.restoredFrom, counts, pages, log: run.log.slice(-60), times: run.times || null,
       sends: (run.sends || []).map(x => ({ kind: x.kind, status: x.status, destinationName: x.destinationName, ts: x.ts })), emailedAt: run.emailedAt || null,
+      lists: run.lists || null,
       hasViews: Object.keys(run.views).length, hasCrew: !!(run.crew && run.crew.length),
     };
   }

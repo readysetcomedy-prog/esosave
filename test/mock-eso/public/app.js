@@ -66,6 +66,10 @@
       this.views[view] = out;
       render();
       if (view === 'Vitals') renderVitals(out.body);
+      document.getElementById('patient').style.display = view === 'Patient' ? 'block' : 'none';
+      document.getElementById('narrative').style.display = view === 'Narrative' ? 'block' : 'none';
+      if (view === 'Patient') renderHistory(out.body);
+      if (view === 'Narrative') renderAcuity(out.body);
       return out;
     },
     // the real app validates, then POSTs lock with a timestamp; unlock likewise
@@ -97,6 +101,67 @@
     table.innerHTML = '<tr><th>Time</th><th>BP</th><th>Pulse</th><th></th></tr>' + list.map(v =>
       `<tr><td class="t">${(v.vitalSignDateTime || '').slice(-8)}</td><td>${(v.bloodPressure && v.bloodPressure.bloodPressureSystolic) || '--'}/${(v.bloodPressure && v.bloodPressure.bloodPressureDiastolic) || '--'}</td><td>${(v.pulse && v.pulse.pulseRate) || '--'}</td><td><button class="x">×</button></td></tr>`).join('');
   }
+  // ---- ESO-style pickers. Names and ids are a slice of ESO's own lists.
+  const HISTORY = [[12224, 'None Reported'], [1337167, '1st Degree Heart Block'], [535, 'Asthma'], [14827, 'Asthma - mild, persistent'], [10103, 'Atrial Fibrillation'],
+    [541, 'Chronic Obstructive Pulmonary Disease (COPD)'], [540, 'Congestive Heart Failure (CHF)'], [545, 'Diabetes'], [11914, 'Type 1 Diabetes'], [11915, 'Type 2 Diabetes'],
+    [547, 'Hypertension (HTN)'], [1337844, 'Pulmonary Hypertension, Other Secondary'], [553, 'Seizures'], [555, 'Stroke/CVA']];
+  const ACUITY = { initial: [[10586, 'Critical (Red)'], [10587, 'Emergent (Yellow)'], [10588, 'Lower Acuity (Green)'], [14756, 'Non-Acute/Routine']],
+    final: [[11838, 'Critical (Red)'], [11839, 'Emergent (Yellow)'], [11840, 'Lower Acuity (Green)'], [14755, 'Non-Acute/Routine']] };
+  app.histories = []; app.acuity = { initial: null, final: null }; app.shelfOpens = 0;
+  function renderHistory(body) {
+    const m = body && body.data && body.data.model;
+    app.histories = ((m && m.patientMedicalHistories) || []).map(h => h.itemId);
+    document.getElementById('histlist').innerHTML = app.histories.map(id => `<li>${(HISTORY.find(h => h[0] === id) || [0, id])[1]}</li>`).join('');
+  }
+  function renderAcuity(body) {
+    const m = body && body.data && body.data.model;
+    app.acuity.initial = m && m.patientComplaint ? m.patientComplaint.initialPatientAcuityId : null;
+    app.acuity.final = m && m.patientComplaint ? m.patientComplaint.finalPatientAcuityId : null;
+    document.getElementById('ia').textContent = (ACUITY.initial.find(a => a[0] === app.acuity.initial) || [0, ''])[1];
+    document.getElementById('fa').textContent = (ACUITY.final.find(a => a[0] === app.acuity.final) || [0, ''])[1];
+  }
+  const shelfHost = document.getElementById('shelfhost');
+  function openShelf({ title, items, multi, checked, onOk, onPick }) {
+    app.shelfOpens++;
+    const el = document.createElement('shelf-panel');
+    el.innerHTML = `<header><h1>${title}</h1><button class="btn green-btn workflow-btn">OK</button></header>
+      <div class="search"><eso-search-input><label>Search</label><input type="text"><div class="cancel"></div></eso-search-input></div>
+      <main class="viewport"><div class="content"><${multi ? 'eso-multi-select-panel' : 'eso-single-select-panel'}><ul></ul></${multi ? 'eso-multi-select-panel' : 'eso-single-select-panel'}></div></main>`;
+    const ul = el.querySelector('ul'); const input = el.querySelector('input');
+    const state = new Set(checked || []);
+    const draw = () => {
+      const q = input.value.trim().toLowerCase();
+      // like ESO's virtual list: only the matches are in the DOM
+      ul.innerHTML = items.filter(([, name]) => !q || name.toLowerCase().includes(q)).map(([id, name]) =>
+        `<li data-itemid="${id}" tabindex="0"><div class="label-content"><div class="selection-indicator"><check-mark class="${state.has(id) ? 'selected' : ''}"></check-mark></div><div class="label-container"><div>${name}<mark></mark></div><div class="description ng-hide"></div></div><div class="aside"></div></div></li>`).join('');
+    };
+    input.addEventListener('input', draw);
+    ul.addEventListener('click', (e) => {
+      const li = e.target.closest('li'); if (!li) return;
+      const id = Number(li.dataset.itemid);
+      if (multi) { if (state.has(id)) state.delete(id); else state.add(id); draw(); }
+      else { onPick(id); el.remove(); }
+    });
+    el.querySelector('header button').addEventListener('click', () => { onOk && onOk([...state]); el.remove(); });
+    draw();
+    shelfHost.appendChild(el);
+  }
+  document.getElementById('addhist').addEventListener('click', () => {
+    openShelf({ title: 'Add History', items: HISTORY, multi: true, checked: app.histories, onOk: (ids) => {
+      for (const id of ids) if (!app.histories.includes(id)) app.add('patient', `patient.patientMedicalHistories.['${id}']`, { itemId: id }, 'fieldGroup');
+      for (const id of app.histories) if (!ids.includes(id)) app.del('patient', `patient.patientMedicalHistories.['${id}']`, 'fieldGroup');
+      app.histories = ids;
+      document.getElementById('histlist').innerHTML = ids.map(id => `<li>${(HISTORY.find(h => h[0] === id) || [0, id])[1]}</li>`).join('');
+    } });
+  });
+  document.querySelectorAll('.picker-icon').forEach(ic => ic.addEventListener('click', () => {
+    const which = ic.dataset.field;
+    openShelf({ title: which === 'initial' ? 'Initial Patient Acuity' : 'Final Patient Acuity', items: ACUITY[which], multi: false, checked: app.acuity[which] ? [app.acuity[which]] : [], onPick: (id) => {
+      app.acuity[which] = id;
+      app.edit('narrative', `narrative.patientComplaint.${which}PatientAcuityId`, id, 'singleselect');
+      document.getElementById(which === 'initial' ? 'ia' : 'fa').textContent = ACUITY[which].find(a => a[0] === id)[1];
+    } });
+  }));
   function render() {
     const el = document.getElementById('status');
     if (el) el.textContent = `record ${app.recordId}\nresponses ${app.responses.length} errors ${app.errors.length}\nkeyMap ${JSON.stringify(app.keyMap)}`;

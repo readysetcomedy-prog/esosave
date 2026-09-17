@@ -43,7 +43,7 @@
   const sget = (keys) => new Promise(res => storage.get(keys, (v) => res(v || {})));
   const sset = (obj) => new Promise(res => storage.set(obj, () => res()));
   const sremove = (keys) => new Promise(res => storage.remove(keys, () => res()));
-  const DEFAULT_SETTINGS = { purgeHoursAfterLock: 0, probeSec: 20, heldProbeSec: 8, warmTabs: true, cardCollapsed: false, showTimes: true, sendPrompt: true, unsentList: true };
+  const DEFAULT_SETTINGS = { purgeHoursAfterLock: 0, probeSec: 20, heldProbeSec: 8, warmTabs: true, cardCollapsed: false, showTimes: true, sendPrompt: true, unsentList: true, quickHistory: true, quickAcuity: true };
 
   async function loadAll() {
     const all = await sget(null);
@@ -117,6 +117,7 @@
       if (payload.runs.some(r => r.locked)) purgeLocked(settings);
       renderBar();
       renderTimes();
+      layoutQuick();
       if (panelOpen) renderPanel();
       try { api.runtime.sendMessage({ type: 'badge', held: payload.held, rejected: payload.rejected, online: payload.online }); } catch (e) { /* worker asleep */ }
     }
@@ -138,6 +139,17 @@
     .bar.good { background: #15803d; } .bar.warn { background: #b45309; } .bar.bad { background: #b91c1c; } .bar.info { background: #1d4ed8; }
     .bar.warn, .bar.bad { animation: pulse 1.6s ease-in-out infinite; }
     .copylayer { position: fixed; inset: 0; pointer-events: none; z-index: 2147483640; }
+    .quick { position: fixed; inset: 0; pointer-events: none; z-index: 2147483640; font: 13px/1.2 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    .quick .chip { position: fixed; pointer-events: auto; height: 28px; padding: 0 11px; border-radius: 14px; border: 1px solid #94a3b8; background: #fff; color: #1e293b; font: inherit; font-weight: 600; cursor: pointer; white-space: nowrap; box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+    .quick .chip:hover { border-color: #15803d; }
+    .quick .chip.on { background: #15803d; border-color: #15803d; color: #fff; }
+    .quick .chip.added { background: #dcfce7; border-color: #86efac; color: #166534; cursor: default; }
+    .quick .chip.added::before { content: '✓ '; }
+    .quick .chip.busy { opacity: .6; cursor: wait; }
+    .quick .sw { position: fixed; pointer-events: auto; width: 34px; height: 26px; border-radius: 7px; border: 2px solid transparent; cursor: pointer; box-shadow: 0 1px 2px rgba(0,0,0,.25); }
+    .quick .sw.red { background: #dc2626; } .quick .sw.yellow { background: #facc15; } .quick .sw.green { background: #16a34a; }
+    .quick .sw.cur { border-color: #0f172a; box-shadow: 0 0 0 2px #fff, 0 0 0 4px #0f172a; }
+    .quick .sw.busy { opacity: .5; cursor: wait; }
     .times { position: fixed; z-index: 2147483639; display: flex; gap: 4px; align-items: stretch; pointer-events: none; font: 12px/1.15 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; white-space: nowrap; overflow: hidden; }
     .times .t { display: flex; flex-direction: column; align-items: center; justify-content: center; min-width: 46px; padding: 3px 6px; border-radius: 7px; background: rgba(255,255,255,.10); color: #fff; }
     .times .t .l { font-size: 10px; letter-spacing: .04em; text-transform: uppercase; opacity: .75; }
@@ -304,6 +316,9 @@
         `<label class="s"><input type="checkbox" id="times" ${settings.showTimes === false ? '' : 'checked'}> Show the call times (dispatched, en route, on scene, at patient, depart, at destination, transfer) in the empty part of ESO's top bar</label>` +
         `<label class="s"><input type="checkbox" id="sendprompt" ${settings.sendPrompt === false ? '' : 'checked'}> When a run is locked, offer to fax or email it to the destination if it has not been sent yet</label>` +
         `<label class="s"><input type="checkbox" id="unsentlist" ${settings.unsentList === false ? '' : 'checked'}> Keep a list of locked runs from the last 15 days that have a fax or email destination but were never sent</label>` +
+        `<div class="s" style="margin-top:8px;font-weight:700">Quick buttons</div>` +
+        `<label class="s"><input type="checkbox" id="qhistory" ${settings.quickHistory === false ? '' : 'checked'}> History: one-tap chips for common conditions under Add History (Patient tab)</label>` +
+        `<label class="s"><input type="checkbox" id="qacuity" ${settings.quickAcuity === false ? '' : 'checked'}> Acuity: red, yellow and green buttons next to Initial and Final Patient Acuity (Narrative tab)</label>` +
         `<div class="actions"><button class="a" data-act="save-settings">Save</button></div></div>`);
     }
     if (settings.unsentList !== false) {
@@ -364,6 +379,9 @@
       settings.showTimes = !!panel.querySelector('#times').checked;
       settings.sendPrompt = !!panel.querySelector('#sendprompt').checked;
       settings.unsentList = !!panel.querySelector('#unsentlist').checked;
+      settings.quickHistory = !!panel.querySelector('#qhistory').checked;
+      settings.quickAcuity = !!panel.querySelector('#qacuity').checked;
+      layoutQuick();
       await sset({ settings }); toPage('settings', settings); settingsOpen = false; renderPanel(); renderTimes();
     }
     else if (act === 'toggle-log') { if (openLogs.has(id)) openLogs.delete(id); else openLogs.add(id); renderPanel(); }
@@ -699,6 +717,219 @@
   addEventListener('popstate', () => setTimeout(renderTimes, 50));
   setInterval(renderTimes, 700);
 
+  // ---------------------------------------------------------------- quick buttons
+  // One-tap chips that do what a finger would do in ESO's own pickers: open the list, tick the
+  // item, press OK. Nothing is written behind the app's back, so the screen and the save are ESO's.
+  // Names and ids come from ESO's configuration bundle (list SL.MEDICALHISTORY etc.).
+  const HISTORY_CHIPS = [
+    ['HTN', 'Hypertension (HTN)', 547], ['Diabetes', 'Diabetes', 545], ['COPD', 'Chronic Obstructive Pulmonary Disease (COPD)', 541],
+    ['CHF', 'Congestive Heart Failure (CHF)', 540], ['Asthma', 'Asthma', 535], ['CAD', 'Coronary Artery Disease (CAD)', 12846],
+    ['A-fib', 'Atrial Fibrillation', 10103], ['MI', 'Myocardial Infarction (MI)', 12871], ['Pacemaker/AICD', 'Pacemaker/AICD', 550],
+    ['Stroke/CVA', 'Stroke/CVA', 555], ['Seizures', 'Seizures', 553], ['Dementia', 'Dementia', 543],
+    ['Anxiety', 'Anxiety', 10076], ['Depression', 'Depression', 10071], ['Hyperlipidemia', 'Hyperlipidemia', 8212],
+    ['Hypothyroid', 'Hypothyroidism', 10273], ['Renal failure', 'Kidney/Renal Failure', 552], ['Dialysis', 'Dialysis', 11887],
+    ['GERD', 'Gastro-Esophageal Reflux Disease (GERD)', 8214], ['Cancer', 'Cancer, Unspecified', 537], ['Smoking', 'Smoking', 554],
+    ['None reported', 'None Reported', 12224],
+  ];
+  const ACUITY = {
+    initial: { label: 'Initial Patient Acuity', key: 'initialAcuity', items: { red: ['Critical (Red)', 10586], yellow: ['Emergent (Yellow)', 10587], green: ['Lower Acuity (Green)', 10588] } },
+    final: { label: 'Final Patient Acuity', key: 'finalAcuity', items: { red: ['Critical (Red)', 11838], yellow: ['Emergent (Yellow)', 11839], green: ['Lower Acuity (Green)', 11840] } },
+  };
+  let quickLayer = null;
+  const quickEls = new Map();   // key -> element in our layer
+  const pending = new Set();    // history names tapped, not yet committed
+  let quickBusy = false, commitTimer = null;
+  const norm = (t) => (t || '').replace(/\s+/g, ' ').trim();
+  const visible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+  function findByText(selector, text, opts) {
+    // the innermost visible element whose whole text is exactly this
+    const want = norm(text).toUpperCase();
+    let best = null;
+    for (const el of document.querySelectorAll(selector)) {
+      if (host && host.contains(el)) continue;
+      if (norm(el.textContent).toUpperCase() !== want) continue;
+      if (opts && opts.visible !== false && !visible(el)) continue;
+      if (!best || best.contains(el)) best = el;
+    }
+    return best;
+  }
+  const wait = (ms) => new Promise(r => setTimeout(r, ms));
+  async function until(fn, timeout, step) {
+    const t0 = Date.now();
+    for (;;) { const v = fn(); if (v) return v; if (Date.now() - t0 > timeout) return null; await wait(step || 80); }
+  }
+  function ensureQuickLayer() {
+    if (quickLayer || !shadow) return quickLayer;
+    quickLayer = document.createElement('div'); quickLayer.className = 'quick'; shadow.appendChild(quickLayer);
+    return quickLayer;
+  }
+  function quickEl(key, make) {
+    let el = quickEls.get(key);
+    if (!el) { el = make(); quickEls.set(key, el); ensureQuickLayer().appendChild(el); }
+    return el;
+  }
+  function dropQuick(prefix) {
+    for (const [k, el] of quickEls) if (k.startsWith(prefix)) { el.remove(); quickEls.delete(k); }
+  }
+  function currentRun() { const s = lastStatus; return s && s.currentRecordId ? s.runs.find(r => r.recordId === s.currentRecordId) : null; }
+  function onTab(view) { const s = lastStatus; return s && s.lastView && s.lastView.view === view && s.lastView.recordId === s.currentRecordId; }
+
+  // ---- history chips: to the right of the Add History button and in rows under it
+  function layoutHistory() {
+    const run = currentRun();
+    const anchor = settings.quickHistory !== false && run && !run.locked && onTab('Patient') ? findByText('button, a, div, span', 'Add History') : null;
+    const btn = anchor && (anchor.closest('button, a') || anchor);
+    if (!btn) { dropQuick('h:'); return; }
+    const r = btn.getBoundingClientRect();
+    if (!r.width) { dropQuick('h:'); return; }
+    const box = btn.parentElement ? btn.parentElement.getBoundingClientRect() : r;
+    const right = Math.max(r.right + 200, box.right - 8);
+    const have = new Set(((run.lists && run.lists.histories) || []).map(Number));
+    const gap = 6, rowH = 34;
+    let x = r.left + r.width + 12, y = r.top + (r.height - 28) / 2, row = 0;
+    const layer = ensureQuickLayer();
+    for (const [short, name, id] of HISTORY_CHIPS) {
+      const chip = quickEl('h:' + id, () => {
+        const c = document.createElement('button'); c.type = 'button'; c.className = 'chip'; c.textContent = short; c.title = name;
+        c.addEventListener('pointerdown', (e) => e.stopPropagation());
+        c.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); tapHistory(name, id); });
+        return c;
+      });
+      chip.classList.toggle('added', have.has(id));
+      chip.classList.toggle('on', pending.has(name));
+      chip.classList.toggle('busy', quickBusy);
+      chip.style.display = 'block';
+      chip.style.visibility = 'hidden';
+      layer.appendChild(chip);
+      const w = chip.getBoundingClientRect().width || 60;
+      if (x + w > right) { row++; x = r.left; y = r.bottom + 8 + (row - 1) * rowH; }
+      chip.style.left = Math.round(x) + 'px'; chip.style.top = Math.round(y) + 'px';
+      chip.style.visibility = '';
+      x += w + gap;
+    }
+    // reserve the rows under the button so nothing of ESO's sits beneath the chips
+    const need = row ? row * rowH + 8 : 0;
+    if (btn.style.marginBottom !== need + 'px') btn.style.marginBottom = need + 'px';
+  }
+  function tapHistory(name, id) {
+    if (quickBusy) return;
+    const run = currentRun();
+    if (run && run.lists && (run.lists.histories || []).map(Number).includes(id)) return; // already on the run
+    if (pending.has(name)) pending.delete(name); else pending.add(name);
+    layoutHistory();
+    clearTimeout(commitTimer);
+    if (pending.size) commitTimer = setTimeout(commitHistory, 1500);
+  }
+  async function commitHistory() {
+    if (quickBusy || !pending.size) return;
+    const names = [...pending];
+    quickBusy = true; layoutHistory();
+    const missed = [];
+    try {
+      const anchor = findByText('button, a, div, span', 'Add History');
+      const btn = anchor && (anchor.closest('button, a') || anchor);
+      if (!btn) throw new Error('Add History button not found');
+      showVeilMessage('Adding history…', names.join(', '));
+      btn.click();
+      const shelf = await until(() => { const h = findByText('shelf-panel h1, shelf-panel header', 'Add History') || Array.from(document.querySelectorAll('shelf-panel')).find(p => /Add History/i.test(p.textContent)); return h ? (h.closest('shelf-panel') || h) : null; }, 5000);
+      if (!shelf) throw new Error('the Add History list did not open');
+      const input = await until(() => shelf.querySelector('eso-search-input input, input[type=text]'), 3000);
+      if (!input) throw new Error('no search box in the list');
+      const setSearch = async (t) => { input.focus(); input.value = t; input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event('change', { bubbles: true })); await wait(120); };
+      for (const name of names) {
+        await setSearch(name);
+        const li = await until(() => Array.from(shelf.querySelectorAll('li')).find(l => visible(l) && norm(l.querySelector('.label-container > div, .label-container div') ? l.querySelector('.label-container > div, .label-container div').textContent : l.textContent).toUpperCase() === name.toUpperCase()), 3000);
+        if (!li) { missed.push(name); continue; }
+        const mark = li.querySelector('check-mark');
+        if (mark && mark.classList.contains('selected')) { pending.delete(name); continue; } // already ticked
+        (li.querySelector('.label-content') || li).click();
+        const ok = await until(() => { const m = li.querySelector('check-mark'); return m && m.classList.contains('selected'); }, 1500);
+        if (!ok) missed.push(name); else pending.delete(name);
+      }
+      await setSearch('');
+      const okBtn = Array.from(shelf.querySelectorAll('header button')).find(b => /^OK$/i.test(norm(b.textContent)));
+      if (!okBtn) throw new Error('no OK button');
+      okBtn.click();
+      await until(() => !document.body.contains(shelf) || !visible(shelf), 4000);
+    } catch (e) {
+      hideVeil(); quickBusy = false; layoutHistory();
+      alert('ESO Save: could not add the history. ' + (e && e.message ? e.message : '') + ' The list is left as ESO shows it; finish it by hand.');
+      return;
+    }
+    hideVeil(); quickBusy = false;
+    for (const n of names) if (!missed.includes(n)) pending.delete(n);
+    layoutHistory();
+    if (missed.length) alert('ESO Save: not found in ESO\'s list, add by hand: ' + missed.join(', '));
+  }
+
+  // ---- acuity: red / yellow / green next to the label, opens ESO's picker and picks the colour
+  function acuityField(label) {
+    const lab = findByText('label, span, div, p, legend', label);
+    if (!lab) return null;
+    // the field block: nearest ancestor that is wide and holds a picker control
+    let box = lab.parentElement;
+    for (let i = 0; box && i < 5; box = box.parentElement, i++) {
+      const r = box.getBoundingClientRect();
+      if (r.width < 200) continue;
+      const ctl = Array.from(box.querySelectorAll('[ng-click], button, a, [class*="icon" i], [class*="list" i]')).find(c => c !== lab && !c.contains(lab) && visible(c));
+      if (ctl) return { lab, box, ctl };
+    }
+    return null;
+  }
+  function layoutAcuity() {
+    const run = currentRun();
+    if (settings.quickAcuity === false || !run || run.locked || !onTab('Narrative')) { dropQuick('a:'); return; }
+    for (const [which, def] of Object.entries(ACUITY)) {
+      const f = acuityField(def.label);
+      if (!f) { dropQuick('a:' + which); continue; }
+      const r = f.lab.getBoundingClientRect();
+      const cur = run.lists ? Number(run.lists[def.key]) : null;
+      let x = r.right + 14;
+      for (const [colour, [name, id]] of Object.entries(def.items)) {
+        const sw = quickEl(`a:${which}:${colour}`, () => {
+          const b = document.createElement('button'); b.type = 'button'; b.className = 'sw ' + colour; b.title = name;
+          b.addEventListener('pointerdown', (e) => e.stopPropagation());
+          b.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); pickAcuity(which, name); });
+          return b;
+        });
+        sw.classList.toggle('cur', cur === id);
+        sw.classList.toggle('busy', quickBusy);
+        sw.style.left = Math.round(x) + 'px';
+        sw.style.top = Math.round(r.top + (r.height - 26) / 2) + 'px';
+        x += 34 + 8;
+      }
+    }
+  }
+  async function pickAcuity(which, name) {
+    if (quickBusy) return;
+    const def = ACUITY[which];
+    quickBusy = true; layoutAcuity();
+    try {
+      const f = acuityField(def.label);
+      if (!f) throw new Error(def.label + ' not found on the page');
+      f.ctl.click();
+      let shelf = await until(() => Array.from(document.querySelectorAll('shelf-panel, eso-single-select-panel')).find(p => visible(p) && Array.from(p.querySelectorAll('li')).some(l => norm(l.textContent).toUpperCase().includes(name.toUpperCase()))), 4000);
+      if (!shelf) { f.box.click(); shelf = await until(() => Array.from(document.querySelectorAll('shelf-panel, eso-single-select-panel')).find(p => visible(p) && Array.from(p.querySelectorAll('li')).some(l => norm(l.textContent).toUpperCase().includes(name.toUpperCase()))), 3000); }
+      if (!shelf) throw new Error('the acuity list did not open');
+      const li = Array.from(shelf.querySelectorAll('li')).find(l => visible(l) && norm((l.querySelector('.label-container > div') || l).textContent).toUpperCase() === name.toUpperCase());
+      if (!li) throw new Error(name + ' is not in the list');
+      (li.querySelector('.label-content') || li).click();
+      await wait(150);
+      // a single-select list usually closes itself; press OK if it is still open
+      if (document.body.contains(shelf) && visible(shelf)) {
+        const okBtn = Array.from((shelf.closest('shelf-panel') || shelf).querySelectorAll('header button')).find(b => /^OK$/i.test(norm(b.textContent)));
+        if (okBtn) okBtn.click();
+        await until(() => !document.body.contains(shelf) || !visible(shelf), 3000);
+      }
+    } catch (e) {
+      quickBusy = false; layoutAcuity();
+      alert('ESO Save: could not set the acuity. ' + (e && e.message ? e.message : ''));
+      return;
+    }
+    quickBusy = false; layoutAcuity();
+  }
+  function layoutQuick() { try { layoutHistory(); } catch (e) { /* keep going */ } try { layoutAcuity(); } catch (e) { /* keep going */ } }
+
   // ---------------------------------------------------------------- copy button on saved vitals
   // Each saved vital row in the Vitals tab shows its time (HH:MM:SS). A small copy button floats
   // just left of that cell; tapping it re-enters the vital's values as a new row with the current
@@ -865,11 +1096,11 @@
     setTimeout(decorateVitalRows, 300);
   }
   let rowTimer = null;
-  const scheduleRows = (ms) => { clearTimeout(rowTimer); rowTimer = setTimeout(decorateVitalRows, ms); };
+  const scheduleRows = (ms) => { clearTimeout(rowTimer); rowTimer = setTimeout(() => { decorateVitalRows(); layoutQuick(); }, ms); };
   const rowObserver = new MutationObserver(() => scheduleRows(150));
   const startRowObserver = () => { if (document.body) rowObserver.observe(document.body, { childList: true, subtree: true, characterData: true }); };
   if (document.body) startRowObserver(); else document.addEventListener('DOMContentLoaded', startRowObserver);
-  addEventListener('scroll', () => scheduleRows(30), { capture: true, passive: true });
+  addEventListener('scroll', () => { scheduleRows(30); layoutQuick(); }, { capture: true, passive: true });
   document.addEventListener('pointerdown', (e) => {
     if (!copyButtons.size || (host && e.composedPath().includes(host))) return;
     const t = e.target && e.target.closest ? e.target.closest('a, button, [role="tab"], li') : null;
@@ -877,5 +1108,5 @@
     if (label && Object.values(TAB_LABELS).includes(label) && t.getBoundingClientRect().top <= 260) { copyHiddenAt = Date.now(); if (copyLayer) copyLayer.style.display = 'none'; }
   }, true);
   addEventListener('resize', () => scheduleRows(60));
-  setInterval(decorateVitalRows, 700);
+  setInterval(() => { decorateVitalRows(); layoutQuick(); }, 700);
 })();
