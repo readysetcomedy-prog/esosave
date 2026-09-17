@@ -43,7 +43,7 @@
   const sget = (keys) => new Promise(res => storage.get(keys, (v) => res(v || {})));
   const sset = (obj) => new Promise(res => storage.set(obj, () => res()));
   const sremove = (keys) => new Promise(res => storage.remove(keys, () => res()));
-  const DEFAULT_SETTINGS = { purgeHoursAfterLock: 0, probeSec: 20, heldProbeSec: 8, warmTabs: true, cardCollapsed: false, showTimes: true };
+  const DEFAULT_SETTINGS = { purgeHoursAfterLock: 0, probeSec: 20, heldProbeSec: 8, warmTabs: true, cardCollapsed: false, showTimes: true, sendPrompt: true, unsentList: true };
 
   async function loadAll() {
     const all = await sget(null);
@@ -58,7 +58,8 @@
     const stale = Date.now() - 30 * 24 * 3600 * 1000;
     const dead = Object.values(runs).filter(r => {
       if (r.batches.some(b => b.status === 'held' || b.status === 'rejected')) return false;
-      if (r.locked && r.lockedAt && r.lockedAt <= cutoff) return true;
+      if ((r.sends || []).some(x => x.status === 'held')) return false;
+      if (r.locked && r.lockedAt && r.lockedAt <= Math.min(cutoff, Date.now() - 10 * 60 * 1000)) return true;
       if (!r.batches.length && !r.pendingCreate) return true;
       return (r.lastSeenAt || 0) < stale;
     });
@@ -76,7 +77,7 @@
     await purgeLocked(settings);
     await sremove(['fieldDefs', 'knownViews']).catch(() => {}); // superseded keys from earlier versions
     const fresh = await loadAll();
-    toPage('init', { runs: fresh.runs, templates: fresh.templates, settings, tabRequests: fresh.all.tabRequests || null, fieldDefs: fresh.all.fieldDefs2 || null });
+    toPage('init', { runs: fresh.runs, templates: fresh.templates, settings, tabRequests: fresh.all.tabRequests || null, fieldDefs: fresh.all.fieldDefs2 || null, emailed: fresh.all.emailed || null });
     setInterval(() => purgeLocked(settings), 10 * 60 * 1000);
   })();
   // The page script may have been injected before our listener existed; ask for a status once ready.
@@ -89,6 +90,16 @@
       await sset({ fieldDefs2: payload.fieldDefs });
     } else if (type === 'event' && payload && payload.name === 'vitalCopied') {
       onVitalCopied(payload);
+    } else if (type === 'event' && payload && payload.name === 'sendPrompt') {
+      showSendPrompt(payload);
+    } else if (type === 'event' && payload && payload.name === 'sent') {
+      onSent(payload);
+    } else if (type === 'persistEmailed' && payload && payload.pcrId) {
+      const cur = (await sget('emailed')).emailed || {};
+      cur[payload.pcrId] = payload.ts || Date.now();
+      const cutoff = Date.now() - 60 * 24 * 3600 * 1000;
+      for (const k of Object.keys(cur)) if (cur[k] < cutoff) delete cur[k];
+      await sset({ emailed: cur });
     } else if (type === 'persistTabRequests' && payload && payload.tabRequests) {
       await sset({ tabRequests: payload.tabRequests });
     } else if (type === 'persistTemplates') {
@@ -162,6 +173,10 @@
     .veil .track { height: 6px; background: #e5e7eb; border-radius: 3px; margin: 10px 0 12px; overflow: hidden; }
     .veil .fill { height: 100%; background: #15803d; width: 0; transition: width .3s; }
     .veil button.a { margin-top: 4px; }
+    .veil .row { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-top: 14px; }
+    .veil .row button.a { font-size: 15px; padding: 10px 16px; }
+    .urow { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid #eee; font-size: 13px; }
+    .urow .actions { margin: 0; }
     .pick { text-align: left; }
     .pick h2 { text-align: center; }
     .pick .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 0; border-bottom: 1px solid #eee; }
@@ -227,7 +242,8 @@
     if (!s.online) return { cls: 'warn', title: 'NO SIGNAL', msg: s.held ? held + '. Keep working.' : 'Keep working. Changes are being kept here.', num, btn: s.held ? 'Push now' : null };
     if (s.pushing) return { cls: 'info', title: 'Pushing to ESO…', msg: held, num };
     if (s.held) return { cls: 'warn', title: 'Changes held', msg: held + '. Pushing shortly.', num, btn: 'Push now' };
-    return { cls: 'good', title: 'ESO Save · signal OK', msg: cur && cur.lastSavedAt ? `last save ${fmtTime(cur.lastSavedAt)}` : 'all saved', num };
+    const unsent = settings.unsentList !== false && s.unsent && s.unsent.items.length;
+    return { cls: 'good', title: 'ESO Save · signal OK', msg: (cur && cur.lastSavedAt ? `last save ${fmtTime(cur.lastSavedAt)}` : 'all saved') + (unsent ? ` · ${unsent} run${unsent === 1 ? '' : 's'} not faxed` : ''), num, btn: unsent ? 'Not sent' : null };
   }
   let lastCls = null;
   function renderBar() {
@@ -265,7 +281,11 @@
   }
   function togglePanel(force) {
     panelOpen = force === undefined ? !panelOpen : !!force;
-    if (panelOpen) { if (!panel) { panel = document.createElement('div'); panel.className = 'panel'; shadow.appendChild(panel); } renderPanel(); panel.style.display = 'block'; }
+    if (panelOpen) {
+      if (!panel) { panel = document.createElement('div'); panel.className = 'panel'; shadow.appendChild(panel); }
+      renderPanel(); panel.style.display = 'block';
+      if (settings.unsentList !== false && (!lastStatus || !lastStatus.unsent || Date.now() - lastStatus.unsent.at > 2 * 60 * 1000)) toPage('action', { name: 'scanUnsent' });
+    }
     else if (panel) panel.style.display = 'none';
   }
   async function renderPanel() {
@@ -281,9 +301,19 @@
       parts.push(`<div class="run"><label class="s">Clear a run from this device <input type="number" min="0" max="720" id="purge" value="${esc(settings.purgeHoursAfterLock)}"> hours after it is locked (0 = as soon as the lock is seen)</label>` +
         `<label class="s"><input type="checkbox" id="warm" ${settings.warmTabs === false ? '' : 'checked'}> Open every tab once, quietly, when a run opens (so tabs you have not touched still work with no signal)</label>` +
         `<label class="s"><input type="checkbox" id="times" ${settings.showTimes === false ? '' : 'checked'}> Show the call times (dispatched, en route, on scene, at patient, depart, at destination, transfer) in the empty part of ESO's top bar</label>` +
+        `<label class="s"><input type="checkbox" id="sendprompt" ${settings.sendPrompt === false ? '' : 'checked'}> When a run is locked, offer to fax or email it to the destination if it has not been sent yet</label>` +
+        `<label class="s"><input type="checkbox" id="unsentlist" ${settings.unsentList === false ? '' : 'checked'}> Keep a list of locked runs from the last 15 days that have a fax or email destination but were never sent</label>` +
         `<div class="actions"><button class="a" data-act="save-settings">Save</button></div></div>`);
     }
-    const listed = s.runs.filter(r => r.counts.total || r.pendingCreate);
+    if (settings.unsentList !== false) {
+      const u = s.unsent;
+      const items = u ? u.items : [];
+      parts.push(`<div class="run unsent"><div class="head"><span class="num">Not sent yet</span><span class="muted">${u ? `locked in the last 15 days · checked ${fmtTime(u.at)}` : 'checking…'}</span></div>` +
+        (items.length ? items.map(i => `<div class="urow" data-pcr="${esc(i.pcrId)}"><div><b>${esc(i.incidentNumber || '')}</b> · ${esc(fmtWhen(i.incidentDateTime))}<br><span class="muted">${esc(i.patientName || '')} → ${esc(i.destinationName || '')}</span></div><div class="actions">${i.fax ? '<button class="a" data-act="send-fax">Fax</button>' : ''}${i.email ? '<button class="a sec" data-act="send-email">Email</button>' : ''}</div></div>`).join('')
+          : `<p class="muted">${u ? 'Every locked run with a fax or email destination has been sent.' : 'Looking at ESO\'s fax history and the locked runs…'}</p>`) +
+        `<div class="actions"><button class="a sec" data-act="rescan">Check again</button></div></div>`);
+    }
+    const listed = s.runs.filter(r => (r.counts.total || r.pendingCreate) && !(r.locked && !r.counts.held && !r.counts.rejected && !r.sends.some(x => x.status === 'held')));
     if (!listed.length) parts.push(`<p class="muted">No runs recorded yet. Open a run in ESO and every save will be recorded here.</p>`);
     for (const r of listed) {
       const sigs = all['sigs:' + r.recordId] || [];
@@ -291,6 +321,7 @@
       const pills = [];
       if (r.pendingCreate) pills.push('<span class="pill warn">not yet created on ESO</span>');
       if (c.held) pills.push(`<span class="pill warn">${c.held} held</span>`);
+      for (const x of r.sends) if (x.status === 'held') pills.push(`<span class="pill warn">${x.kind} held</span>`);
       if (c.rejected) pills.push(`<span class="pill bad">${c.rejected} rejected</span>`);
       if (r.locked) pills.push('<span class="pill good">locked</span>');
       else if (!c.held && !c.rejected && c.total) pills.push('<span class="pill good">all on ESO</span>');
@@ -330,9 +361,20 @@
       settings.purgeHoursAfterLock = Number.isFinite(v) && v >= 0 ? v : 0;
       settings.warmTabs = !!panel.querySelector('#warm').checked;
       settings.showTimes = !!panel.querySelector('#times').checked;
+      settings.sendPrompt = !!panel.querySelector('#sendprompt').checked;
+      settings.unsentList = !!panel.querySelector('#unsentlist').checked;
       await sset({ settings }); toPage('settings', settings); settingsOpen = false; renderPanel(); renderTimes();
     }
     else if (act === 'toggle-log') { if (openLogs.has(id)) openLogs.delete(id); else openLogs.add(id); renderPanel(); }
+    else if (act === 'rescan') { toPage('action', { name: 'scanUnsent' }); }
+    else if (act === 'send-fax' || act === 'send-email') {
+      const row = el.closest('.urow'); const pcr = row && row.dataset.pcr; if (!pcr) return;
+      const kind = act === 'send-fax' ? 'fax' : 'email';
+      const dest = row.querySelector('.muted').textContent.split('→').pop().trim();
+      if (!confirm(`${kind === 'fax' ? 'Fax' : 'Email'} ${row.querySelector('b').textContent} to ${dest}?`)) return;
+      showVeilMessage(kind === 'fax' ? 'Sending fax…' : 'Sending email…', 'Asking ESO to send the chart to ' + dest + '.');
+      toPage('action', { name: 'send', recordId: pcr, kind });
+    }
     else if (act === 'into-current' || act === 'into-new') showPagePicker(id, act === 'into-new');
     else if (act === 'retry') toPage('action', { name: 'retryRejected', recordId: id });
     else if (act === 'drop') { if (confirm('Drop the rejected changes? They will stay in the export but will not be pushed again.')) toPage('action', { name: 'dropRejected', recordId: id }); }
@@ -722,6 +764,39 @@
     veil.className = 'veil';
     veil.innerHTML = `<div class="box"><div class="spin"></div><h2>${esc(title)}</h2><div class="why">${esc(text)}</div></div>`;
     shadow.appendChild(veil);
+  }
+  // ---------------------------------------------------------------- send after lock
+  function showSendPrompt(p) {
+    if (settings.sendPrompt === false || !shadow) return;
+    hideVeil();
+    const dest = (p.fax.ok ? p.fax : p.email).destinationName || 'the destination';
+    veil = document.createElement('div');
+    veil.className = 'veil';
+    veil.style.cursor = 'default';
+    veil.innerHTML = `<div class="box"><h2>${esc(p.incidentNumber || 'This run')} is locked</h2>
+      <div class="why">${p.historyKnown ? 'It has not been sent yet. ' : ''}Send the chart to <b>${esc(dest)}</b>?</div>
+      <div class="row">${p.fax.ok ? '<button class="a" data-act="fax">Send fax</button>' : ''}${p.email.ok ? '<button class="a" data-act="email">Send email</button>' : ''}<button class="a sec" data-act="later">Not now</button></div>
+      <div class="why" style="margin-top:10px">${p.fax.ok && p.email.ok ? '' : esc(p.fax.ok ? (p.email.error ? '' : '') : (p.fax.error || ''))}</div></div>`;
+    veil.addEventListener('pointerdown', (e) => e.stopPropagation());
+    veil.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const act = e.target.dataset && e.target.dataset.act;
+      if (!act) return;
+      if (act === 'later') { hideVeil(); toPage('action', { name: 'note', recordId: p.recordId, msg: 'Not sent: the medic chose Not now. It will stay in the Not sent list.', level: 'warn' }); toPage('action', { name: 'scanUnsent' }); return; }
+      showVeilMessage(act === 'fax' ? 'Sending fax…' : 'Sending email…', 'Asking ESO to send the chart to ' + dest + '.');
+      toPage('action', { name: 'send', recordId: p.recordId, kind: act });
+    });
+    shadow.appendChild(veil);
+  }
+  function onSent(p) {
+    hideVeil();
+    const what = p.kind === 'fax' ? 'Fax' : 'Email';
+    if (!p.ok) { alert(`ESO Save: could not ${p.kind} the run. ${p.error || ''}`); return; }
+    if (p.held) { alert(`ESO Save: no signal right now. The ${p.kind} is held on this device and will be sent as soon as ESO answers.`); return; }
+    showVeilMessage(`${what} sent`, `ESO accepted the ${p.kind}${p.destinationName ? ' to ' + p.destinationName : ''}.`);
+    if (veil) { veil.querySelector('.spin').remove(); veil.style.cursor = 'default'; veil.addEventListener('click', hideVeil); }
+    setTimeout(() => { if (veil && /sent/.test(veil.textContent)) hideVeil(); }, 2500);
+    if (panelOpen) renderPanel();
   }
   async function onVitalCopied(p) {
     if (!p.ok) { copyBusy = false; hideVeil(); alert('ESO Save: ' + (p.error || 'could not copy the vital')); return; }

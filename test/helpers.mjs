@@ -27,6 +27,8 @@ export async function launch() {
     control: (c) => fetch(base + '/__control', { method: 'POST', body: JSON.stringify(c) }).then(r => r.json()),
     record: (id) => fetch(base + '/__record/' + id).then(r => r.json()),
     records: () => fetch(base + '/__records').then(r => r.json()),
+    shape: (id, body) => fetch(base + '/__shape/' + id, { method: 'POST', body: JSON.stringify(body) }).then(r => r.json()),
+    faxes: () => fetch(base + '/__faxes').then(r => r.json()),
     storage: () => sw.evaluate(() => new Promise(res => chrome.storage.local.get(null, res))),
     setStorage: (obj) => sw.evaluate((o) => new Promise(res => chrome.storage.local.set(o, res)), obj),
     status: (p = page) => p.evaluate(() => window.__esosave.status()),

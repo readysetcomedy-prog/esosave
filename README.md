@@ -23,6 +23,15 @@ to bad signal or a hung page.
   destination and transfer of patient sit in the empty part of ESO's dark top bar as HH:MM, updated
   the moment a time is entered, so nobody has to leave the page to work out when something happened.
   Can be turned off in Settings.
+- **Fax or email at lock.** The moment a run is locked, the extension asks ESO whether the run's
+  destination has a fax number or an email address and whether a fax has already gone (ESO's own
+  fax history). If there is somewhere to send it and it has not been sent, a prompt offers Send fax
+  or Send email right there in the run, and sends through ESO's own call. With no signal the send is
+  held with the run and goes when signal returns. Unlock and relock asks again until it has gone.
+- **Not sent list.** Agency-wide, on any device: locked runs from the last 15 days that have a fax or
+  email destination and no fax in ESO's history, with Fax and Email buttons. The card shows the count.
+  Emails leave no history in ESO, so a run emailed from a device without the extension still shows.
+  Both are settings, on by default.
 - **Copy a vital.** A small copy button floats just left of each saved vital's time in the Vitals
   tab; tapping it re-enters that vital as a new one with the current time, every other value the
   same. Only fields the app itself has been seen saving are copied, and the run log names any that
@@ -39,6 +48,11 @@ ESO's web app talks to its server with a small set of calls, recorded from a rea
 | `POST /ehr/api/PatientCareRecords` | start a run; returns the record id |
 | `POST /ehr/api/PatientCareRecords/{id}/autosave?scope=incident` | save a batch of field edits for one tab (every ~10 s) |
 | `GET  /ehr/api/PatientCareRecords/{id}/Views/Vitals` | load a tab; carries the run state (`draft` or locked) |
+| `POST /ehr/api/PatientCareRecords/{id}/lock` | lock (`unlock` likewise); body `{lockDateTime}` |
+| `GET  /ehr/api/PatientCareRecords/{id}/Fax/CanSend` | `{ok, destinationName, error}`; `Email/canSend` likewise |
+| `POST /ehr/api/PatientCareRecords/{id}/Fax/Send` | body `{sendDateTime}`; `Email/Send` likewise |
+| `POST /ehr/api/FaxHistory/Search` | `{incidentStartDate, incidentEndDate}` → every fax sent, agency-wide |
+| `POST /ehr/api/PatientCareRecords/Search` | the records feed; status filter value 2 = locked |
 
 Each autosave is a list of `EDIT` / `ADD` / `DELETE` operations with a field address and value. New
 list items (a vital, a treatment, a finding, a signed form) get a temporary key from the app and the
@@ -71,10 +85,9 @@ Verified against a mock of ESO's API built from the recording (`npm test`):
 
 Not yet verified on the real ESO, and the first things to watch on a real call:
 
-1. **Lock.** The lock call itself was not in the recording (locking would have sent a test run to
-   the state). Lock detection relies on the run state ESO returns changing away from `draft`, which
-   is what its API exposes on every tab load. If it never shows "locked" in the run list, tell me and
-   I'll match the real call.
+1. **Email/Send.** Recorded: lock, unlock, fax CanSend and Send, email canSend, fax history and the
+   feed. Not recorded: the email Send call itself (no email-capable destination was to hand); it is
+   assumed to mirror Fax/Send. If Send email ever fails, the error shown is ESO's own.
 2. **How ESO's app reacts to the fake "saved"** for an `ADD` while offline: it keeps its temporary
    key and the extension rewrites it later. The mock is strict about this and it passes; the real
    server should behave the same since it is the same contract.

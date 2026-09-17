@@ -404,6 +404,111 @@ test('the call times show in the top bar as they are entered, and the setting hi
   await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.x').click());
 });
 
+const sh = (sel) => T.page.evaluate((s) => { const el = document.getElementById('esosave-host').shadowRoot.querySelector(s); return el ? el.textContent : null; }, sel);
+const shClick = (sel) => T.page.evaluate((s) => { const el = document.getElementById('esosave-host').shadowRoot.querySelector(s); if (!el) throw new Error('no ' + s); el.click(); }, sel);
+function dialogs() { const seen = []; const on = (d) => { seen.push({ type: d.type(), message: d.message() }); d.accept().catch(() => {}); }; T.page.on('dialog', on); return { seen, off: () => T.page.off('dialog', on) }; }
+
+test('lock: offers to fax the run to its destination, sends through ESO, and does not ask again once it is in the fax history', async () => {
+  const id = await freshRun();
+  await T.shape(id, { destination: { name: 'HSHS St. John\'s', fax: '2175551234', email: null } });
+  const dl = dialogs();
+  try {
+    await app(() => window.app.lock());
+    await waitFor(() => sh('.veil'), { label: 'prompt' });
+    const text = await sh('.veil');
+    assert.match(text, /TEST-\d+ is locked/);
+    assert.match(text, /HSHS St. John's/);
+    assert.match(text, /Send fax/); assert.doesNotMatch(text, /Send email/, 'no email on file, so no email button');
+    await shClick('.veil [data-act=fax]');
+    await waitFor(async () => (await T.faxes()).faxHistory.some(f => f.pcrId === id), { label: 'ESO faxed it' });
+    const f = (await T.faxes()).faxHistory.find(f => f.pcrId === id);
+    assert.equal(f.destination, 'HSHS St. John\'s');
+    await waitFor(async () => /Fax sent/.test(await sh('.veil') || ''), { label: 'confirmation' });
+    await waitFor(async () => !(await sh('.veil')), { label: 'confirmation gone', timeout: 6000 });
+    const run = await T.run(id);
+    assert.ok(run.log.some(l => /Fax sent to HSHS/.test(l.msg)));
+    // unlock and lock again: ESO's history says it went, so no prompt
+    await app(() => window.app.unlock());
+    await app(() => window.app.lock());
+    await waitFor(async () => (await T.run(id)).log.some(l => /Already faxed/.test(l.msg)), { label: 'relock sees the history' });
+    assert.equal(await sh('.veil'), null, 'no second prompt');
+    assert.equal(dl.seen.length, 0, 'no alerts');
+  } finally { dl.off(); }
+});
+
+test('lock: email-only destination offers email only; Not now leaves it in the Not sent list; no destination asks nothing', async () => {
+  const id = await freshRun();
+  await T.shape(id, { destination: { name: 'Fayette County Hospital', fax: null, email: 'er@fayette.example' } });
+  const dl = dialogs();
+  try {
+    await app(() => window.app.lock());
+    const text = await waitFor(() => sh('.veil'), { label: 'prompt' });
+    assert.match(text, /Send email/); assert.doesNotMatch(text, /Send fax/);
+    await shClick('.veil [data-act=later]');
+    await waitFor(async () => !(await sh('.veil')), { label: 'prompt closed' });
+    await waitFor(async () => { const s = await T.status(); return s.unsent && s.unsent.items.some(i => i.pcrId === id && i.email && !i.fax); }, { label: 'listed as not sent', timeout: 20000 });
+    // send it from the list
+    await shClick('.bar [data-act=open]');
+    await waitFor(() => sh('.urow[data-pcr="' + id + '"] [data-act=send-email]'), { label: 'email button in the list' });
+    await shClick('.urow[data-pcr="' + id + '"] [data-act=send-email]');
+    await waitFor(async () => (await T.faxes()).emails.some(e => e.pcrId === id), { label: 'emailed' });
+    assert.ok(dl.seen.some(d => d.type === 'confirm' && /Email TEST-\d+ to Fayette/.test(d.message)), 'asked before sending');
+    await waitFor(async () => { const s = await T.status(); return s.unsent && !s.unsent.items.some(i => i.pcrId === id); }, { label: 'off the list', timeout: 20000 });
+    await shClick('.panel [data-act=close]');
+    // a run with no destination: nothing to offer
+    const id2 = await freshRun();
+    await app(() => window.app.lock());
+    await waitFor(async () => (await T.run(id2)).log.some(l => /Nothing to send: This record has no selected destination/.test(l.msg)), { label: 'nothing to send logged' });
+    assert.equal(await sh('.veil'), null);
+  } finally { dl.off(); }
+});
+
+test('lock with no signal: the fax is held with the run and sent when signal returns', async () => {
+  const id = await freshRun();
+  await T.shape(id, { destination: { name: 'Anderson Hospital', fax: '6185551234', email: null } });
+  const dl = dialogs();
+  try {
+    // the destination check happens on lock, while there is still signal; then signal drops
+    await app(() => window.app.lock());
+    await waitFor(() => sh('.veil'), { label: 'prompt' });
+    await T.context.setOffline(true);
+    await waitFor(async () => !(await T.status()).online, { label: 'offline noticed', timeout: 30000 });
+    await shClick('.veil [data-act=fax]');
+    await waitFor(() => dl.seen.some(d => /held on this device/.test(d.message)), { label: 'held notice' });
+    const held = await T.run(id);
+    assert.equal(held.sends.filter(x => x.status === 'held').length, 1);
+    assert.equal((await T.status()).held, 1, 'counts as a held change');
+    assert.equal((await T.faxes()).faxHistory.some(f => f.pcrId === id), false);
+    await T.context.setOffline(false);
+    await waitFor(async () => (await T.faxes()).faxHistory.some(f => f.pcrId === id), { label: 'sent after signal returned', timeout: 30000 });
+    await waitFor(async () => (await T.status()).held === 0, { label: 'nothing held' });
+    assert.ok((await T.run(id)).log.some(l => /Fax sent to Anderson Hospital now that signal is back/.test(l.msg)));
+  } finally { dl.off(); }
+});
+
+test('the Not sent list is agency-wide: locked runs from other devices with a destination and no fax in the history', async () => {
+  await T.page.goto(T.url);
+  await waitFor(() => T.page.evaluate(() => !!window.__esosave), { label: 'interceptor' });
+  // three runs locked elsewhere: one faxed already, one with a fax destination, one with no destination
+  const mk = async (dest) => { const r = await fetch(T.base + '/ehr/api/PatientCareRecords', { method: 'POST', headers: { 'x-custom-xsrf-token': 't' }, body: '{}' }).then(r => r.json()); await T.shape(r.data, { locked: true, destination: dest }); return r.data; };
+  const faxed = await mk({ name: 'Barnes Jewish Hospital', fax: '3145551234', email: null });
+  const unsent = await mk({ name: 'Gateway Regional Med Center', fax: '6185559876', email: 'er@gateway.example' });
+  const nowhere = await mk(null);
+  await fetch(T.base + `/ehr/api/PatientCareRecords/${faxed}/Fax/Send`, { method: 'POST', body: '{"sendDateTime":"09/17/2026 10:00:00"}' });
+  await app(() => window.app.start()); // gives the extension a token
+  await shClick('.bar [data-act=open]');
+  await waitFor(async () => { const s = await T.status(); return s.unsent && s.unsent.items.some(i => i.pcrId === unsent); }, { label: 'scan done', timeout: 30000 });
+  const s = await T.status();
+  assert.ok(!s.unsent.items.some(i => i.pcrId === faxed), 'faxed run not listed');
+  assert.ok(!s.unsent.items.some(i => i.pcrId === nowhere), 'run with no destination not listed');
+  const item = s.unsent.items.find(i => i.pcrId === unsent);
+  assert.equal(item.destinationName, 'Gateway Regional Med Center'); assert.equal(item.fax, true); assert.equal(item.email, true);
+  const text = await sh('.run.unsent');
+  assert.match(text, /Gateway Regional Med Center/);
+  assert.match(await sh('.bar'), /1 run not faxed/);
+  await shClick('.panel [data-act=close]');
+});
+
 test('locking a run marks it and it is cleared from the device after the retention window', async () => {
   const id = await app(() => window.app.recordId);
   await app(() => window.app.lock());

@@ -68,7 +68,14 @@
       if (view === 'Vitals') renderVitals(out.body);
       return out;
     },
-    async lock() { const r = await xhr('POST', `/ehr/api/PatientCareRecords/${this.recordId}/Lock`); await this.openTab('Incident'); return r.status; },
+    // the real app validates, then POSTs lock with a timestamp; unlock likewise
+    async lock() {
+      await xhr('GET', `/ehr/api//PatientCareRecords/${this.recordId}/Validate?lrIsLinked=false`);
+      const r = await xhr('POST', `/ehr/api/PatientCareRecords/${this.recordId}/lock`, JSON.stringify({ lockDateTime: '09/17/2026 10:44:47' }));
+      await this.openTab('Incident'); return r.status;
+    },
+    async unlock() { const r = await xhr('POST', `/ehr/api/PatientCareRecords/${this.recordId}/unlock`, JSON.stringify({ unlockDateTime: '09/17/2026 10:44:19' })); await this.openTab('Incident'); return r.status; },
+    async fax() { const c = JSON.parse((await xhr('GET', `/ehr/api/PatientCareRecords/${this.recordId}/Fax/CanSend`)).text); if (!c.ok) return c; const r = await xhr('POST', `/ehr/api/PatientCareRecords/${this.recordId}/Fax/Send`, JSON.stringify({ sendDateTime: '09/17/2026 10:40:14' })); return JSON.parse(r.text); },
     async attachments() { const r = await xhr('GET', `/ehr/api/PatientCareRecords/${this.recordId}/Attachments`); return JSON.parse(r.text); },
     uuid,
   };

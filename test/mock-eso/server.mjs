@@ -63,7 +63,10 @@ export function applyToTree(tree, op) {
 
 export function createMockEso() {
   const records = new Map();
-  const control = { loggedOut: false, rejectValue: null, failAutosaves: 0, refuseAutosaves: 0, log: [] };
+  const control = { loggedOut: false, rejectValue: null, failAutosaves: 0, refuseAutosaves: 0, faxStatus: 'SUCCESS', log: [] };
+  const faxHistory = []; // agency-wide, like ESO's Fax History
+  const emails = [];
+  let faxSeq = 7370000;
   let seq = 0;
 
   function newRecord() {
@@ -72,6 +75,7 @@ export function createMockEso() {
     const rec = {
       id, incidentNumber: `TEST-${String(seq).padStart(4, '0')}`, state: 'draft', locked: false,
       tree: {}, ops: [], mappings: [], knownKeys: new Set(), autosaves: 0,
+      incidentDateTime: new Date(), destination: null, // { name, fax, email }
       crew: [{ personnelId: 'person-1', itemId: randomUUID(), firstName: 'TEST', lastName: 'MEDIC', rank: 0 }],
     };
     rec.knownKeys.add(rec.crew[0].itemId);
@@ -171,6 +175,16 @@ export function createMockEso() {
         return r ? send(200, { id: r.id, incidentNumber: r.incidentNumber, state: r.state, tree: r.tree, ops: r.ops, mappings: r.mappings, crew: r.crew, autosaves: r.autosaves }) : send(404, { error: 'no such record' });
       }
       if (path === '/__log') return send(200, control.log);
+      // shape a record the way an admin would: destination, lock state, incident date
+      if (path.startsWith('/__shape/') && req.method === 'POST') {
+        const r = records.get(path.split('/')[2]); if (!r) return send(404, { error: 'no such record' });
+        const b = JSON.parse(body || '{}');
+        if ('destination' in b) r.destination = b.destination;
+        if ('locked' in b) { r.locked = !!b.locked; r.state = r.locked ? 'locked' : 'draft'; }
+        if (b.incidentDateTime) r.incidentDateTime = new Date(b.incidentDateTime);
+        return send(200, { ok: true });
+      }
+      if (path === '/__faxes') return send(200, { faxHistory, emails });
       // ---- static app
       if (path === '/ehr' || path === '/ehr/') return send(200, readFileSync(join(publicDir, 'index.html'), 'utf8'), 'text/html; charset=utf-8');
       if (path === '/ehr/app.js') return send(200, readFileSync(join(publicDir, 'app.js'), 'utf8'), 'text/javascript');
@@ -183,6 +197,27 @@ export function createMockEso() {
       if (rest.startsWith('WebApi') && req.method === 'POST') return send(200, { result: '', status: 204 });
       if (rest.startsWith('custom/lookup')) return send(200, { items: [1, 2, 3] });
       if (rest === 'PatientCareRecords' && req.method === 'POST') { const r = newRecord(); return send(200, { result: 'Success', data: r.id }); }
+      const esoDate = (d) => `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}/${d.getFullYear()}`;
+      const esoStamp = (d) => `${esoDate(d)} @${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
+      const parseEso = (t) => { const m = /^(\d\d)\/(\d\d)\/(\d{4})/.exec(String(t || '')); return m ? new Date(+m[3], +m[1] - 1, +m[2]) : null; };
+      // the records feed: POST /PatientCareRecords/Search {startDate,endDate,index,count,filters:[{fieldRef:'PCRSEARCHSTATUS',itemId:6,value:[2]}]}
+      if (rest === 'PatientCareRecords/Search' && req.method === 'POST') {
+        const q = JSON.parse(body || '{}');
+        const from = parseEso(q.startDate), to = parseEso(q.endDate); if (to) to.setHours(23, 59, 59, 999);
+        const st = (q.filters || []).find(f => f.fieldRef === 'PCRSEARCHSTATUS');
+        const wantLocked = st && Array.isArray(st.value) && st.value.includes(2);
+        const rows = [...records.values()].filter(r => (!from || r.incidentDateTime >= from) && (!to || r.incidentDateTime <= to) && (!st || (wantLocked ? r.locked : !r.locked)))
+          .sort((a, b) => b.incidentDateTime - a.incidentDateTime)
+          .map(r => ({ status: r.locked ? 'REPORT_LOCKED' : 'REPORT_UNLOCKED', incidentDateTime: r.incidentDateTime.toISOString(), incidentNumber: r.incidentNumber, unitId: null, sceneLocation: null, patientName: 'TEST, PATIENT', leadProviderNonCrewName: null, leadProviderAgencyPersonId: null, cardiacAttachmentCount: 0, otherAttachmentCount: 0, pcrId: r.id, incidentUnitId: null, destinationName: r.destination ? r.destination.name : null, fax: null, deleted: false, callNature: null }));
+        const index = Number(q.index) || 0, count = Number(q.count) || 100;
+        return send(200, { callNatureIsActive: false, data: rows.slice(index, index + count), meta: null, responseStatus: null });
+      }
+      if (rest === 'FaxHistory/Search' && req.method === 'POST') {
+        const q = JSON.parse(body || '{}');
+        const from = parseEso(q.incidentStartDate), to = parseEso(q.incidentEndDate); if (to) to.setHours(23, 59, 59, 999);
+        const rows = faxHistory.filter(f => { const r = records.get(f.pcrId); const d = r ? r.incidentDateTime : new Date(); return (!from || d >= from) && (!to || d <= to); }).slice().reverse();
+        return send(200, { data: rows });
+      }
       const m = /^PatientCareRecords\/([^/]+)(?:\/(.*))?$/.exec(rest);
       if (!m) return send(404, { error: 'unknown api' });
       const rec = records.get(m[1]);
@@ -198,14 +233,34 @@ export function createMockEso() {
       if (tail === 'CardiacMonitor') return send(200, { data: [], hasImportedCases: false });
       if (tail === 'Attachments') return send(200, { data: { model: { attachments: [], incidentNumber: rec.incidentNumber } }, meta: { state: rec.state }, responseStatus: null });
       if (tail.startsWith('Validate')) return send(200, { issues: [] });
-      if (tail === 'Lock' && req.method === 'POST') { rec.state = 'locked'; rec.locked = true; return send(200, { result: 'Success', data: null }); }
-      if (tail === 'Unlock' && req.method === 'POST') { rec.state = 'draft'; rec.locked = false; return send(200, { result: 'Success', data: null }); }
+      if (/^lock$/i.test(tail) && req.method === 'POST') { rec.state = 'locked'; rec.locked = true; return send(200, { result: 'Success', data: null }); }
+      if (/^unlock$/i.test(tail) && req.method === 'POST') { rec.state = 'draft'; rec.locked = false; return send(200, { result: 'Success', data: null }); }
+      // fax / email, exactly as ESO answers
+      const canSend = (kind) => {
+        const d = rec.destination;
+        if (!d) return { ok: false, destinationName: null, error: 'This record has no selected destination.', resultCode: -1 };
+        if (kind === 'fax' && !d.fax) return { ok: false, destinationName: null, error: "The patient's destination does not have an associated fax number", resultCode: -2 };
+        if (kind === 'email' && !d.email) return { ok: false, destinationName: null, error: "The patient's destination does not have an associated email address", resultCode: -2 };
+        return { ok: true, destinationName: d.name, error: null, resultCode: 0 };
+      };
+      if (/^Fax\/CanSend$/i.test(tail) && req.method === 'GET') return send(200, canSend('fax'));
+      if (/^Email\/canSend$/i.test(tail) && req.method === 'GET') return send(200, canSend('email'));
+      if (/^Fax\/Send$/i.test(tail) && req.method === 'POST') {
+        const c = canSend('fax'); if (!c.ok) return send(400, { result: 'Failure', message: c.error });
+        faxHistory.push({ itemId: String(++faxSeq), sentAt: esoStamp(new Date()), incident: rec.incidentNumber, destination: rec.destination.name, status: control.faxStatus, pcrId: rec.id });
+        return send(200, { result: 'Success', data: null });
+      }
+      if (/^Email\/Send$/i.test(tail) && req.method === 'POST') {
+        const c = canSend('email'); if (!c.ok) return send(400, { result: 'Failure', message: c.error });
+        emails.push({ pcrId: rec.id, incident: rec.incidentNumber, destination: rec.destination.name, at: Date.now() });
+        return send(200, { result: 'Success', data: null });
+      }
       return send(404, { error: 'unknown api: ' + rest });
     });
   });
 
   return {
-    server, records, control,
+    server, records, control, faxHistory, emails,
     listen: () => new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve(`http://127.0.0.1:${server.address().port}`))),
     close: () => new Promise((resolve) => server.close(resolve)),
   };

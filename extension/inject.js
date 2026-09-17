@@ -27,7 +27,7 @@
   if (ext) return;
   if (window.__esosave) return;
 
-  const VERSION = '0.3.2';
+  const VERSION = '0.4.0';
   const API_PREFIX_RE = /^\/ehr\/api\/+/i;
   const FAKE_OK_TEXT = '{"result":"Success","data":[]}';
   const PROBE_PATH = '/ehr/api/thirdpartydata/partners';
@@ -85,7 +85,7 @@
       'pediatricTraumaScore.pediatricTraumaBpId': ['PEDIATRICTRAUMABPID', 'singleselect'], 'pediatricTraumaScore.pediatricTraumaSkeletalId': ['PEDIATRICTRAUMASKELETALID', 'singleselect'],
       'pediatricTraumaScore.pediatricTraumaTotalScore': ['PEDIATRICTRAUMATOTALSCORE', 'integer'],
     },
-    settings: { purgeHoursAfterLock: 0, probeSec: 20, heldProbeSec: 8 },
+    settings: { purgeHoursAfterLock: 0, probeSec: 20, heldProbeSec: 8, sendPrompt: true, unsentList: true },
     online: navigator.onLine !== false,
     loggedOut: false,
     pushing: false,
@@ -128,6 +128,7 @@
       createdAt: Date.now(), lastSeenAt: Date.now(), lastSavedAt: null,
       nextSeq: 0, batches: [], keyMap: {}, views: {}, crew: null,
       restoredFrom: null, fresh: false, log: [],
+      sends: [], emailedAt: null,
     };
   }
   function getRun(recordId) {
@@ -140,7 +141,8 @@
     if (S.currentRecordId !== run.recordId) { S.currentRecordId = run.recordId; emit(); }
   }
   const heldCount = (run) => run.batches.reduce((n, b) => n + (b.status === 'held' ? 1 : 0), 0);
-  const hasHeld = (run) => run.batches.some(b => b.status === 'held');
+  const heldSends = (run) => (run.sends || []).filter(x => x.status === 'held').length;
+  const hasHeld = (run) => run.batches.some(b => b.status === 'held') || heldSends(run) > 0;
   const needsPush = (run) => !!run.pendingCreate || hasHeld(run);
 
   function log(run, msg, level = 'info') {
@@ -495,6 +497,16 @@
         if (b.synthetic) { b.status = 'dropped'; b.error = summarize(res); log(run, `ESO refused the copied vital, so it was dropped (${b.error}). Enter it by hand.`, 'error'); persist(run); emit(); continue; }
         reject(run, b, res); persist(run); emit();
       }
+      for (const x of (run.sends || [])) {
+        if (x.status !== 'held') continue;
+        const res = await sendCall(target, x.kind);
+        const o = outcome(res);
+        if (o === 'net') { setOnline(false, 'send failed'); return false; }
+        if (o === 'auth') { setLoggedOut(true); return false; }
+        if (o === 'ok') { x.status = 'sent'; x.sentAt = Date.now(); if (x.kind === 'email') { run.emailedAt = Date.now(); post('persistEmailed', { pcrId: target, ts: run.emailedAt }); } log(run, `${x.kind === 'fax' ? 'Fax' : 'Email'} sent to ${x.destinationName || 'the destination'} now that signal is back.`, 'good'); }
+        else { x.status = 'failed'; x.error = summarize(res); log(run, `ESO refused the ${x.kind} that was held: ${x.error}`, 'error'); }
+        persist(run); emit(); scheduleUnsentScan(5000);
+      }
       if (!hasHeld(run)) {
         const bad = run.batches.filter(b => b.status === 'rejected').length;
         log(run, bad ? `Pushed everything ESO would take for ${run.incidentNumber || 'this run'}; ${bad} change${bad === 1 ? '' : 's'} rejected (see above).` : `All changes for ${run.incidentNumber || 'this run'} are on ESO.`, bad ? 'warn' : 'good');
@@ -662,6 +674,118 @@
       }
     }
   }
+  // ------------------------------------------------------------------ fax / email after lock
+  // ESO's own calls, recorded from the app: GET .../Fax/CanSend and .../Email/canSend answer
+  // {ok, destinationName, error}; POST .../Fax/Send and .../Email/Send take {sendDateTime};
+  // POST /FaxHistory/Search {incidentStartDate, incidentEndDate} lists faxes agency-wide;
+  // POST /PatientCareRecords/Search lists the feed (status filter value 2 = locked).
+  const esoDate = (d) => `${pad(d.getMonth() + 1)}/${pad(d.getDate())}/${d.getFullYear()}`;
+  const daysAgo = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return d; };
+  const canSendCache = new Map(); // pcrId -> { at, fax, email }
+  async function canSend(pcrId, fresh) {
+    const hit = canSendCache.get(pcrId);
+    if (hit && !fresh && Date.now() - hit.at < 3600 * 1000) return hit;
+    const get = async (path) => { const res = await rawRequest({ method: 'GET', url: apiUrl(`/PatientCareRecords/${pcrId}/${path}`), headers: headersFor(false), timeout: 20000 }); const j = outcome(res) === 'ok' ? tryJSON(res.text) : null; return j && typeof j === 'object' ? { ok: !!j.ok, destinationName: j.destinationName || null, error: j.error || null } : { ok: false, destinationName: null, error: outcome(res) === 'net' ? 'no signal' : summarize(res), unknown: true }; };
+    const out = { at: Date.now(), fax: await get('Fax/CanSend'), email: await get('Email/canSend') };
+    if (!out.fax.unknown && !out.email.unknown) canSendCache.set(pcrId, out);
+    return out;
+  }
+  async function faxHistory(days) {
+    const res = await rawRequest({ method: 'POST', url: apiUrl('/FaxHistory/Search'), headers: headersFor(true), timeout: 30000,
+      body: JSON.stringify({ incidentStartDate: esoDate(daysAgo(days)) + ' 00:00:00', incidentEndDate: esoDate(new Date()) + ' 23:59:59' }) });
+    if (outcome(res) !== 'ok') return null;
+    const j = tryJSON(res.text);
+    return j && Array.isArray(j.data) ? j.data : null;
+  }
+  const FAX_FAILED_RE = /fail|error|reject|cancel/i;
+  function sentEntry(history, pcrId) {
+    let best = null;
+    for (const f of history || []) { if (f && f.pcrId === pcrId && !FAX_FAILED_RE.test(String(f.status || ''))) { best = f; } }
+    return best;
+  }
+  function sendCall(pcrId, kind) {
+    return rawRequest({ method: 'POST', url: apiUrl(`/PatientCareRecords/${pcrId}/${kind === 'email' ? 'Email' : 'Fax'}/Send`), headers: headersFor(true), timeout: 30000,
+      body: JSON.stringify({ sendDateTime: fmtEsoLocal(new Date()) }) });
+  }
+  // Right after the app locks a run: is there somewhere to send it, and has it gone already?
+  async function afterLock(run) {
+    if (S.settings.sendPrompt === false) return;
+    const pcrId = run.realId || run.recordId;
+    const c = await canSend(pcrId, true);
+    if (!c.fax.ok && !c.email.ok) {
+      log(run, `Locked. Nothing to send: ${c.fax.error || c.email.error || 'no fax or email on file for the destination'}.`, 'info');
+      return;
+    }
+    const history = await faxHistory(45);
+    const already = history ? sentEntry(history, pcrId) : null;
+    if (already) { log(run, `Locked. Already faxed to ${already.destination} at ${already.sentAt}.`, 'info'); return; }
+    if (run.emailedAt || (S.emailed && S.emailed[pcrId])) { log(run, 'Locked. Already emailed from this device.', 'info'); return; }
+    if ((run.sends || []).some(x => x.status === 'held' || x.status === 'sent')) return;
+    log(run, `Locked. Asking whether to ${c.fax.ok ? 'fax' : 'email'} it to ${(c.fax.ok ? c.fax : c.email).destinationName}.`, 'info');
+    post('event', { name: 'sendPrompt', recordId: run.recordId, pcrId, incidentNumber: run.incidentNumber, fax: c.fax, email: c.email, historyKnown: !!history });
+  }
+  // Send now, or hold it with the run's other changes when there is no signal.
+  async function sendRecord(recordId, kind) {
+    const run = S.runs[recordId] || null;
+    const pcrId = run ? (run.realId || run.recordId) : recordId;
+    const c = canSendCache.get(pcrId);
+    const destinationName = c && c[kind] && c[kind].destinationName || null;
+    const fail = (error) => { if (run) log(run, `Could not ${kind} the run: ${error}`, 'error'); post('event', { name: 'sent', recordId, pcrId, kind, ok: false, error }); };
+    if (run && (!S.online || S.loggedOut || run.pendingCreate || run.pushing || hasHeld(run))) {
+      run.sends = run.sends || [];
+      run.sends.push({ kind, destinationName, ts: Date.now(), status: 'held' });
+      persist(run, true); emit(); kick(300);
+      log(run, `No signal: the ${kind} to ${destinationName || 'the destination'} is held on this device and will go when signal returns.`, 'warn');
+      return post('event', { name: 'sent', recordId, pcrId, kind, ok: true, held: true, destinationName });
+    }
+    const res = await sendCall(pcrId, kind);
+    const o = outcome(res);
+    if (o === 'ok') {
+      if (run) { run.sends = run.sends || []; run.sends.push({ kind, destinationName, ts: Date.now(), status: 'sent', sentAt: Date.now() }); if (kind === 'email') run.emailedAt = Date.now(); persist(run); log(run, `${kind === 'fax' ? 'Fax' : 'Email'} sent to ${destinationName || 'the destination'}.`, 'good'); }
+      if (kind === 'email') { S.emailed = S.emailed || {}; S.emailed[pcrId] = Date.now(); post('persistEmailed', { pcrId, ts: Date.now() }); }
+      setOnline(true); emit(); scheduleUnsentScan(4000);
+      return post('event', { name: 'sent', recordId, pcrId, kind, ok: true, destinationName });
+    }
+    if (o === 'auth') { setLoggedOut(true); return fail('ESO logged you out. Log in and try again.'); }
+    if (o === 'net') return fail(run ? 'ESO did not answer. Try again in a moment.' : 'No signal. Try again when ESO answers.');
+    fail(`ESO refused: ${summarize(res)}`);
+  }
+  // Agency-wide: locked runs from the last 15 days that have a fax or email destination and no
+  // fax in ESO's history (and no email sent from a device running this extension).
+  let unsentTimer = null;
+  function scheduleUnsentScan(delay) { if (S.settings.unsentList === false) return; clearTimeout(unsentTimer); unsentTimer = setTimeout(() => scanUnsent().catch(() => {}), delay == null ? 2000 : delay); }
+  async function scanUnsent() {
+    if (S.settings.unsentList === false || !S.online || S.loggedOut || !S.xsrf || S.scanning) return;
+    S.scanning = true;
+    try {
+      const rows = [];
+      for (let index = 0; index < 1000; index += 100) {
+        const res = await rawRequest({ method: 'POST', url: apiUrl('/PatientCareRecords/Search'), headers: headersFor(true), timeout: 30000,
+          body: JSON.stringify({ startDate: esoDate(daysAgo(15)), endDate: esoDate(new Date()), index, count: 100, filters: [{ fieldRef: 'PCRSEARCHSTATUS', itemId: 6, value: [2] }] }) });
+        if (outcome(res) !== 'ok') { if (outcome(res) === 'net') setOnline(false, 'feed did not load'); return; }
+        const j = tryJSON(res.text);
+        const page = j && Array.isArray(j.data) ? j.data : [];
+        rows.push(...page);
+        if (page.length < 100) break;
+      }
+      const history = await faxHistory(45);
+      if (!history) return;
+      const emailed = S.emailed || {};
+      for (const run of Object.values(S.runs)) if (run.emailedAt) emailed[run.realId || run.recordId] = run.emailedAt;
+      const candidates = rows.filter(r => r && r.pcrId && !r.deleted && r.destinationName && !sentEntry(history, r.pcrId) && !emailed[r.pcrId]).slice(0, 40);
+      const items = [];
+      for (const r of candidates) {
+        const c = await canSend(r.pcrId);
+        if (c.fax.unknown && c.email.unknown) continue;
+        if (!c.fax.ok && !c.email.ok) continue;
+        items.push({ pcrId: r.pcrId, incidentNumber: r.incidentNumber, incidentDateTime: r.incidentDateTime, patientName: r.patientName, destinationName: c.fax.destinationName || c.email.destinationName || r.destinationName, fax: c.fax.ok, email: c.email.ok });
+      }
+      S.unsent = { at: Date.now(), items, locked: rows.length };
+      emit();
+    } finally { S.scanning = false; }
+  }
+  setInterval(() => { if (S.unsent && Date.now() - S.unsent.at > 3600 * 1000) scheduleUnsentScan(0); }, 60 * 1000);
+
   // ------------------------------------------------------------------ copy a vital
   const VITAL_ITEM_RE = /^vitals\.vitalSigns\.\['[^']+'\]\.(.+)$/;
   function learnFieldDefs(ops) {
@@ -875,7 +999,10 @@
       setOnline(true); setLoggedOut(false);
       observeMeta(run, tryJSON(res.text));
       cachePut(req.method, req.url, req.body, res);
-      if (kind.method !== 'GET' && /lock|final|submit/i.test(kind.tail)) { setLocked(run, true); persist(run); }
+      if (kind.method !== 'GET' && /^unlock$/i.test(kind.tail)) { setLocked(run, false); persist(run); }
+      else if (kind.method !== 'GET' && /lock|final|submit/i.test(kind.tail)) { setLocked(run, true); persist(run); afterLock(run); }
+      if (kind.method === 'POST' && /^Email\/Send$/i.test(kind.tail)) { run.emailedAt = Date.now(); persist(run); post('persistEmailed', { pcrId: run.realId || run.recordId, ts: run.emailedAt }); scheduleUnsentScan(5000); }
+      if (kind.method === 'POST' && /^Fax\/Send$/i.test(kind.tail)) scheduleUnsentScan(5000);
     } else if (o === 'net') {
       setOnline(false, 'request failed');
       const hit = cacheGet(req.method, req.url, req.body);
@@ -1058,6 +1185,7 @@
       incidentNumber: run.incidentNumber, state: run.state, locked: run.locked, lockedAt: run.lockedAt,
       createdAt: run.createdAt, lastSeenAt: run.lastSeenAt, lastSavedAt: run.lastSavedAt,
       restoredFrom: run.restoredFrom, counts, pages, log: run.log.slice(-60), times: run.times || null,
+      sends: (run.sends || []).map(x => ({ kind: x.kind, status: x.status, destinationName: x.destinationName, ts: x.ts })), emailedAt: run.emailedAt || null,
       hasViews: Object.keys(run.views).length, hasCrew: !!(run.crew && run.crew.length),
     };
   }
@@ -1066,7 +1194,8 @@
     return {
       version: VERSION, online: S.online, loggedOut: S.loggedOut, pushing: S.pushing, ready: S.ready, hasToken: !!S.xsrf,
       currentRecordId: S.currentRecordId, runs, lastEvent: S.lastEvent, lastView: S.lastView,
-      held: runs.reduce((n, r) => n + r.counts.held + (r.pendingCreate ? 1 : 0), 0),
+      held: runs.reduce((n, r) => n + r.counts.held + (r.pendingCreate ? 1 : 0) + r.sends.filter(x => x.status === 'held').length, 0),
+      unsent: S.unsent || null,
       rejected: runs.reduce((n, r) => n + r.counts.rejected, 0),
       hasTemplates: !!(S.templates && S.templates.views && S.templates.views.Incident),
     };
@@ -1088,6 +1217,8 @@
       merged.crew = mem.crew || r.crew || null;
       merged.incidentNumber = mem.incidentNumber || r.incidentNumber || null;
       merged.times = mem.times || r.times || null;
+      merged.sends = [...(r.sends || []), ...(mem.sends || [])];
+      merged.emailedAt = mem.emailedAt || r.emailedAt || null;
       merged.state = mem.state || r.state;
       merged.log = [...(r.log || []), ...(mem.log || [])];
       for (const b of mem.batches) merged.batches.push({ ...b, seq: merged.nextSeq++ });
@@ -1106,8 +1237,10 @@
           for (const [view, reqs] of Object.entries(payload.tabRequests)) if (Array.isArray(reqs)) for (const r of reqs) if (r && r.url) noteTabRequest(view, r.method || 'GET', r.url, r.body);
         }
         if (payload.settings) Object.assign(S.settings, payload.settings);
+        if (payload.emailed && typeof payload.emailed === 'object') S.emailed = payload.emailed;
         S.ready = true;
         emit();
+        scheduleUnsentScan(20000);
         if (anyHeld()) { log(null, 'Found changes held from before. Pushing as soon as ESO answers.', 'warn'); kick(500); }
       } else if (type === 'settings') {
         Object.assign(S.settings, payload || {}); emit();
@@ -1122,6 +1255,8 @@
         else if (a.name === 'status') { emit(); }
         else if (a.name === 'note') { const run = S.runs[a.recordId]; if (run) log(run, String(a.msg || ''), a.level || 'info'); }
         else if (a.name === 'copyVital') { copyVital(a.recordId || S.currentRecordId, String(a.time || ''), Number(a.nth) || 0); }
+        else if (a.name === 'send') { sendRecord(a.recordId, a.kind === 'email' ? 'email' : 'fax'); }
+        else if (a.name === 'scanUnsent') { scheduleUnsentScan(0); }
       }
     } catch (e) { log(null, 'ESO Save internal error: ' + (e && e.message), 'error'); }
   });
