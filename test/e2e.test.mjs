@@ -373,7 +373,10 @@ test('the call times show in the top bar as they are entered, and the setting hi
   assert.match(s0.text, /Disp--:--Enr--:--Scene--:--At pt--:--Depart--:--Dest--:--Xfer--:--/);
   const bar = await T.page.evaluate(() => document.getElementById('topbar').getBoundingClientRect().toJSON());
   assert.ok(s0.rect.top >= bar.top && s0.rect.bottom <= bar.bottom, 'inside the top bar');
-  assert.ok(s0.rect.left > bar.left + 40, 'clear of the menu control on the left');
+  // centred in the gap between what ESO shows on the left and on the right of the bar
+  const ends = await T.page.evaluate(() => { const [l, r] = document.querySelectorAll('#topbar > span'); return { l: l.getBoundingClientRect().right, r: r.getBoundingClientRect().left }; });
+  assert.ok(s0.rect.left > ends.l && s0.rect.right < ends.r, 'between the left and right content');
+  assert.ok(Math.abs((s0.rect.left + s0.rect.right) / 2 - (ends.l + ends.r) / 2) < 20, `centred (strip ${(s0.rect.left + s0.rect.right) / 2}, gap ${(ends.l + ends.r) / 2})`);
   // the app saves a time the way ESO's app does: only the clock part is real
   await app(() => { window.app.edit('incident', 'incident.incidentTimes.enRouteTime', '01/01/1890 13:05:00', 'time'); window.app.edit('incident', 'incident.incidentTimes.onSceneTime', '01/01/1890 13:12:00', 'time'); });
   const s1 = await waitFor(async () => { const x = await strip(); return x && /Enr13:05/.test(x.text) ? x : null; }, { label: 'time shows' });

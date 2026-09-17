@@ -132,7 +132,7 @@
     .times .t .l { font-size: 10px; letter-spacing: .04em; text-transform: uppercase; opacity: .75; }
     .times .t .v { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: 1px; }
     .times .t.empty .v { opacity: .35; font-weight: 400; }
-    @media (max-width: 900px) { .times .t { min-width: 40px; padding: 2px 4px; } .times .t .v { font-size: 13px; } }
+    .times.tight { gap: 3px; } .times.tight .t { min-width: 36px; padding: 2px 3px; } .times.tight .t .v { font-size: 13px; } .times.tight .t .l { font-size: 9px; }
     .copylayer .esosave-copy { position: fixed; pointer-events: auto; width: 26px; height: 22px; margin: 0; padding: 0; border: 0; border-radius: 6px; background: #15803d; color: #fff; font: 15px/22px system-ui, sans-serif; text-align: center; cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,.35); }
     .copylayer .esosave-copy:hover { background: #166534; }
     @keyframes pulse { 0%,100% { filter: brightness(1); } 50% { filter: brightness(1.25); } }
@@ -549,10 +549,32 @@
         const m = /rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/.exec(bg || '');
         if (!m || (m[4] !== undefined && Number(m[4]) < 0.5)) continue;
         if ((Number(m[1]) * 0.299 + Number(m[2]) * 0.587 + Number(m[3]) * 0.114) > 110) continue; // not dark
-        return r;
+        return { el, rect: r };
       }
     }
     return null;
+  }
+  // The widest empty stretch of the bar: between whatever ESO shows on the left (logo, patient
+  // name) and on the right (positive ID, icons).
+  function topBarGap(bar) {
+    const spans = [];
+    for (const el of bar.el.querySelectorAll('*')) {
+      if (host && host.contains(el)) continue;
+      const leaf = !el.firstElementChild || /^(IMG|SVG|CANVAS|INPUT|BUTTON|SELECT)$/.test(el.tagName) || (el.childNodes.length && Array.from(el.childNodes).some(n => n.nodeType === 3 && n.textContent.trim()));
+      if (!leaf) continue;
+      const r = el.getBoundingClientRect();
+      if (!r.width || !r.height || r.bottom <= bar.rect.top || r.top >= bar.rect.bottom) continue;
+      if (getComputedStyle(el).visibility === 'hidden') continue;
+      spans.push([r.left, r.right]);
+    }
+    spans.sort((a, b) => a[0] - b[0]);
+    let best = null, cursor = bar.rect.left;
+    for (const [l, r] of spans) {
+      if (l - cursor > (best ? best[1] - best[0] : 0)) best = [cursor, l];
+      cursor = Math.max(cursor, r);
+    }
+    if (bar.rect.right - cursor > (best ? best[1] - best[0] : 0)) best = [cursor, bar.rect.right];
+    return best;
   }
   function renderTimes() {
     if (!shadow) return;
@@ -567,14 +589,17 @@
       timesKey = key;
       timesEl.innerHTML = TIME_FIELDS.map(([k, l]) => `<div class="t${times[k] ? '' : ' empty'}"><span class="l">${l}</span><span class="v">${esc(times[k] || '--:--')}</span></div>`).join('');
     }
-    // right after the menu control on the left, clear of whatever ESO shows on the right
-    const left = Math.round(bar.left + Math.min(84, bar.width * 0.08));
-    const right = Math.round(bar.right - Math.min(360, bar.width * 0.3));
-    timesEl.style.left = left + 'px';
-    timesEl.style.top = Math.round(bar.top + 6) + 'px';
-    timesEl.style.height = Math.round(bar.height - 12) + 'px';
-    timesEl.style.maxWidth = Math.max(0, right - left) + 'px';
-    timesEl.style.display = right - left < 120 ? 'none' : 'flex';
+    // centred in the empty stretch of the bar
+    const gap = topBarGap(bar);
+    const room = gap ? gap[1] - gap[0] - 24 : 0;
+    if (room < 200) { timesEl.style.display = 'none'; return; }
+    timesEl.classList.toggle('tight', room < 7 * 54);
+    timesEl.style.display = 'flex';
+    timesEl.style.top = Math.round(bar.rect.top + 6) + 'px';
+    timesEl.style.height = Math.round(bar.rect.height - 12) + 'px';
+    timesEl.style.maxWidth = Math.round(room) + 'px';
+    const w = Math.min(room, timesEl.scrollWidth || room);
+    timesEl.style.left = Math.round(gap[0] + 12 + (room - w) / 2) + 'px';
   }
   addEventListener('resize', () => setTimeout(renderTimes, 50));
   setInterval(renderTimes, 1500);
