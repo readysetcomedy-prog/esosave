@@ -189,7 +189,7 @@ Layout:
 - `test/mock-eso/` — mock of ESO's API and a fake app that saves exactly like the real one
 - `test/e2e.test.mjs` — scenarios; `test/recording.test.mjs` — real-recording replay
 - `ios-app/` — Expo wrapper that carries the extension onto iPads through EAS Build and TestFlight.
-  Its screen also has an off-by-default "Monitor test": a Bluetooth scan that lists what the iPad
-  can see and everything a chosen device exposes, to find out whether a cardiac monitor can be read
-  directly. A monitor that only speaks classic Bluetooth will not appear, which is itself the answer.
+  (A Bluetooth "monitor test" screen was tried and removed: the LIFEPAK 15 uses classic Bluetooth,
+  which iPad apps cannot open without the maker's MFi approval, and its data format is Stryker's own.
+  Monitor data reaches ESO through LIFENET and the Monitor Import button, not through a device link.)
 - `scripts/make-icons.mjs` — regenerates every icon size and the iOS icon from one square logo image
