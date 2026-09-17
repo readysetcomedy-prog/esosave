@@ -580,7 +580,9 @@
     if (!shadow) return;
     const s = lastStatus;
     const run = s && s.currentRecordId ? s.runs.find(r => r.recordId === s.currentRecordId) : null;
-    const bar = settings.showTimes !== false && run && !run.locked ? topBarRect() : null;
+    // only while the page is actually inside that run (ESO keeps the run id in the address)
+    const inRun = run && (location.href.includes(run.recordId) || (run.realId && location.href.includes(run.realId)));
+    const bar = settings.showTimes !== false && inRun && !run.locked ? topBarRect() : null;
     if (!bar) { if (timesEl) { timesEl.remove(); timesEl = null; timesKey = ''; } return; }
     if (!timesEl) { timesEl = document.createElement('div'); timesEl.className = 'times'; shadow.appendChild(timesEl); }
     const times = run.times || {};
@@ -602,7 +604,9 @@
     timesEl.style.left = Math.round(gap[0] + 12 + (room - w) / 2) + 'px';
   }
   addEventListener('resize', () => setTimeout(renderTimes, 50));
-  setInterval(renderTimes, 1500);
+  addEventListener('hashchange', () => setTimeout(renderTimes, 50));
+  addEventListener('popstate', () => setTimeout(renderTimes, 50));
+  setInterval(renderTimes, 700);
 
   // ---------------------------------------------------------------- copy button on saved vitals
   // Each saved vital row in the Vitals tab shows its time (HH:MM:SS). A small copy button floats

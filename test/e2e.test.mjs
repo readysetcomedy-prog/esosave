@@ -386,6 +386,11 @@ test('the call times show in the top bar as they are entered, and the setting hi
   await waitFor(() => T.page.evaluate(() => !!window.__esosave), { label: 'interceptor' });
   await app((id) => window.app.use(id), id);
   await waitFor(async () => { const x = await strip(); return x && /Enr13:05/.test(x.text) && /Scene13:12/.test(x.text); }, { label: 'times from the served tab' });
+  // leaving the run (the records list) takes the strip away; coming back brings it back
+  await T.page.evaluate(() => { location.hash = '#/records'; });
+  await waitFor(async () => !(await strip()), { label: 'hidden outside the run' });
+  await app(() => window.app.openTab('Incident'));
+  await waitFor(async () => { const x = await strip(); return x && /Enr13:05/.test(x.text); }, { label: 'back inside the run' });
   // and the setting turns it off
   const q = (sel) => T.page.evaluate((s) => { const el = document.getElementById('esosave-host').shadowRoot.querySelector(s); return !!(el && el.getBoundingClientRect().height); }, sel);
   if (!(await q('.panel [data-act=settings]'))) await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.bar').click());

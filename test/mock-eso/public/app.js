@@ -53,6 +53,7 @@
       render();
     },
     async openTab(view) {
+      location.hash = `#/pcr/${this.recordId}/${view.toLowerCase()}`; // the real app keeps the run in the address
       const q = view === 'Incident' ? '?getMultiPatientData=true&getPcrHeaderData=true' : view === 'Assessments' ? '?getAssessmentListsData=true' : '';
       const r = await xhr('GET', `/ehr/api/PatientCareRecords/${this.recordId}/Views/${view}${q}`);
       const out = { status: r.status, body: (() => { try { return JSON.parse(r.text); } catch { return null; } })(), companions: [] };
