@@ -365,6 +365,37 @@ test('with no signal, a copied vital is held and pushed when signal returns', as
   } finally { T.page.off('dialog', onDialog); }
 });
 
+test('the call times show in the top bar as they are entered, and the setting hides them', async () => {
+  const id = await freshRun();
+  const strip = () => T.page.evaluate(() => { const el = document.getElementById('esosave-host').shadowRoot.querySelector('.times'); return el ? { text: el.textContent, rect: el.getBoundingClientRect().toJSON(), display: getComputedStyle(el).display } : null; });
+  // before any time: every slot shows --:--
+  const s0 = await waitFor(strip, { label: 'strip shown' });
+  assert.match(s0.text, /Disp--:--Enr--:--Scene--:--At pt--:--Depart--:--Dest--:--Xfer--:--/);
+  const bar = await T.page.evaluate(() => document.getElementById('topbar').getBoundingClientRect().toJSON());
+  assert.ok(s0.rect.top >= bar.top && s0.rect.bottom <= bar.bottom, 'inside the top bar');
+  assert.ok(s0.rect.left > bar.left + 40, 'clear of the menu control on the left');
+  // the app saves a time the way ESO's app does: only the clock part is real
+  await app(() => { window.app.edit('incident', 'incident.incidentTimes.enRouteTime', '01/01/1890 13:05:00', 'time'); window.app.edit('incident', 'incident.incidentTimes.onSceneTime', '01/01/1890 13:12:00', 'time'); });
+  const s1 = await waitFor(async () => { const x = await strip(); return x && /Enr13:05/.test(x.text) ? x : null; }, { label: 'time shows' });
+  assert.match(s1.text, /Scene13:12/);
+  // a reload reads the times back from the Incident tab ESO serves
+  await T.page.goto(T.url);
+  await waitFor(() => T.page.evaluate(() => !!window.__esosave), { label: 'interceptor' });
+  await app((id) => window.app.use(id), id);
+  await waitFor(async () => { const x = await strip(); return x && /Enr13:05/.test(x.text) && /Scene13:12/.test(x.text); }, { label: 'times from the served tab' });
+  // and the setting turns it off
+  const q = (sel) => T.page.evaluate((s) => { const el = document.getElementById('esosave-host').shadowRoot.querySelector(s); return !!(el && el.getBoundingClientRect().height); }, sel);
+  if (!(await q('.panel [data-act=settings]'))) await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.bar').click());
+  await waitFor(() => q('.panel [data-act=settings]'), { label: 'panel open' });
+  await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('[data-act=settings]').click());
+  await waitFor(() => q('#times'), { label: 'settings open' });
+  await T.page.evaluate(() => { const r = document.getElementById('esosave-host').shadowRoot; r.querySelector('#times').checked = false; r.querySelector('[data-act=save-settings]').click(); });
+  await waitFor(async () => !(await strip()), { label: 'strip hidden' });
+  assert.equal((await T.storage()).settings.showTimes, false);
+  await T.setStorage({ settings: { ...(await T.storage()).settings, showTimes: true } });
+  await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.x').click());
+});
+
 test('locking a run marks it and it is cleared from the device after the retention window', async () => {
   const id = await app(() => window.app.recordId);
   await app(() => window.app.lock());

@@ -27,7 +27,7 @@
   if (ext) return;
   if (window.__esosave) return;
 
-  const VERSION = '0.2.1';
+  const VERSION = '0.3.0';
   const API_PREFIX_RE = /^\/ehr\/api\/+/i;
   const FAKE_OK_TEXT = '{"result":"Success","data":[]}';
   const PROBE_PATH = '/ehr/api/thirdpartydata/partners';
@@ -574,12 +574,31 @@
     const model = j.data && j.data.model;
     const num = (model && (model.incidentNumber || (model.response && model.response.incidentNumber))) || null;
     if (num && run.incidentNumber !== num) { run.incidentNumber = num; persist(run); emit(); }
+    if (model && model.incidentTimes && typeof model.incidentTimes === 'object') {
+      const t = {};
+      for (const [k, v] of Object.entries(model.incidentTimes)) if (/Time$/.test(k)) t[k] = v == null ? null : hhmm(v);
+      if (JSON.stringify(t) !== JSON.stringify(run.times || {})) { run.times = t; emit(); }
+    }
     const patients = j.data && j.data.optionalData && j.data.optionalData.patients;
     if (Array.isArray(patients)) {
       const me = patients.find(p => p && p.patientCareRecordId === (run.realId || run.recordId));
       if (me && typeof me.isLocked === 'boolean') setLocked(run, me.isLocked);
     }
     if (model && Array.isArray(model.crew) && model.crew.length && model.crew[0] && 'personnelId' in model.crew[0]) run.crew = model.crew;
+  }
+  // ESO stores a call time as "01/01/1890 13:05:00": only the clock part means anything.
+  function hhmm(v) { const m = /(\d{1,2}):(\d{2})(?::\d{2})?\s*$/.exec(String(v)); return m ? `${m[1].padStart(2, '0')}:${m[2]}` : null; }
+  const TIME_ADDR_RE = /^incident\.incidentTimes\.(\w+Time)$/;
+  function noteTimes(run, ops) {
+    let changed = false;
+    for (const op of ops) {
+      const m = TIME_ADDR_RE.exec(op.address || '');
+      if (!m || op.verb === 'ADD') continue;
+      const v = op.verb === 'DELETE' || op.value == null ? null : hhmm(op.value);
+      run.times = run.times || {};
+      if (run.times[m[1]] !== v) { run.times[m[1]] = v; changed = true; }
+    }
+    if (changed) emit();
   }
   function setLocked(run, locked) {
     if (locked && !run.locked) { run.locked = true; run.lockedAt = Date.now(); log(run, `Run ${run.incidentNumber || ''} is locked. It will be cleared from this device${Number(S.settings.purgeHoursAfterLock) ? ' after ' + S.settings.purgeHoursAfterLock + ' hour(s)' : ' now'}.`, 'good'); }
@@ -753,6 +772,7 @@
       return fakeOk(FAKE_OK_TEXT, req.url);
     }
     learnFieldDefs(ops);
+    noteTimes(run, ops);
     const batch = { seq: run.nextSeq++, ts: Date.now(), scope: kind.scope, ops, status: 'pending', attempts: 0 };
     run.batches.push(batch);
     const hold = (why) => {
@@ -1037,7 +1057,7 @@
       recordId: run.recordId, realId: run.realId, tmp: run.tmp, pendingCreate: !!run.pendingCreate,
       incidentNumber: run.incidentNumber, state: run.state, locked: run.locked, lockedAt: run.lockedAt,
       createdAt: run.createdAt, lastSeenAt: run.lastSeenAt, lastSavedAt: run.lastSavedAt,
-      restoredFrom: run.restoredFrom, counts, pages, log: run.log.slice(-60),
+      restoredFrom: run.restoredFrom, counts, pages, log: run.log.slice(-60), times: run.times || null,
       hasViews: Object.keys(run.views).length, hasCrew: !!(run.crew && run.crew.length),
     };
   }
@@ -1067,6 +1087,7 @@
       merged.keyMap = { ...(r.keyMap || {}), ...(mem.keyMap || {}) };
       merged.crew = mem.crew || r.crew || null;
       merged.incidentNumber = mem.incidentNumber || r.incidentNumber || null;
+      merged.times = mem.times || r.times || null;
       merged.state = mem.state || r.state;
       merged.log = [...(r.log || []), ...(mem.log || [])];
       for (const b of mem.batches) merged.batches.push({ ...b, seq: merged.nextSeq++ });

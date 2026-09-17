@@ -19,6 +19,10 @@ to bad signal or a hung page.
   that was sent and when.
 - **Signature images as a backup.** Every signature pad is snapshotted as a PNG when the pen lifts,
   in case one never makes it into ESO.
+- **Call times in the top bar.** Dispatched, en route, on scene, at patient, depart scene, at
+  destination and transfer of patient sit in the empty part of ESO's dark top bar as HH:MM, updated
+  the moment a time is entered, so nobody has to leave the page to work out when something happened.
+  Can be turned off in Settings.
 - **Copy a vital.** A small copy button floats just left of each saved vital's time in the Vitals
   tab; tapping it re-enters that vital as a new one with the current time, every other value the
   same. Only fields the app itself has been seen saving are copied, and the run log names any that

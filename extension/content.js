@@ -43,7 +43,7 @@
   const sget = (keys) => new Promise(res => storage.get(keys, (v) => res(v || {})));
   const sset = (obj) => new Promise(res => storage.set(obj, () => res()));
   const sremove = (keys) => new Promise(res => storage.remove(keys, () => res()));
-  const DEFAULT_SETTINGS = { purgeHoursAfterLock: 0, probeSec: 20, heldProbeSec: 8, warmTabs: true, cardCollapsed: false };
+  const DEFAULT_SETTINGS = { purgeHoursAfterLock: 0, probeSec: 20, heldProbeSec: 8, warmTabs: true, cardCollapsed: false, showTimes: true };
 
   async function loadAll() {
     const all = await sget(null);
@@ -105,6 +105,7 @@
       maybeWarmTabs(payload);
       if (payload.runs.some(r => r.locked)) purgeLocked(settings);
       renderBar();
+      renderTimes();
       if (panelOpen) renderPanel();
       try { api.runtime.sendMessage({ type: 'badge', held: payload.held, rejected: payload.rejected, online: payload.online }); } catch (e) { /* worker asleep */ }
     }
@@ -126,6 +127,12 @@
     .bar.good { background: #15803d; } .bar.warn { background: #b45309; } .bar.bad { background: #b91c1c; } .bar.info { background: #1d4ed8; }
     .bar.warn, .bar.bad { animation: pulse 1.6s ease-in-out infinite; }
     .copylayer { position: fixed; inset: 0; pointer-events: none; z-index: 2147483640; }
+    .times { position: fixed; z-index: 2147483639; display: flex; gap: 4px; align-items: stretch; pointer-events: none; font: 12px/1.15 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; white-space: nowrap; overflow: hidden; }
+    .times .t { display: flex; flex-direction: column; align-items: center; justify-content: center; min-width: 46px; padding: 3px 6px; border-radius: 7px; background: rgba(255,255,255,.10); color: #fff; }
+    .times .t .l { font-size: 10px; letter-spacing: .04em; text-transform: uppercase; opacity: .75; }
+    .times .t .v { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: 1px; }
+    .times .t.empty .v { opacity: .35; font-weight: 400; }
+    @media (max-width: 900px) { .times .t { min-width: 40px; padding: 2px 4px; } .times .t .v { font-size: 13px; } }
     .copylayer .esosave-copy { position: fixed; pointer-events: auto; width: 26px; height: 22px; margin: 0; padding: 0; border: 0; border-radius: 6px; background: #15803d; color: #fff; font: 15px/22px system-ui, sans-serif; text-align: center; cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,.35); }
     .copylayer .esosave-copy:hover { background: #166534; }
     @keyframes pulse { 0%,100% { filter: brightness(1); } 50% { filter: brightness(1.25); } }
@@ -273,6 +280,7 @@
     if (settingsOpen) {
       parts.push(`<div class="run"><label class="s">Clear a run from this device <input type="number" min="0" max="720" id="purge" value="${esc(settings.purgeHoursAfterLock)}"> hours after it is locked (0 = as soon as the lock is seen)</label>` +
         `<label class="s"><input type="checkbox" id="warm" ${settings.warmTabs === false ? '' : 'checked'}> Open every tab once, quietly, when a run opens (so tabs you have not touched still work with no signal)</label>` +
+        `<label class="s"><input type="checkbox" id="times" ${settings.showTimes === false ? '' : 'checked'}> Show the call times (dispatched, en route, on scene, at patient, depart, at destination, transfer) in the empty part of ESO's top bar</label>` +
         `<div class="actions"><button class="a" data-act="save-settings">Save</button></div></div>`);
     }
     const listed = s.runs.filter(r => r.counts.total || r.pendingCreate);
@@ -321,7 +329,8 @@
       const v = Number(panel.querySelector('#purge').value);
       settings.purgeHoursAfterLock = Number.isFinite(v) && v >= 0 ? v : 0;
       settings.warmTabs = !!panel.querySelector('#warm').checked;
-      await sset({ settings }); toPage('settings', settings); settingsOpen = false; renderPanel();
+      settings.showTimes = !!panel.querySelector('#times').checked;
+      await sset({ settings }); toPage('settings', settings); settingsOpen = false; renderPanel(); renderTimes();
     }
     else if (act === 'toggle-log') { if (openLogs.has(id)) openLogs.delete(id); else openLogs.add(id); renderPanel(); }
     else if (act === 'into-current' || act === 'into-new') showPagePicker(id, act === 'into-new');
@@ -519,6 +528,56 @@
     render();
     shadow.appendChild(wrap);
   }
+
+  // ---------------------------------------------------------------- call times in ESO's top bar
+  // The times the narrative is written around, shown in the empty part of ESO's dark top bar so
+  // nobody has to leave the page to look them up. Taken from what ESO sends the page and from the
+  // app's own saves, so a time shows the moment it is entered.
+  const TIME_FIELDS = [['dispatchedTime', 'Disp'], ['enRouteTime', 'Enr'], ['onSceneTime', 'Scene'], ['atPatientTime', 'At pt'],
+    ['departSceneTime', 'Depart'], ['atDestinationTime', 'Dest'], ['transferPatientTime', 'Xfer']];
+  let timesEl = null, timesKey = '';
+  function topBarRect() {
+    // ESO's header: a wide, dark band touching the top of the viewport
+    const seen = new Set();
+    for (const x of [innerWidth * 0.5, innerWidth * 0.3, innerWidth * 0.7]) {
+      for (const el of document.elementsFromPoint(x, 30)) {
+        if (seen.has(el) || (host && host.contains(el))) continue;
+        seen.add(el);
+        const r = el.getBoundingClientRect();
+        if (r.top > 4 || r.height < 40 || r.height > 130 || r.width < innerWidth * 0.8) continue;
+        const bg = getComputedStyle(el).backgroundColor;
+        const m = /rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/.exec(bg || '');
+        if (!m || (m[4] !== undefined && Number(m[4]) < 0.5)) continue;
+        if ((Number(m[1]) * 0.299 + Number(m[2]) * 0.587 + Number(m[3]) * 0.114) > 110) continue; // not dark
+        return r;
+      }
+    }
+    return null;
+  }
+  function renderTimes() {
+    if (!shadow) return;
+    const s = lastStatus;
+    const run = s && s.currentRecordId ? s.runs.find(r => r.recordId === s.currentRecordId) : null;
+    const bar = settings.showTimes !== false && run && !run.locked ? topBarRect() : null;
+    if (!bar) { if (timesEl) { timesEl.remove(); timesEl = null; timesKey = ''; } return; }
+    if (!timesEl) { timesEl = document.createElement('div'); timesEl.className = 'times'; shadow.appendChild(timesEl); }
+    const times = run.times || {};
+    const key = TIME_FIELDS.map(([k]) => times[k] || '').join('|');
+    if (key !== timesKey) {
+      timesKey = key;
+      timesEl.innerHTML = TIME_FIELDS.map(([k, l]) => `<div class="t${times[k] ? '' : ' empty'}"><span class="l">${l}</span><span class="v">${esc(times[k] || '--:--')}</span></div>`).join('');
+    }
+    // right after the menu control on the left, clear of whatever ESO shows on the right
+    const left = Math.round(bar.left + Math.min(84, bar.width * 0.08));
+    const right = Math.round(bar.right - Math.min(360, bar.width * 0.3));
+    timesEl.style.left = left + 'px';
+    timesEl.style.top = Math.round(bar.top + 6) + 'px';
+    timesEl.style.height = Math.round(bar.height - 12) + 'px';
+    timesEl.style.maxWidth = Math.max(0, right - left) + 'px';
+    timesEl.style.display = right - left < 120 ? 'none' : 'flex';
+  }
+  addEventListener('resize', () => setTimeout(renderTimes, 50));
+  setInterval(renderTimes, 1500);
 
   // ---------------------------------------------------------------- copy button on saved vitals
   // Each saved vital row in the Vitals tab shows its time (HH:MM:SS). A small copy button floats

@@ -134,7 +134,11 @@ export function createMockEso() {
   function view(rec, name) {
     const scope = name.charAt(0).toLowerCase() + name.slice(1);
     const model = JSON.parse(JSON.stringify(rec.tree[scope] || {}));
-    if (name === 'Incident') { model.response = { incidentNumber: rec.incidentNumber, ...(model.response || {}) }; model.crew = rec.crew; }
+    if (name === 'Incident') {
+      model.response = { incidentNumber: rec.incidentNumber, ...(model.response || {}) }; model.crew = rec.crew;
+      const t = {}; for (const k of ['psapCall', 'dispatched', 'enRoute', 'onScene', 'atPatient', 'departScene', 'atDestination', 'transferPatient', 'callClosed']) { t[k + 'Time'] = null; t[k + 'Date'] = null; }
+      model.incidentTimes = { ...t, ...(model.incidentTimes || {}) };
+    }
     if (name === 'Signatures' || name === 'Narrative' || name === 'FlowchartTreatments') model.crew = rec.crew;
     if (!('version' in model)) model.version = null;
     // a saved vital comes back the way ESO returns it: numbers for numeric text, every group
