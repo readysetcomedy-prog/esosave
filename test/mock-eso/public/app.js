@@ -86,6 +86,7 @@
   document.getElementById('quickincident').addEventListener('click', () => { app.quickOpened++; });
   document.getElementById('tabs').addEventListener('click', (e) => {
     const t = e.target.closest('.tab'); if (!t) return;
+    e.preventDefault();
     app.clicks.push(t.dataset.view);
     document.querySelectorAll('.tab').forEach(x => x.classList.toggle('active', x === t));
     app.openTab(t.dataset.view);

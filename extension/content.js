@@ -434,16 +434,20 @@
       candidates.push(ctl);
     }
     if (!candidates.length) return null;
-    // prefer the one whose row also holds the other tab labels
+    // prefer the one that is really the tab: a link to that tab of the run, sitting among the
+    // other tabs (its siblings, or its parent's siblings, read as the other labels)
+    const view = Object.keys(TAB_LABELS).find(k => TAB_LABELS[k] === want) || '';
     const score = (ctl) => {
-      // how many other tab labels sit in the nearest container that holds any of them
-      let a = ctl.parentElement;
-      for (let i = 0; a && a !== document.body && i < 5; a = a.parentElement, i++) {
-        const t = text(a);
-        const n = ALL_LABELS.filter(l => l !== want && new RegExp('(^|\\s)' + l + '(\\s|$)').test(t)).length;
-        if (n) return n;
+      let n = 0;
+      const href = (ctl.getAttribute && (ctl.getAttribute('href') || '')) || '';
+      if (href && new RegExp('/' + view.toLowerCase() + '(/|$|\\?|#)', 'i').test(href)) n += 100;
+      let node = ctl;
+      for (let i = 0; node && node.parentElement && node.parentElement !== document.body && i < 4; node = node.parentElement, i++) {
+        const sibs = Array.from(node.parentElement.children).filter(c => c !== node);
+        const hits = sibs.filter(c => { const t = text(c); return t !== want && ALL_LABELS.includes(t); }).length;
+        if (hits) { n += hits * 10 - i; break; }
       }
-      return 0;
+      return n;
     };
     const uniq = [...new Set(candidates)];
     uniq.sort((x, y) => score(y) - score(x));
