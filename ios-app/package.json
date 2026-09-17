@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "start": "expo start",
+    "build": "node ../scripts/build.mjs",
     "prebuild": "expo prebuild -p ios --clean",
     "build:ios": "eas build --platform ios --profile production",
     "submit:ios": "eas submit --platform ios --latest",
