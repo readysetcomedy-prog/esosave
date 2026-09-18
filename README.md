@@ -39,9 +39,10 @@ to bad signal or a hung page.
   presses ESO's own None button on every delay still empty, leaving any already answered alone. On
   the Narrative tab, chips after each transport field (moved to stretcher, to and from the
   ambulance, position during transport) pick in ESO's list the same way. Facility chips under the
-  Scene and Destination locations are chosen in Settings from the agency's saved facilities (read
-  from ESO's configuration bundle); a tap selects Predefined, sets the type to match and picks the
-  name. Red, yellow and green buttons next to Initial and Final Patient Acuity pick the
+  Scene and Destination locations start as the agency's standard set (short labels, ids from ESO's
+  saved facilities) and can be added to or trimmed per device in Settings, which searches the
+  facilities ESO's configuration bundle carries; a tap selects Predefined, sets the type to match and
+  picks the name. Red, yellow and green buttons next to Initial and Final Patient Acuity pick the
   colour in ESO's list. Nothing is written behind the app's back: the buttons do what a finger would
   in ESO's pickers, so the screen and the save are ESO's. Each group is a setting, on by default.
 - **Copy a vital.** A small copy button floats just left of each saved vital's time in the Vitals

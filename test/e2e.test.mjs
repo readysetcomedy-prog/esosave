@@ -627,6 +627,14 @@ test('quick transport: chips after each transport field pick in ESO\'s list; a f
 });
 
 test('facility chips: chosen in Settings from ESO\'s saved facilities, one tap sets Predefined, the type and the name', async () => {
+  // fresh install: the agency's standard chips are there before anything is chosen
+  await T.page.goto(T.url);
+  await waitFor(() => T.page.evaluate(() => !!window.__esosave), { label: 'interceptor' });
+  const std = (await T.storage()).settings || {};
+  assert.equal((std.facilitySending || []).length, 7, 'seven standard sending chips');
+  assert.equal((std.facilityDestination || []).length, 11, 'eleven standard destination chips');
+  assert.equal(std.facilityDestination.find(f => f.label === 'SEO').name, "HSHS St. Elizabeth's Hospital");
+  await T.setStorage({ settings: { ...std, facilitySending: [], facilityDestination: [] } });
   const id = await freshRun();
   const sh = (sel) => T.page.evaluate((s) => { const el = document.getElementById('esosave-host').shadowRoot.querySelector(s); return el ? el.textContent : null; }, sel);
   // choose two destination facilities and one sending facility in Settings

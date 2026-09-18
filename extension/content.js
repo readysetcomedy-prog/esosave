@@ -44,12 +44,37 @@
   const sset = (obj) => new Promise(res => storage.set(obj, () => res()));
   const sremove = (keys) => new Promise(res => storage.remove(keys, () => res()));
   const DEFAULT_SETTINGS = { purgeHoursAfterLock: 0, probeSec: 20, heldProbeSec: 8, warmTabs: true, cardCollapsed: false, showTimes: true, sendPrompt: true, unsentList: true, quickHistory: true, quickMeds: true, quickAllergies: true, quickAcuity: true, quickDelays: true, quickTransport: true, quickFacilities: true, facilitySending: [], facilityDestination: [] };
+  // The agency's standard facility chips (ids and names from ESO's saved facilities). Every install
+  // starts with these; Settings can add or remove per device.
+  const FAC = {
+    sbl: { id: '540af5e7-fbc6-f011-ad8f-6045bdb72f5d', name: 'Sarah Bush Lincoln', typeId: 6540, label: 'SB Mattoon' },
+    stA: { id: 'dbe3de86-fac6-f011-ad8f-6045bdb72f5d', name: 'Saint Anthony Memorial Hospital', typeId: 6540, label: 'St A Effingham' },
+    fch: { id: '477b90bc-f9c6-f011-ad8f-6045bdb72f5d', name: 'Fayette County Hospital', typeId: 6540, label: 'FCH' },
+    holy: { id: 'b7e49057-fcc6-f011-ad8f-6045bdb72f5d', name: 'HSHS Holy Family Hospital', typeId: 6540, label: 'Holy Family' },
+    highland: { id: 'a703d04c-fcc6-f011-ad8f-6045bdb72f5d', name: "HSHS St Joseph's Highland", typeId: 6540, label: "Joe's Highland" },
+    breese: { id: '3cf3a995-fbc6-f011-ad8f-6045bdb72f5d', name: "HSHS St Joseph's Breese", typeId: 6540, label: "Joe's Breese" },
+    anderson: { id: '4b5e73d9-f9c6-f011-ad8f-6045bdb72f5d', name: 'Anderson Hospital', typeId: 6540, label: 'Anderson' },
+    carle: { id: '5e4c73a3-fcc6-f011-ad8f-6045bdb72f5d', name: 'Carle Foundation Hospital', typeId: 6540, label: 'Carle' },
+    stJ: { id: '7a149502-f8c6-f011-ad8f-6045bdb72f5d', name: "HSHS St. John's", typeId: 6540, label: "St John's" },
+    barnes: { id: '5362d2f7-fdc6-f011-ad8f-6045bdb72f5d', name: 'Barnes Jewish Hospital', typeId: 6540, label: 'Barnes' },
+    slu: { id: '946f8531-fec6-f011-ad8f-6045bdb72f5d', name: 'SSM Health Saint Louis University', typeId: 6540, label: 'SLU' },
+    seo: { id: '6dac3b3f-f8c6-f011-ad8f-6045bdb72f5d', name: "HSHS St. Elizabeth's Hospital", typeId: 6540, label: 'SEO' },
+  };
+  DEFAULT_SETTINGS.facilitySending = ['sbl', 'stA', 'fch', 'holy', 'highland', 'breese', 'anderson'].map(k => ({ ...FAC[k] }));
+  DEFAULT_SETTINGS.facilityDestination = ['sbl', 'stA', 'fch', 'holy', 'highland', 'anderson', 'carle', 'stJ', 'barnes', 'slu', 'seo'].map(k => ({ ...FAC[k] }));
 
   async function loadAll() {
     const all = await sget(null);
     const runs = {};
     for (const [k, v] of Object.entries(all)) if (k.startsWith('run:')) runs[k.slice(4)] = v;
-    return { runs, templates: all.templates || null, settings: { ...DEFAULT_SETTINGS, ...(all.settings || {}) }, all };
+    const settings = { ...DEFAULT_SETTINGS, ...(all.settings || {}) };
+    if (!settings.facilityDefaults) { // first time with the standard facility chips: apply them once
+      if (!(settings.facilitySending || []).length) settings.facilitySending = DEFAULT_SETTINGS.facilitySending.map(f => ({ ...f }));
+      if (!(settings.facilityDestination || []).length) settings.facilityDestination = DEFAULT_SETTINGS.facilityDestination.map(f => ({ ...f }));
+      settings.facilityDefaults = 1;
+      if (all.settings) await sset({ settings });
+    }
+    return { runs, templates: all.templates || null, settings, all };
   }
   async function purgeLocked(settings) {
     const { runs, all } = await loadAll();
@@ -393,7 +418,7 @@
     const cat = facilities ? facilities.items : [];
     const matches = q ? cat.filter(f => f.name.toLowerCase().includes(q) && !chosen.some(c => c.id === f.id)).slice(0, 8) : [];
     return `<div class="s fac" data-key="${key}"><b>${esc(title)}</b>` +
-      `<div class="chosen">${chosen.map(c => `<span class="pill gray">${esc(c.name)} <a data-act="fac-remove" data-id="${esc(c.id)}" title="Remove">×</a></span>`).join('') || '<span class="muted">none yet</span>'}</div>` +
+      `<div class="chosen">${chosen.map(c => `<span class="pill gray">${esc(c.label && c.label !== c.name ? `${c.label} (${c.name})` : c.name)} <a data-act="fac-remove" data-id="${esc(c.id)}" title="Remove">×</a></span>`).join('') || '<span class="muted">none yet</span>'}</div>` +
       (facilities ? `<input type="text" class="facq" placeholder="Type part of a facility name…" value="${esc(facSearch[key] || '')}">` +
         `<div class="facm">${matches.map(f => `<a data-act="fac-add" data-id="${esc(f.id)}">${esc(f.name)}${f.city ? ` <span class="muted">${esc(f.city)}</span>` : ''}</a>`).join('')}${q && !matches.length ? '<span class="muted">no saved facility matches</span>' : ''}</div>`
         : '<span class="muted">Open a run first so ESO\'s facility list is loaded.</span>') + '</div>';
@@ -428,7 +453,7 @@
     else if (act === 'fac-add' || act === 'fac-remove') {
       const key = el.closest('.fac').dataset.key; const fid = el.dataset.id;
       const list = (settings[key] || []).filter(c => c.id !== fid);
-      if (act === 'fac-add') { const f = facilities && facilities.items.find(x => x.id === fid); if (f) list.push({ id: f.id, name: f.name, typeId: f.typeId }); facSearch[key] = ''; }
+      if (act === 'fac-add') { const f = facilities && facilities.items.find(x => x.id === fid); if (f) { const std = Object.values(FAC).find(x => x.id === f.id); list.push({ id: f.id, name: f.name, typeId: f.typeId, ...(std ? { label: std.label } : {}) }); } facSearch[key] = ''; }
       settings[key] = list;
       await sset({ settings }); toPage('settings', settings); renderPanel(); layoutQuick();
     }
@@ -1125,7 +1150,7 @@
     const layer = ensureQuickLayer();
     for (const fac of chosen) {
       const chip = quickEl(`f:${gk}:${fac.id}`, () => {
-        const c = document.createElement('button'); c.type = 'button'; c.className = 'chip'; c.textContent = fac.name; c.title = fac.name; c.dataset.group = 'fac-' + gk;
+        const c = document.createElement('button'); c.type = 'button'; c.className = 'chip'; c.textContent = fac.label || fac.name; c.title = fac.name; c.dataset.group = 'fac-' + gk;
         c.addEventListener('pointerdown', (e) => e.stopPropagation());
         c.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); pickFacility(gk, fac); });
         return c;
