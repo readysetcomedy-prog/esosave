@@ -44,7 +44,12 @@ to bad signal or a hung page.
   facilities ESO's configuration bundle carries; a tap selects Predefined, sets the type to match and
   picks the name. On the Assessments tab, "All normal" on each assessment opens ESO's own Quick Ax,
   presses No Abnormalities on every category still unset and presses OK; "A&Ox4" opens Mental Status
-  and presses Alert and Oriented x4. Red, yellow and green buttons next to Initial and Final Patient Acuity pick the
+  and presses Alert and Oriented x4. On the Incident tab, Transported ALS / BLS, Refusal, Canceled
+  (Prior) and Canceled (Scene) set the whole disposition set through ESO's pickers, then outline
+  Transport Mode or Reason for Refusal in red until answered; choosing Emergent or Non-Emergent for
+  the response or transport mode fills the lights/sirens, intersection, scheduled, speed and method
+  fields still empty and sets EMD Performed to No. Emergent / Non-Emergent buttons sit above
+  Response Mode to Scene. Every row ends with "Other…", which simply opens ESO's own list. Red, yellow and green buttons next to Initial and Final Patient Acuity pick the
   colour in ESO's list. Nothing is written behind the app's back: the buttons do what a finger would
   in ESO's pickers, so the screen and the save are ESO's. Each group is a setting, on by default.
 - **Copy a vital.** A small copy button floats just left of each saved vital's time in the Vitals

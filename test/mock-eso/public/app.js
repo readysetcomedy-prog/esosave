@@ -74,7 +74,7 @@
         app.assessments = list.map(a => ({ key: String(a.itemId), time: String(a.assessmentTime || '').slice(-8), findings: (a.findings || []).map(f => ({ key: String(f.itemId), findingId: f.findingId, findingLocationId: f.findingLocationId, present: f.present })) }));
         renderAx();
       }
-      if (view === 'Incident') { renderDelays(out.body); loadBundle(); }
+      if (view === 'Incident') { renderDelays(out.body); renderSS(out.body); loadBundle(); }
       document.getElementById('narrative').style.display = view === 'Narrative' ? 'block' : 'none';
       if (view === 'Patient') renderHistory(out.body);
       if (view === 'Narrative') { renderAcuity(out.body); renderTransport(out.body); }
@@ -176,6 +176,68 @@
       f.querySelector('.display-value').textContent = ids.map(id => (TRANSPORT[k].find(t => t[0] === id) || [0, id])[1]).join(', ');
     } });
   }));
+  // ---- single-select fields the way ESO draws them: display value, click indicator, and quick-pick
+  // buttons shown while the field is empty. Ids and names are ESO's.
+  const SS = {
+    PRIORITYID: { label: 'Response Mode to Scene', addr: 'incident.response.priorityId', list: [[338, 'Emergent'], [339, 'Non-Emergent'], [336, 'Emergent Downgraded to Non-Emergent'], [337, 'Non-Emergent Upgraded to Emergent']], quick: { 338: 'Emergent', 336: 'Emergent Downgraded to Non-Emergent', 339: 'Non-Emergent' } },
+    RESPONSEMODELIGHTSANDSIRENSUSE: { label: 'Response Mode Lights & Sirens Use', addr: 'incident.response.responseModeLightsAndSirensUseId', list: [[14797, 'Lights and Sirens'], [14798, 'Lights and No Sirens'], [14799, 'No Lights or Sirens']], quick: { 14797: 'Lights & Sirens', 14799: 'No Lights or Sirens', 14798: 'Lights and No Sirens' } },
+    RESPONSEMODEINTERSECTIONNAVIGATION: { label: 'Response Mode Intersection Navigation', addr: 'incident.response.responseModeIntersectionNavigationId', list: [[14803, 'Against Normal Light Patterns'], [14804, 'With Automated Light Changing Technology'], [14805, 'With Normal Light Patterns']], quick: { 14805: 'With Normal Light Pattern', 14803: 'Against Normal Light Pattern', 14804: 'With Light Change Tech' } },
+    RESPONSEMODESCHEDULED: { label: 'Response Mode Scheduled', addr: 'incident.response.responseModeScheduledId', list: [[14807, 'No (Unscheduled)'], [14808, 'Yes (Scheduled)']], quick: { 14807: 'No', 14808: 'Yes' } },
+    RESPONSEMODESPEED: { label: 'Response Mode Speed', addr: 'incident.response.responseModeSpeedId', list: [[14810, 'Speed-Enhanced per Local Policy'], [14811, 'Speed-Normal Traffic']], quick: { 14811: 'Normal Traffic', 14810: 'Enhanced per Policy' } },
+    EMDPERFORMEDID: { label: 'EMD Performed', addr: 'incident.response.emdPerformedID', list: [[6868, 'No'], [6869, 'Yes, With Pre-Arrival Instructions'], [6870, 'Yes, Without Pre-Arrival Instructions'], [10307, 'Yes, Unknown if Pre-Arrival Instructions Given']], quick: { 6869: 'Yes, w/ Instructions', 6870: 'Yes, w/o Instructions', 10307: 'Yes, Unknown', 6868: 'No' } },
+    UNITDISPOSITIONITEMID: { label: 'Unit Disposition', addr: 'incident.disposition.unitDispositionItemID', list: [[14402, 'Patient Contact Made'], [14403, 'Canceled on Scene'], [14404, 'Canceled Prior to Arrival at Scene'], [14405, 'No Patient Contact'], [14406, 'No Patient Found']] },
+    PATIENTEVALUATIONCAREDISPOSITIONITEMID: { label: 'Patient Evaluation and/or Care Disposition', addr: 'incident.disposition.patientEvaluationCareDispositionItemID', list: [[14410, 'Patient Evaluated and Care Provided'], [14411, 'Patient Evaluated and Refused Care'], [14412, 'Patient Evaluated, No Care Required'], [14413, 'Patient Refused Evaluation and Care']] },
+    CREWDISPOSITIONITEMID: { label: 'Crew Disposition', addr: 'incident.disposition.crewDispositionItemID', list: [[14415, 'Initiated and Continued Primary Care'], [14417, 'Provided Care Supporting Primary EMS Crew'], [14420, 'Back in Service, No Care or Support Services Required'], [14421, 'Back in Service, Care or Support Services Refused']] },
+    TRANSPORTDISPOSITIONITEMID: { label: 'Transport Disposition', addr: 'incident.disposition.transportDispositionItemID', list: [[14435, 'Transport by This EMS Unit (This Crew Only)'], [14436, 'Transport by This EMS Unit, with a Member of Another Crew'], [14439, 'Patient Refused Transport'], [14441, 'No Transport']] },
+    REFUSALRELEASEITEMIDS: { label: 'Reason for Refusal or Release', addr: 'incident.disposition.refusalReleaseItemIDs', multi: true, list: [[14443, 'Against Medical Advice'], [14444, 'Patient/Guardian Indicates Ambulance Transport is Not Necessary'], [14445, 'Released Following Protocol Guidelines']] },
+    TRANSPORTMODEID: { label: 'Transport Mode', addr: 'incident.disposition.transportModeID', list: [[11850, 'Emergent (Immediate Response)'], [11851, 'Emergent Downgraded to Non-Emergent'], [11852, 'Non-Emergent'], [11853, 'Non-Emergent Upgraded to Emergent']] },
+    TRANSPORTMODELIGHTSANDSIRENSUSE: { label: 'Transport Mode Lights & Sirens Use', addr: 'incident.disposition.transportModeLightsAndSirensUseId', list: [[14813, 'Lights and Sirens'], [14814, 'Lights and No Sirens'], [14815, 'No Lights or Sirens']], quick: { 14813: 'Lights & Sirens', 14815: 'No Lights or Sirens', 14814: 'Lights and No Sirens' } },
+    TRANSPORTMETHODID: { label: 'Transport Method', addr: 'incident.disposition.transportMethodID', list: [[10353, 'Ground-Ambulance'], [10352, 'Air Medical-Rotor Craft'], [10355, 'Ground-Bariatric']], quick: { 10353: 'Ambulance', 10352: 'Rotor Craft', 10355: 'Bariatric' } },
+    LEVELOFSERVICEID: { label: 'Level Of Service', addr: 'incident.disposition.levelOfServiceId', list: [[8196, 'Advanced Life Support'], [8197, 'Basic Life Support'], [8198, 'Critical Care']], quick: { 8197: 'BLS', 8196: 'ALS', 8198: 'Critical Care' } },
+  };
+  app.ss = {}; // ref -> value id(s)
+  function ssHtml(ref) {
+    const d = SS[ref];
+    const qp = d.quick ? `<div class="quick-picks">${Object.entries(d.quick).map(([id, l]) => `<button class="btn" data-id="${id}">${l}</button>`).join('')}</div>` : '';
+    return `<eso-field class="field" data-field-ref="${ref}"><div class="label-container"><label>${d.label}</label></div><div class="line field-area"><div class="display-value"></div><div class="shelf-click-indicator">&#9776;</div></div>${qp}</eso-field>`;
+  }
+  const nameOf = (ref, id) => (SS[ref].list.find(x => x[0] === Number(id)) || [0, ''])[1];
+  function ssRender(ref) {
+    const f = document.querySelector(`eso-field[data-field-ref="${ref}"]`); if (!f) return;
+    const v = app.ss[ref];
+    const names = Array.isArray(v) ? v.map(id => nameOf(ref, id)).join(', ') : (v ? nameOf(ref, v) : '');
+    f.querySelector('.display-value').textContent = names;
+    const qp = f.querySelector('.quick-picks'); if (qp) qp.style.display = names ? 'none' : '';
+    // like ESO: patient/transport dispositions only apply once contact was made; transport mode only when transporting
+    if (ref === 'UNITDISPOSITIONITEMID') for (const dep of ['PATIENTEVALUATIONCAREDISPOSITIONITEMID', 'TRANSPORTDISPOSITIONITEMID']) document.querySelector(`eso-field[data-field-ref="${dep}"]`).toggleAttribute('disabled', v !== 14402);
+    if (ref === 'TRANSPORTDISPOSITIONITEMID') for (const dep of ['TRANSPORTMODEID', 'TRANSPORTMODELIGHTSANDSIRENSUSE', 'TRANSPORTMETHODID']) document.querySelector(`eso-field[data-field-ref="${dep}"]`).toggleAttribute('disabled', !(v === 14435 || v === 14436));
+  }
+  function ssSet(ref, id) {
+    const d = SS[ref];
+    if (d.multi) { app.ss[ref] = (app.ss[ref] || []).concat([id]); app.addScalar('incident', `${d.addr}.['${id}']`, id); }
+    else { app.ss[ref] = id; app.edit('incident', d.addr, id, 'singleselect'); }
+    ssRender(ref);
+  }
+  document.getElementById('response').innerHTML = ['PRIORITYID', 'RESPONSEMODELIGHTSANDSIRENSUSE', 'RESPONSEMODEINTERSECTIONNAVIGATION', 'RESPONSEMODESCHEDULED', 'RESPONSEMODESPEED', 'EMDPERFORMEDID'].map(ssHtml).join('');
+  document.getElementById('disposition').innerHTML = ['UNITDISPOSITIONITEMID', 'PATIENTEVALUATIONCAREDISPOSITIONITEMID', 'CREWDISPOSITIONITEMID', 'TRANSPORTDISPOSITIONITEMID', 'REFUSALRELEASEITEMIDS', 'TRANSPORTMODEID', 'TRANSPORTMODELIGHTSANDSIRENSUSE', 'TRANSPORTMETHODID', 'LEVELOFSERVICEID'].map(ssHtml).join('');
+  for (const ref of Object.keys(SS)) {
+    const f = document.querySelector(`eso-field[data-field-ref="${ref}"]`); if (!f) continue;
+    f.querySelectorAll('.quick-picks button').forEach(b => b.addEventListener('click', () => { if (f.hasAttribute('disabled')) return; ssSet(ref, Number(b.dataset.id)); }));
+    f.querySelector('.shelf-click-indicator').addEventListener('click', () => {
+      if (f.hasAttribute('disabled')) return;
+      const d = SS[ref];
+      openShelf({ title: d.label, items: d.list, multi: !!d.multi, checked: d.multi ? (app.ss[ref] || []) : [], onPick: (id) => ssSet(ref, id), onOk: (ids) => { for (const id of ids) if (!(app.ss[ref] || []).includes(id)) ssSet(ref, id); } });
+    });
+    ssRender(ref);
+  }
+  function renderSS(body) {
+    const m = body && body.data && body.data.model; if (!m) return;
+    for (const [ref, d] of Object.entries(SS)) {
+      const v = d.addr.split('.').slice(1).reduce((o, k) => o && o[k], m);
+      app.ss[ref] = Array.isArray(v) ? v.map(Number) : (v == null ? null : Number(v));
+      ssRender(ref);
+    }
+  }
   // locations: type + name pickers in Predefined mode; the bundle is what the extension learns facilities from
   let bundle = null;
   async function loadBundle() { if (bundle) return bundle; const r = await xhr('GET', '/ehr/api/configurationBundle/agency/5.3.19.1/root'); bundle = JSON.parse(r.text); return bundle; }

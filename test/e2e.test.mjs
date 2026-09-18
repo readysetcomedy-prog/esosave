@@ -526,7 +526,8 @@ test('quick history chips: tap several, one open of ESO\'s Add History list tick
   await app(() => window.app.openTab('Patient'));
   const chips = () => T.page.evaluate(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .chip[data-group=history]')).map(c => ({ short: c.textContent, name: c.title, cls: c.className, rect: c.getBoundingClientRect().toJSON() })));
   await waitFor(async () => (await chips()).length >= 20, { label: 'chips drawn' });
-  const all = await chips();
+  const all = (await chips()).filter(c => !/other/.test(c.cls));
+  assert.equal((await chips()).filter(c => /other/.test(c.cls)).length, 1, 'one Other… at the end of the row');
   const btn = await T.page.evaluate(() => document.getElementById('addhist').getBoundingClientRect().toJSON());
   const next = await T.page.evaluate(() => document.querySelector('#patient label').getBoundingClientRect().toJSON());
   assert.ok(all[0].rect.left > btn.right, 'first chip sits to the right of Add History');
@@ -538,16 +539,23 @@ test('quick history chips: tap several, one open of ESO\'s Add History list tick
   await tap('Chronic Obstructive Pulmonary Disease (COPD)');
   await tap('Chronic Obstructive Pulmonary Disease (COPD)'); // tapped twice = off again
   assert.deepEqual((await chips()).filter(c => /\bon\b/.test(c.cls)).map(c => c.short), ['HTN', 'Diabetes']);
+  // "Other…" opens ESO's own Add History list and nothing else
+  await T.page.evaluate(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .chip[data-group=history]')).find(c => /other/.test(c.className)).click());
+  await waitFor(async () => (await app(() => window.app.shelfOpens)) === 1, { label: 'Add History opened by Other…' });
+  await app(() => document.querySelector('shelf-panel header button').click());
+  await waitFor(async () => (await app(() => document.querySelectorAll('shelf-panel').length)) === 0, { label: 'closed' });
+  // the pending chips still commit once the list is closed
+  await waitFor(async () => (await chips()).length >= 20, { label: 'chips back' });
   const rec = await waitFor(async () => { const r = await T.record(id); const h = (r.tree.patient && r.tree.patient.patientMedicalHistories) || []; return h.length === 2 ? r : null; }, { label: 'both on ESO', timeout: 15000 });
   assert.deepEqual(rec.tree.patient.patientMedicalHistories.map(h => Number(h.itemId)).sort(), [545, 547]);
-  assert.equal(await app(() => window.app.shelfOpens), 1, 'one open for two chips');
+  assert.equal(await app(() => window.app.shelfOpens), 2, 'one open for Other…, one for the two chips');
   assert.equal(await app(() => document.querySelectorAll('shelf-panel').length), 0, 'list closed with OK');
   assert.match(await app(() => document.getElementById('histlist').textContent), /Hypertension \(HTN\)Diabetes/);
   await waitFor(async () => (await chips()).filter(c => /added/.test(c.cls)).length === 2, { label: 'chips show added' });
   // an added chip is inert; the app's own list is left alone
   await tap('Hypertension (HTN)');
   await sleep(2000);
-  assert.equal(await app(() => window.app.shelfOpens), 1);
+  assert.equal(await app(() => window.app.shelfOpens), 2);
   assert.equal((await T.record(id)).tree.patient.patientMedicalHistories.length, 2);
   // the search matched the exact name, not a lookalike ("Pulmonary Hypertension", "Type 1 Diabetes")
   const ops = rec.ops.filter(o => /patientMedicalHistories/.test(o.address));
@@ -587,11 +595,11 @@ test('quick delays: one button presses ESO\'s own None/No Delay on every delay s
   await app(() => { window.app.addScalar('incident', "incident.additionalFactors.sceneDelays.['365']", 365); });
   await waitFor(async () => ((await T.record(id)).tree.incident?.additionalFactors?.sceneDelays || []).length === 1, { label: 'scene delay saved' });
   await app(() => window.app.openTab('Incident'));
-  const btn = () => T.page.evaluate(() => { const b = document.getElementById('esosave-host').shadowRoot.querySelector('.quick .allnone'); return b ? { text: b.textContent, cls: b.className, rect: b.getBoundingClientRect().toJSON() } : null; });
+  const btn = () => T.page.evaluate(() => { const b = document.getElementById('esosave-host').shadowRoot.querySelector('.quick .allnone[data-group=delays]'); return b ? { text: b.textContent, cls: b.className, rect: b.getBoundingClientRect().toJSON() } : null; });
   const b0 = await waitFor(async () => { const b = await btn(); return b && /\(4 left\)/.test(b.text) ? b : null; }, { label: 'All: None/No Delay button, counting the four still empty' });
   const field = await T.page.evaluate(() => document.querySelector('eso-field[data-field-ref=DISPATCHDELAYS]').getBoundingClientRect().toJSON());
   assert.ok(b0.rect.bottom <= field.top && Math.abs(b0.rect.right - field.right) < 4, 'sits just above the first delay field, right-aligned');
-  await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.quick .allnone').click());
+  await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.quick .allnone[data-group=delays]').click());
   const rec = await waitFor(async () => { const r = await T.record(id); const a = r.tree.incident?.additionalFactors || {}; return a.dispatchDelays && a.responseDelays && a.transportDelays && a.turnAroundDelays ? r : null; }, { label: 'four delays saved by the app', timeout: 15000 });
   const a = rec.tree.incident.additionalFactors;
   assert.deepEqual([a.dispatchDelays, a.responseDelays, a.transportDelays, a.turnAroundDelays].map(x => x.map(Number)), [[6430], [357], [385], [399]]);
@@ -603,8 +611,9 @@ test('quick delays: one button presses ESO\'s own None/No Delay on every delay s
 test('quick transport: chips after each transport field pick in ESO\'s list; a field with a value shows it as added', async () => {
   const id = await freshRun();
   await app(() => window.app.openTab('Narrative'));
-  const chips = (gk) => T.page.evaluate((g) => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll(`.quick .chip[data-group=${g}]`)).map(c => ({ short: c.textContent, name: c.title, cls: c.className, rect: c.getBoundingClientRect().toJSON() })), gk);
+  const chips = (gk) => T.page.evaluate((g) => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll(`.quick .chip[data-group=${g}]:not(.other)`)).map(c => ({ short: c.textContent, name: c.title, cls: c.className, rect: c.getBoundingClientRect().toJSON() })), gk);
   await waitFor(async () => (await chips('toStretcher')).length === 7 && (await chips('position')).length === 4 && (await chips('toAmbulance')).length === 1, { label: 'transport chips drawn' });
+  assert.equal(await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .chip.other[data-group=toStretcher]').length), 1, 'Other… on the stretcher row');
   const lab = await T.page.evaluate(() => document.querySelector('eso-field[data-field-ref=HOWPATIENTWASMOVEDTOSTRETCHERIDS] label').getBoundingClientRect().toJSON());
   const fld = await T.page.evaluate(() => document.querySelector('eso-field[data-field-ref=HOWPATIENTWASMOVEDTOSTRETCHERIDS]').getBoundingClientRect().toJSON());
   const c0 = (await chips('toStretcher'))[0];
@@ -617,8 +626,8 @@ test('quick transport: chips after each transport field pick in ESO\'s list; a f
   // to ambulance: Stretcher; from ambulance: Stretcher (two fields, one after the other)
   await tap('Stretcher');
   await waitFor(async () => ((await T.record(id)).tree.narrative?.patientTransport?.patientMovedFromSceneToAmbulanceMethodIds || []).map(Number).includes(7183), { label: 'to ambulance', timeout: 15000 });
-  await waitFor(() => T.page.evaluate(() => { const cs = Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .chip[data-group=fromAmbulance]')); return cs.length === 1 && !/busy/.test(cs[0].className); }), { label: 'from-ambulance chip free' });
-  await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.quick .chip[data-group=fromAmbulance]').click());
+  await waitFor(() => T.page.evaluate(() => { const cs = Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .chip[data-group=fromAmbulance]:not(.other)')); return cs.length === 1 && !/busy/.test(cs[0].className); }), { label: 'from-ambulance chip free' });
+  await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.quick .chip[data-group=fromAmbulance]:not(.other)').click());
   await waitFor(async () => ((await T.record(id)).tree.narrative?.patientTransport?.patientMovedFromAmbulanceToDestinationMethodIds || []).map(Number).includes(7196), { label: 'from ambulance', timeout: 15000 });
   await tap('Semi-Fowlers');
   await waitFor(async () => ((await T.record(id)).tree.narrative?.patientTransport?.patientPositionDuringTransportIds || []).map(Number).includes(7189), { label: 'position', timeout: 15000 });
@@ -656,7 +665,7 @@ test('facility chips: chosen in Settings from ESO\'s saved facilities, one tap s
   assert.equal(st.facilitySending[0].typeId, 6540, 'the facility remembers its type from ESO\'s list');
   await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.panel [data-act=close]').click());
   // chips sit under each location's Predefined/Address pills
-  const chips = (g) => T.page.evaluate((gg) => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll(`.quick .chip[data-group=${gg}]`)).map(c => ({ name: c.title, cls: c.className, rect: c.getBoundingClientRect().toJSON() })), g);
+  const chips = (g) => T.page.evaluate((gg) => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll(`.quick .chip[data-group=${gg}]:not(.other)`)).map(c => ({ name: c.title, cls: c.className, rect: c.getBoundingClientRect().toJSON() })), g);
   await waitFor(async () => (await chips('fac-destination')).length === 2 && (await chips('fac-sending')).length === 1, { label: 'facility chips' });
   const pills = await T.page.evaluate(() => document.querySelector('eso-location[view-model="vm.destination"] .button-group').getBoundingClientRect().toJSON());
   const c0 = (await chips('fac-destination'))[0];
@@ -716,11 +725,107 @@ test('assessment: "All normal" presses No Abnormalities on every category in ESO
   assert.equal((await T.record(id)).ops.length, before, 'nothing re-saved');
 });
 
+test('disposition buttons set the whole set through ESO\'s pickers and quick-picks; red outline until Transport Mode or the refusal reason is answered', async () => {
+  const id = await freshRun();
+  await app(() => window.app.openTab('Incident'));
+  const btns = () => T.page.evaluate(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick [data-group^=dispo-]')).map(b => ({ g: b.dataset.group, text: b.textContent, cls: b.className, rect: b.getBoundingClientRect().toJSON() })));
+  await waitFor(async () => (await btns()).length === 6, { label: 'five disposition buttons and Other…' });
+  // Other… opens ESO's Unit Disposition list
+  await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.quick [data-group=dispo-other]').click());
+  await waitFor(() => T.page.evaluate(() => !!document.querySelector('shelf-panel')), { label: 'unit disposition list opened' });
+  assert.match(await app(() => document.querySelector('shelf-panel h1').textContent), /Unit Disposition/);
+  await app(() => document.querySelector('shelf-panel header button').click());
+  await waitFor(async () => (await btns()).length === 6, { label: 'buttons back' });
+  // the response-mode row: Emergent sets the field, the watcher fills the rest
+  const rb = () => T.page.evaluate(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick [data-group^=resp-]')).map(b => ({ g: b.dataset.group, cls: b.className })));
+  await waitFor(async () => (await rb()).length === 3, { label: 'Emergent / Non-Emergent / Other… row' });
+  await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.quick [data-group=resp-e]').click());
+  await waitFor(async () => ((await T.record(id)).tree.incident?.response || {}).emdPerformedID === 6868, { label: 'Emergent set and follow-ons filled', timeout: 15000 });
+  assert.equal((await T.record(id)).tree.incident.response.priorityId, 338);
+  await waitFor(async () => /done/.test((await rb()).find(b => b.g === 'resp-e').cls), { label: 'Emergent shown as current' });
+  const unit = await T.page.evaluate(() => document.querySelector('eso-field[data-field-ref=UNITDISPOSITIONITEMID]').getBoundingClientRect().toJSON());
+  const first = (await btns())[0];
+  assert.ok(first.rect.bottom <= unit.top && Math.abs(first.rect.left - unit.left) < 4, 'row sits just above Unit Disposition');
+  const press = async (g) => { await waitFor(async () => { const b = (await btns()).find(x => x.g === g); return b && !/busy/.test(b.cls); }, { label: g }); await T.page.evaluate((gg) => document.getElementById('esosave-host').shadowRoot.querySelector(`.quick [data-group=${gg}]`).click(), g); };
+  const dispo = async () => (await T.record(id)).tree.incident?.disposition || {};
+  // Transported ALS
+  await press('dispo-als');
+  await waitFor(async () => (await dispo()).levelOfServiceId === 8196, { label: 'ALS set', timeout: 20000 });
+  const d1 = await dispo();
+  assert.equal(d1.unitDispositionItemID, 14402); assert.equal(d1.patientEvaluationCareDispositionItemID, 14410); assert.equal(d1.crewDispositionItemID, 14415); assert.equal(d1.transportDispositionItemID, 14435);
+  const need = () => T.page.evaluate(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .need')).map(n => n.dataset.msg));
+  await waitFor(async () => (await need()).includes('Transport Mode needed'), { label: 'Transport Mode outlined in red' });
+  assert.equal(await app(() => document.querySelectorAll('shelf-panel').length), 0);
+  // the crew picks Transport Mode Emergent by hand; the follow-ons fill themselves and the outline goes
+  await app(() => { document.querySelector('eso-field[data-field-ref=TRANSPORTMODEID] .shelf-click-indicator').click(); });
+  await app(() => { Array.from(document.querySelectorAll('shelf-panel li')).find(l => /Emergent \(Immediate Response\)/.test(l.textContent)).click(); });
+  await waitFor(async () => { const d = await dispo(); return d.transportModeLightsAndSirensUseId === 14813 && d.transportMethodID === 10353; }, { label: 'lights & sirens and ambulance filled in', timeout: 15000 });
+  await waitFor(async () => !(await need()).length, { label: 'outline gone' });
+  // Refusal on a fresh run
+  const id2 = await freshRun();
+  await app(() => window.app.openTab('Incident'));
+  await waitFor(async () => (await btns()).length === 6, { label: 'buttons' });
+  await press('dispo-refusal');
+  await waitFor(async () => ((await T.record(id2)).tree.incident?.disposition || {}).transportDispositionItemID === 14441, { label: 'refusal set', timeout: 20000 });
+  const d2 = (await T.record(id2)).tree.incident.disposition;
+  assert.equal(d2.unitDispositionItemID, 14402); assert.equal(d2.patientEvaluationCareDispositionItemID, 14411); assert.equal(d2.crewDispositionItemID, 14421);
+  assert.equal(d2.levelOfServiceId, undefined, 'level of service left alone on a refusal');
+  await waitFor(async () => (await need()).includes('Reason needed'), { label: 'reason outlined' });
+  await app(() => { document.querySelector('eso-field[data-field-ref=REFUSALRELEASEITEMIDS] .shelf-click-indicator').click(); });
+  await app(() => { Array.from(document.querySelectorAll('shelf-panel li')).find(l => /Against Medical Advice/.test(l.textContent)).click(); document.querySelector('shelf-panel header button').click(); });
+  await waitFor(async () => !(await need()).length, { label: 'reason outline gone' });
+  // Canceled prior: only unit and crew; patient evaluation stays not applicable
+  const id3 = await freshRun();
+  await app(() => window.app.openTab('Incident'));
+  await waitFor(async () => (await btns()).length === 6, { label: 'buttons' });
+  await press('dispo-prior');
+  await waitFor(async () => ((await T.record(id3)).tree.incident?.disposition || {}).crewDispositionItemID === 14420, { label: 'canceled prior set', timeout: 20000 });
+  const d3 = (await T.record(id3)).tree.incident.disposition;
+  assert.equal(d3.unitDispositionItemID, 14404); assert.equal(d3.patientEvaluationCareDispositionItemID, undefined); assert.equal(d3.transportDispositionItemID, undefined);
+  assert.deepEqual(await need(), []);
+});
+
+test('choosing a response mode fills the follow-on fields that are empty and sets EMD Performed to No', async () => {
+  const id = await freshRun();
+  await app(() => window.app.openTab('Incident'));
+  await waitFor(() => T.page.evaluate(() => !!document.querySelector('eso-field[data-field-ref=PRIORITYID] .quick-picks button')), { label: 'response mode quick-picks' });
+  await sleep(1200); // the watcher must have seen the empty field first
+  // the crew leaves Speed answered already; it must be left alone
+  await app(() => { window.app.ssSet && 0; Array.from(document.querySelectorAll('eso-field[data-field-ref=RESPONSEMODESPEED] .quick-picks button')).find(b => /Enhanced/.test(b.textContent)).click(); });
+  await app(() => { Array.from(document.querySelectorAll('eso-field[data-field-ref=PRIORITYID] .quick-picks button')).find(b => b.textContent === 'Emergent').click(); });
+  const resp = await waitFor(async () => { const r = (await T.record(id)).tree.incident?.response || {}; return r.emdPerformedID === 6868 ? r : null; }, { label: 'auto-filled through EMD', timeout: 15000 });
+  assert.equal(resp.priorityId, 338);
+  assert.equal(resp.responseModeLightsAndSirensUseId, 14797, 'Lights & Sirens');
+  assert.equal(resp.responseModeIntersectionNavigationId, 14805, 'With Normal Light Pattern');
+  assert.equal(resp.responseModeScheduledId, 14807, 'No');
+  assert.equal(resp.responseModeSpeedId, 14810, 'Speed left as the crew set it');
+  // non-emergent on another run
+  const id2 = await freshRun();
+  await app(() => window.app.openTab('Incident'));
+  await waitFor(() => T.page.evaluate(() => !!document.querySelector('eso-field[data-field-ref=PRIORITYID] .quick-picks button')), { label: 'quick-picks' });
+  await sleep(1200);
+  await app(() => { Array.from(document.querySelectorAll('eso-field[data-field-ref=PRIORITYID] .quick-picks button')).find(b => b.textContent === 'Non-Emergent').click(); });
+  const r2 = await waitFor(async () => { const r = (await T.record(id2)).tree.incident?.response || {}; return r.emdPerformedID === 6868 ? r : null; }, { label: 'non-emergent auto-fill', timeout: 15000 });
+  assert.equal(r2.responseModeLightsAndSirensUseId, 14799, 'No Lights or Sirens');
+  assert.equal(r2.responseModeSpeedId, 14811, 'Normal Traffic');
+  // a downgraded mode only sets EMD; the rest is the crew's call
+  const id3 = await freshRun();
+  await app(() => window.app.openTab('Incident'));
+  await waitFor(() => T.page.evaluate(() => !!document.querySelector('eso-field[data-field-ref=PRIORITYID] .quick-picks button')), { label: 'quick-picks' });
+  await sleep(1200);
+  await app(() => { Array.from(document.querySelectorAll('eso-field[data-field-ref=PRIORITYID] .quick-picks button')).find(b => /Downgraded/.test(b.textContent)).click(); });
+  await waitFor(async () => ((await T.record(id3)).tree.incident?.response || {}).emdPerformedID === 6868, { label: 'EMD No', timeout: 15000 });
+  await sleep(1500);
+  const r3 = (await T.record(id3)).tree.incident.response;
+  assert.equal(r3.responseModeLightsAndSirensUseId, undefined, 'lights & sirens left for the crew on a downgraded response');
+});
+
 test('quick acuity: red, yellow, green next to each acuity field, one tap picks it in ESO\'s list', async () => {
   const id = await app(() => window.app.recordId);
   await app(() => window.app.openTab('Narrative'));
   const sws = () => T.page.evaluate(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .sw')).map(c => ({ title: c.title, cls: c.className, rect: c.getBoundingClientRect().toJSON() })));
   await waitFor(async () => (await sws()).length === 6, { label: 'six swatches' });
+  assert.equal(await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .chip.other:not([data-group])').length), 2, 'an Other… after each acuity row');
   const lab = await T.page.evaluate(() => document.querySelector('#narrative label').getBoundingClientRect().toJSON());
   const first = (await sws())[0];
   assert.ok(first.rect.left > lab.right && Math.abs(first.rect.top + first.rect.height / 2 - (lab.top + lab.height / 2)) < 8, 'swatches sit right after the label, on its line');

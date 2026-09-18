@@ -43,7 +43,7 @@
   const sget = (keys) => new Promise(res => storage.get(keys, (v) => res(v || {})));
   const sset = (obj) => new Promise(res => storage.set(obj, () => res()));
   const sremove = (keys) => new Promise(res => storage.remove(keys, () => res()));
-  const DEFAULT_SETTINGS = { purgeHoursAfterLock: 0, probeSec: 20, heldProbeSec: 8, warmTabs: true, cardCollapsed: false, showTimes: true, sendPrompt: true, unsentList: true, quickHistory: true, quickMeds: true, quickAllergies: true, quickAcuity: true, quickDelays: true, quickTransport: true, quickAssess: true, quickFacilities: true, facilitySending: [], facilityDestination: [] };
+  const DEFAULT_SETTINGS = { purgeHoursAfterLock: 0, probeSec: 20, heldProbeSec: 8, warmTabs: true, cardCollapsed: false, showTimes: true, sendPrompt: true, unsentList: true, quickHistory: true, quickMeds: true, quickAllergies: true, quickAcuity: true, quickDelays: true, quickTransport: true, quickAssess: true, quickDisposition: true, autoResponse: true, quickFacilities: true, facilitySending: [], facilityDestination: [] };
   // The agency's standard facility chips (ids and names from ESO's saved facilities). Every install
   // starts with these; Settings can add or remove per device.
   const FAC = {
@@ -175,6 +175,7 @@
     .quick .chip.added { background: #dcfce7; border-color: #86efac; color: #166534; cursor: default; }
     .quick .chip.added::before { content: '✓ '; }
     .quick .chip.busy { opacity: .6; cursor: wait; }
+    .quick .chip.other, .quick .allnone.other { border-style: dashed; color: #475569; font-weight: 600; }
     .quick .sw { position: fixed; pointer-events: auto; width: 34px; height: 26px; border-radius: 7px; border: 2px solid transparent; cursor: pointer; box-shadow: 0 1px 2px rgba(0,0,0,.25); }
     .quick .sw.red { background: #dc2626; } .quick .sw.yellow { background: #facc15; } .quick .sw.green { background: #16a34a; }
     .quick .sw.cur { border-color: #0f172a; box-shadow: 0 0 0 2px #fff, 0 0 0 4px #0f172a; }
@@ -182,6 +183,8 @@
     .quick .allnone { position: fixed; pointer-events: auto; height: 30px; padding: 0 14px; border-radius: 8px; border: 1px solid #15803d; background: #fff; color: #15803d; font: inherit; font-weight: 700; cursor: pointer; white-space: nowrap; box-shadow: 0 1px 2px rgba(0,0,0,.12); }
     .quick .allnone:hover { background: #f0fdf4; }
     .quick .allnone.done { background: #dcfce7; border-color: #86efac; color: #166534; cursor: default; }
+    .quick .need { position: fixed; pointer-events: none; border: 2px solid #dc2626; border-radius: 6px; box-shadow: 0 0 0 3px rgba(220,38,38,.15); }
+    .quick .need::after { content: attr(data-msg); position: absolute; right: 6px; top: -11px; background: #dc2626; color: #fff; font: 700 11px/16px system-ui, sans-serif; padding: 1px 7px; border-radius: 8px; }
     .times { position: fixed; z-index: 2147483639; display: flex; gap: 4px; align-items: stretch; pointer-events: none; font: 12px/1.15 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; white-space: nowrap; overflow: hidden; }
     .times .t { display: flex; flex-direction: column; align-items: center; justify-content: center; min-width: 46px; padding: 3px 6px; border-radius: 7px; background: rgba(255,255,255,.10); color: #fff; }
     .times .t .l { font-size: 10px; letter-spacing: .04em; text-transform: uppercase; opacity: .75; }
@@ -359,6 +362,8 @@
         `<label class="s"><input type="checkbox" id="qacuity" ${settings.quickAcuity === false ? '' : 'checked'}> Acuity: red, yellow and green buttons next to Initial and Final Patient Acuity (Narrative tab)</label>` +
         `<label class="s"><input type="checkbox" id="qtransport" ${settings.quickTransport === false ? '' : 'checked'}> Transport: chips for how the patient was moved and positioned (Narrative tab)</label>` +
         `<label class="s"><input type="checkbox" id="qfacilities" ${settings.quickFacilities === false ? '' : 'checked'}> Facilities: chips for saved facilities above the Scene and Destination locations (Incident tab)</label>` +
+        `<label class="s"><input type="checkbox" id="qdisposition" ${settings.quickDisposition === false ? '' : 'checked'}> Disposition: Transported ALS/BLS, Refusal, Canceled (Prior/Scene) buttons above Unit Disposition; Transport Mode and Reason for Refusal outlined in red until answered (Incident tab)</label>` +
+        `<label class="s"><input type="checkbox" id="qautoresp" ${settings.autoResponse === false ? '' : 'checked'}> Auto-fill: choosing Emergent or Non-Emergent (response or transport mode) fills the lights/sirens, intersection, scheduled, speed and method fields that are still empty, and sets EMD Performed to No</label>` +
         `<label class="s"><input type="checkbox" id="qassess" ${settings.quickAssess === false ? '' : 'checked'}> Assessment: "All normal" (presses No Abnormalities on every category in ESO's Quick Ax) and "A&amp;Ox4" on each assessment (Assessments tab)</label>` +
         facilityPicker('facilitySending', 'Sending facility chips (Scene)') + facilityPicker('facilityDestination', 'Destination facility chips') +
         `<div class="actions"><button class="a" data-act="save-settings">Save</button></div></div>`);
@@ -447,6 +452,8 @@
       settings.quickTransport = !!panel.querySelector('#qtransport').checked;
       settings.quickFacilities = !!panel.querySelector('#qfacilities').checked;
       settings.quickAssess = !!panel.querySelector('#qassess').checked;
+      settings.quickDisposition = !!panel.querySelector('#qdisposition').checked;
+      settings.autoResponse = !!panel.querySelector('#qautoresp').checked;
       layoutQuick();
       await sset({ settings }); toPage('settings', settings); settingsOpen = false; renderPanel(); renderTimes();
     }
@@ -924,15 +931,15 @@
     let x = r.left + r.width + 12, y = r.top + (r.height - 28) / 2, row = 0;
     const under = g.field ? fr.bottom : r.bottom;
     const layer = ensureQuickLayer();
-    for (const [short, name, id] of g.chips) {
+    for (const [short, name, id] of [...g.chips, ['Other…', null, 'other']]) {
       const chip = quickEl(`${gk}:${id}`, () => {
-        const c = document.createElement('button'); c.type = 'button'; c.className = 'chip'; c.textContent = short; c.title = name; c.dataset.group = gk;
+        const c = document.createElement('button'); c.type = 'button'; c.className = 'chip' + (id === 'other' ? ' other' : ''); c.textContent = short; c.title = name || 'Open ESO\'s full list'; c.dataset.group = gk;
         c.addEventListener('pointerdown', (e) => e.stopPropagation());
-        c.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); tapChip(gk, name, id); });
+        c.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); if (id === 'other') openNative(gk); else tapChip(gk, name, id); });
         return c;
       });
-      chip.classList.toggle('added', have.has(id));
-      chip.classList.toggle('on', pend(gk).has(name));
+      chip.classList.toggle('added', id !== 'other' && have.has(id));
+      chip.classList.toggle('on', id !== 'other' && pend(gk).has(name));
       chip.classList.toggle('busy', quickBusy);
       chip.style.display = 'block';
       chip.style.visibility = 'hidden';
@@ -946,6 +953,14 @@
     // reserve the rows under the button so nothing of ESO's sits beneath the chips
     const need = row ? row * rowH + 8 : 0;
     if (btn.style.marginBottom !== need + 'px') btn.style.marginBottom = need + 'px';
+  }
+  // "Other…": open what ESO itself would open for this group, nothing more
+  function openNative(gk) {
+    if (quickBusy) return;
+    const g = CHIP_GROUPS[gk];
+    const el = g.field ? fieldEl(g.field) : anchorButton(g);
+    if (!el) return;
+    (g.field ? (el.querySelector('.shelf-click-indicator') || el.querySelector('.field-area') || el) : el).click();
   }
   function tapChip(gk, name, id) {
     if (quickBusy) return;
@@ -1032,6 +1047,12 @@
       const r = f.lab.getBoundingClientRect();
       const cur = run.lists ? Number(run.lists[def.key]) : null;
       let x = r.right + 14;
+      const other = quickEl(`a:${which}:other`, () => {
+        const b = document.createElement('button'); b.type = 'button'; b.className = 'chip other'; b.textContent = 'Other…'; b.title = 'Open ESO\'s acuity list';
+        b.addEventListener('pointerdown', (e) => e.stopPropagation());
+        b.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); if (quickBusy) return; const f2 = acuityField(def.label); if (f2) f2.ctl.click(); });
+        return b;
+      });
       for (const [colour, [name, id]] of Object.entries(def.items)) {
         const sw = quickEl(`a:${which}:${colour}`, () => {
           const b = document.createElement('button'); b.type = 'button'; b.className = 'sw ' + colour; b.title = name;
@@ -1045,6 +1066,8 @@
         sw.style.top = Math.round(r.top + (r.height - 26) / 2) + 'px';
         x += 34 + 8;
       }
+      other.style.left = Math.round(x + 4) + 'px';
+      other.style.top = Math.round(r.top + (r.height - 28) / 2) + 'px';
     }
   }
   async function pickAcuity(which, name) {
@@ -1089,7 +1112,7 @@
     if (!empty && Date.now() - delaysDoneAt > 2500) { dropQuick('d:'); return; }
     const r = first.getBoundingClientRect();
     const btn = quickEl('d:all', () => {
-      const b = document.createElement('button'); b.type = 'button'; b.className = 'allnone'; b.title = 'Press None/No Delay on every delay field that is still empty';
+      const b = document.createElement('button'); b.type = 'button'; b.className = 'allnone'; b.dataset.group = 'delays'; b.title = 'Press None/No Delay on every delay field that is still empty';
       b.addEventListener('pointerdown', (e) => e.stopPropagation());
       b.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); allNoDelay(); });
       return b;
@@ -1150,14 +1173,14 @@
     const gap = 6, rowH = 34;
     let x = pr.left, y = pr.bottom + 8, row = 0;
     const layer = ensureQuickLayer();
-    for (const fac of chosen) {
+    for (const fac of [...chosen, { id: 'other', name: 'Open ESO\'s facility list', label: 'Other…' }]) {
       const chip = quickEl(`f:${gk}:${fac.id}`, () => {
-        const c = document.createElement('button'); c.type = 'button'; c.className = 'chip'; c.textContent = fac.label || fac.name; c.title = fac.name; c.dataset.group = 'fac-' + gk;
+        const c = document.createElement('button'); c.type = 'button'; c.className = 'chip' + (fac.id === 'other' ? ' other' : ''); c.textContent = fac.label || fac.name; c.title = fac.name; c.dataset.group = 'fac-' + gk;
         c.addEventListener('pointerdown', (e) => e.stopPropagation());
-        c.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); pickFacility(gk, fac); });
+        c.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); if (fac.id === 'other') openFacilityList(gk); else pickFacility(gk, fac); });
         return c;
       });
-      chip.classList.toggle('added', current.toUpperCase() === fac.name.toUpperCase());
+      chip.classList.toggle('added', fac.id !== 'other' && current.toUpperCase() === fac.name.toUpperCase());
       chip.classList.toggle('busy', quickBusy);
       chip.style.display = 'block'; chip.style.visibility = 'hidden';
       layer.appendChild(chip);
@@ -1188,6 +1211,15 @@
       if (okBtn) okBtn.click();
     }
     await until(() => !document.body.contains(shelf) || !visible(shelf), 3000);
+  }
+  async function openFacilityList(gk) {
+    if (quickBusy) return;
+    const g = FACILITY_GROUPS[gk];
+    const blk = locationBlock(g); if (!blk) return;
+    if (blk.pill && !blk.pill.classList.contains('selected')) blk.pill.click();
+    const name = await until(() => fieldEl(g.nameRef), 2000);
+    const f = name && !name.hasAttribute('disabled') ? name : fieldEl(g.typeRef);
+    if (f) (f.querySelector('.shelf-click-indicator') || f.querySelector('.field-area') || f).click();
   }
   async function pickFacility(gk, fac) {
     if (quickBusy) return;
@@ -1315,8 +1347,170 @@
     }
     hideVeil(); quickBusy = false; setTimeout(layoutAssess, 300);
   }
+  // ---- dispositions: one button sets the whole set the way the crew would, then outlines in red
+  // whatever ESO still needs (Transport Mode, Reason for Refusal) until it is answered.
+  const fieldValue = (ref) => { const f = fieldEl(ref); if (!f) return null; const v = f.querySelector('.display-value'); return norm(v ? v.textContent : ''); };
+  const fieldReady = (ref) => { const f = fieldEl(ref); return f && !f.hasAttribute('disabled') ? f : null; };
+  // Set a single-select field: ESO's own quick-pick button when it has one, else its picker.
+  async function setSingle(ref, fullName, quickLabel) {
+    const f = await until(() => fieldReady(ref), 3000);
+    if (!f) return false; // not on the page or not applicable for this disposition
+    if (norm(fieldValue(ref)).toUpperCase() === fullName.toUpperCase()) return true;
+    const qp = quickLabel ? Array.from(f.querySelectorAll('.quick-picks button')).find(b => norm(b.textContent).toUpperCase() === quickLabel.toUpperCase()) : null;
+    if (qp) {
+      qp.click();
+      if (await until(() => norm(fieldValue(ref)).toUpperCase() === fullName.toUpperCase() || (fieldValue(ref) || '').toUpperCase().includes(quickLabel.toUpperCase()), 1200, 60)) return true;
+    }
+    await pickSingle(f, fullName, true);
+    return true;
+  }
+  const DISPO = {
+    als: { text: 'Transported ALS', steps: [['UNITDISPOSITIONITEMID', 'Patient Contact Made'], ['PATIENTEVALUATIONCAREDISPOSITIONITEMID', 'Patient Evaluated and Care Provided'], ['CREWDISPOSITIONITEMID', 'Initiated and Continued Primary Care'], ['TRANSPORTDISPOSITIONITEMID', 'Transport by This EMS Unit (This Crew Only)'], ['LEVELOFSERVICEID', 'Advanced Life Support', 'ALS']], needs: ['TRANSPORTMODEID'] },
+    bls: { text: 'Transported BLS', steps: [['UNITDISPOSITIONITEMID', 'Patient Contact Made'], ['PATIENTEVALUATIONCAREDISPOSITIONITEMID', 'Patient Evaluated and Care Provided'], ['CREWDISPOSITIONITEMID', 'Initiated and Continued Primary Care'], ['TRANSPORTDISPOSITIONITEMID', 'Transport by This EMS Unit (This Crew Only)'], ['LEVELOFSERVICEID', 'Basic Life Support', 'BLS']], needs: ['TRANSPORTMODEID'] },
+    refusal: { text: 'Refusal', steps: [['UNITDISPOSITIONITEMID', 'Patient Contact Made'], ['PATIENTEVALUATIONCAREDISPOSITIONITEMID', 'Patient Evaluated and Refused Care'], ['CREWDISPOSITIONITEMID', 'Back in Service, Care or Support Services Refused'], ['TRANSPORTDISPOSITIONITEMID', 'No Transport']], needs: ['REFUSALRELEASEITEMIDS'] },
+    prior: { text: 'Canceled (Prior)', steps: [['UNITDISPOSITIONITEMID', 'Canceled Prior to Arrival at Scene'], ['CREWDISPOSITIONITEMID', 'Back in Service, No Care or Support Services Required']], needs: [] },
+    scene: { text: 'Canceled (Scene)', steps: [['UNITDISPOSITIONITEMID', 'Canceled on Scene'], ['CREWDISPOSITIONITEMID', 'Back in Service, No Care or Support Services Required']], needs: [] },
+  };
+  const needs = new Map(); // ref -> message, outlined until the field has a value
+  function layoutDisposition() {
+    const run = currentRun();
+    const first = settings.quickDisposition === false || !run || run.locked || !onTab('Incident') || shelfOpen() ? null : fieldEl('UNITDISPOSITIONITEMID');
+    if (!first) { dropQuick('dp:'); return; }
+    const r = first.getBoundingClientRect();
+    if (!r.width) { dropQuick('dp:'); return; }
+    if (first.style.marginTop !== '44px') first.style.marginTop = '44px';
+    let x = r.left;
+    for (const [k, d] of [...Object.entries(DISPO), ['other', { text: 'Other…', steps: [], other: true }]]) {
+      const b = quickEl('dp:' + k, () => {
+        const el = document.createElement('button'); el.type = 'button'; el.className = 'allnone' + (d.other ? ' other' : ''); el.dataset.group = 'dispo-' + k; el.textContent = d.text; el.title = d.other ? 'Open ESO\'s Unit Disposition list' : d.steps.map(s => s[1]).join(' · ');
+        el.addEventListener('pointerdown', (e) => e.stopPropagation());
+        el.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); if (d.other) { if (!quickBusy) { const f = fieldEl('UNITDISPOSITIONITEMID'); if (f) (f.querySelector('.shelf-click-indicator') || f).click(); } } else runDisposition(k); });
+        return el;
+      });
+      b.classList.toggle('busy', quickBusy);
+      b.style.visibility = 'hidden'; b.style.display = 'block';
+      const w = b.getBoundingClientRect().width || 120;
+      b.style.left = Math.round(x) + 'px'; b.style.top = Math.round(r.top - 40) + 'px';
+      b.style.visibility = '';
+      x += w + 8;
+    }
+  }
+  async function runDisposition(k) {
+    if (quickBusy) return;
+    const d = DISPO[k];
+    quickBusy = true; layoutDisposition();
+    try {
+      showVeilMessage(d.text, d.steps.map(s => s[1]).join(', '));
+      for (const [ref, name, quick] of d.steps) { await setSingle(ref, name, quick); await wait(200); }
+      for (const ref of d.needs) needs.set(ref, ref === 'TRANSPORTMODEID' ? 'Transport Mode needed' : 'Reason needed');
+    } catch (e) {
+      hideVeil(); quickBusy = false; layoutDisposition();
+      alert('ESO Save: could not finish the disposition. ' + (e && e.message ? e.message : '') + ' Check the fields and finish by hand.');
+      return;
+    }
+    hideVeil(); quickBusy = false; layoutDisposition(); layoutNeeds();
+  }
+  // ---- response mode to scene: Emergent / Non-Emergent / Other… above the field, one tap even
+  // once the field is set (ESO's own quick-picks only show while it is empty)
+  const RESPONSE = [['e', 'Emergent', 'Emergent', 'Emergent'], ['n', 'Non-Emergent', 'Non-Emergent', 'Non-Emergent']];
+  function layoutResponse() {
+    const run = currentRun();
+    const f = settings.quickDisposition === false || !run || run.locked || !onTab('Incident') || shelfOpen() ? null : fieldEl('PRIORITYID');
+    if (!f) { dropQuick('rp:'); return; }
+    const r = f.getBoundingClientRect();
+    if (!r.width) { dropQuick('rp:'); return; }
+    if (f.style.marginTop !== '44px') f.style.marginTop = '44px';
+    const cur = norm(fieldValue('PRIORITYID')).toUpperCase();
+    let x = r.left;
+    for (const [k, text, full, quick] of [...RESPONSE, ['other', 'Other…', null, null]]) {
+      const b = quickEl('rp:' + k, () => {
+        const el = document.createElement('button'); el.type = 'button'; el.className = 'allnone' + (k === 'other' ? ' other' : ''); el.dataset.group = 'resp-' + k; el.textContent = text; el.title = k === 'other' ? 'Open ESO\'s Response Mode list' : 'Response Mode to Scene: ' + full;
+        el.addEventListener('pointerdown', (e) => e.stopPropagation());
+        el.addEventListener('click', async (e) => {
+          e.preventDefault(); e.stopPropagation();
+          if (quickBusy) return;
+          const f2 = fieldEl('PRIORITYID'); if (!f2) return;
+          if (k === 'other') { (f2.querySelector('.shelf-click-indicator') || f2).click(); return; }
+          quickBusy = true; layoutResponse();
+          try { await setSingle('PRIORITYID', full, quick); } catch (err) { alert('ESO Save: could not set the response mode. ' + (err && err.message ? err.message : '')); }
+          quickBusy = false; layoutResponse();
+        });
+        return el;
+      });
+      b.classList.toggle('done', k !== 'other' && cur === full.toUpperCase());
+      b.classList.toggle('busy', quickBusy);
+      b.style.visibility = 'hidden'; b.style.display = 'block';
+      const w = b.getBoundingClientRect().width || 100;
+      b.style.left = Math.round(x) + 'px'; b.style.top = Math.round(r.top - 40) + 'px';
+      b.style.visibility = '';
+      x += w + 8;
+    }
+  }
+  function layoutNeeds() {
+    const run = currentRun();
+    if (!run || !onTab('Incident') || shelfOpen()) { dropQuick('nd:'); return; }
+    for (const [ref, msg] of needs) {
+      const f = fieldEl(ref);
+      const v = f ? f.querySelector('.display-value') : null;
+      const filled = v && norm(v.textContent);
+      if (!f || filled) { needs.delete(ref); dropQuick('nd:' + ref); continue; }
+      const r = f.getBoundingClientRect();
+      const box = quickEl('nd:' + ref, () => { const el = document.createElement('div'); el.className = 'need'; return el; });
+      box.dataset.msg = msg;
+      box.style.left = Math.round(r.left - 6) + 'px'; box.style.top = Math.round(r.top - 4) + 'px';
+      box.style.width = Math.round(r.width + 8) + 'px'; box.style.height = Math.round(r.height + 4) + 'px';
+    }
+  }
+
+  // ---- auto-fill after a mode is chosen: response mode to scene, and transport mode
+  const AUTO = {
+    PRIORITYID: {
+      match: (v) => /^Emergent$/i.test(v) ? 'e' : /^Non-Emergent$/i.test(v) ? 'n' : /Emergent/i.test(v) ? 'other' : null,
+      fill: (kind) => [
+        ...(kind === 'e' ? [['RESPONSEMODELIGHTSANDSIRENSUSE', 'Lights and Sirens', 'Lights & Sirens']] : kind === 'n' ? [['RESPONSEMODELIGHTSANDSIRENSUSE', 'No Lights or Sirens', 'No Lights or Sirens']] : []),
+        ...(kind === 'e' || kind === 'n' ? [['RESPONSEMODEINTERSECTIONNAVIGATION', 'With Normal Light Patterns', 'With Normal Light Pattern'], ['RESPONSEMODESCHEDULED', 'No (Unscheduled)', 'No'], ['RESPONSEMODESPEED', 'Speed-Normal Traffic', 'Normal Traffic']] : []),
+        ['EMDPERFORMEDID', 'No', 'No'],
+      ],
+    },
+    TRANSPORTMODEID: {
+      match: (v) => /^Emergent \(Immediate Response\)$/i.test(v) ? 'e' : /^Non-Emergent$/i.test(v) ? 'n' : null,
+      fill: (kind) => [['TRANSPORTMODELIGHTSANDSIRENSUSE', kind === 'e' ? 'Lights and Sirens' : 'No Lights or Sirens', kind === 'e' ? 'Lights & Sirens' : 'No Lights or Sirens'], ['TRANSPORTMETHODID', 'Ground-Ambulance', 'Ambulance']],
+    },
+  };
+  const seenMode = {};
+  let autoBusy = false;
+  function watchModes() {
+    if (settings.autoResponse === false || !onTab('Incident')) { for (const k of Object.keys(seenMode)) delete seenMode[k]; return; }
+    for (const [ref, rule] of Object.entries(AUTO)) {
+      const v = fieldValue(ref);
+      if (v === null) { delete seenMode[ref]; continue; }
+      const prev = seenMode[ref];
+      seenMode[ref] = v;
+      if (prev === undefined || prev === v || !v) continue; // first look, or unchanged, or cleared
+      const kind = rule.match(v);
+      if (!kind) continue;
+      autoFill(rule.fill(kind));
+    }
+  }
+  async function autoFill(steps) {
+    if (autoBusy) return;
+    autoBusy = true;
+    try {
+      for (const [ref, name, quick] of steps) {
+        const f = await until(() => fieldReady(ref), 2500);
+        if (!f || norm(fieldValue(ref))) continue; // only fields still empty
+        await setSingle(ref, name, quick);
+        await wait(150);
+      }
+    } catch (e) { /* leave the rest to the crew */ }
+    autoBusy = false;
+  }
   function layoutQuick() {
     try { layoutAssess(); } catch (e) { /* keep going */ }
+    try { layoutDisposition(); } catch (e) { /* keep going */ }
+    try { layoutResponse(); } catch (e) { /* keep going */ }
+    try { layoutNeeds(); } catch (e) { /* keep going */ }
+    try { watchModes(); } catch (e) { /* keep going */ }
     for (const gk of Object.keys(CHIP_GROUPS)) { try { layoutChips(gk); } catch (e) { /* keep going */ } }
     for (const gk of Object.keys(FACILITY_GROUPS)) { try { layoutFacilities(gk); } catch (e) { /* keep going */ } }
     try { layoutDelays(); } catch (e) { /* keep going */ }
