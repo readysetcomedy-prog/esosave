@@ -43,7 +43,7 @@
   const sget = (keys) => new Promise(res => storage.get(keys, (v) => res(v || {})));
   const sset = (obj) => new Promise(res => storage.set(obj, () => res()));
   const sremove = (keys) => new Promise(res => storage.remove(keys, () => res()));
-  const DEFAULT_SETTINGS = { purgeHoursAfterLock: 0, probeSec: 20, heldProbeSec: 8, warmTabs: true, cardCollapsed: false, showTimes: true, sendPrompt: true, unsentList: true, quickHistory: true, quickMeds: true, quickAllergies: true, quickAcuity: true, quickDelays: true, quickTransport: true, quickAssess: true, quickDisposition: true, autoResponse: true, quickIncident: true, quickMechanism: true, quickFacilities: true, facilitySending: [], facilityDestination: [] };
+  const DEFAULT_SETTINGS = { purgeHoursAfterLock: 0, probeSec: 20, heldProbeSec: 8, warmTabs: true, cardCollapsed: false, showTimes: true, sendPrompt: true, unsentList: true, quickHistory: true, quickMeds: true, quickAllergies: true, quickAcuity: true, quickDelays: true, quickTransport: true, quickAssess: true, quickDisposition: true, autoResponse: true, quickIncident: true, quickMechanism: true, quickFacilities: true, quickNarrative: true, quickPatient: true, quickRefusal: true, syncCareLevel: true, facilitySending: [], facilityDestination: [] };
   // The agency's standard facility chips (ids and names from ESO's saved facilities). Every install
   // starts with these; Settings can add or remove per device.
   const FAC = {
@@ -175,6 +175,8 @@
     .quick .chip.added { background: #dcfce7; border-color: #86efac; color: #166534; cursor: default; }
     .quick .chip.added::before { content: '✓ '; }
     .quick .chip.busy { opacity: .6; cursor: wait; }
+    .quick .chip.padval { line-height: 26px; cursor: default; min-width: 44px; text-align: center; color: #475569; }
+    .quick .chip.padval.on { color: #fff; }
     .quick .chip.other, .quick .allnone.other { border-style: dashed; color: #475569; font-weight: 600; }
     .quick .sw { position: fixed; pointer-events: auto; width: 34px; height: 26px; border-radius: 7px; border: 2px solid transparent; cursor: pointer; box-shadow: 0 1px 2px rgba(0,0,0,.25); }
     .quick .sw.red { background: #dc2626; } .quick .sw.yellow { background: #facc15; } .quick .sw.green { background: #16a34a; }
@@ -367,6 +369,10 @@
         `<label class="s"><input type="checkbox" id="qdisposition" ${settings.quickDisposition === false ? '' : 'checked'}> Disposition: Transported ALS/BLS, Refusal, Canceled (Prior/Scene) buttons above Unit Disposition; Transport Mode and Reason for Refusal outlined in red until answered (Incident tab)</label>` +
         `<label class="s"><input type="checkbox" id="qautoresp" ${settings.autoResponse === false ? '' : 'checked'}> Auto-fill: choosing Emergent or Non-Emergent (response or transport mode) fills the lights/sirens, intersection, scheduled, speed and method fields that are still empty, and sets EMD Performed to No</label>` +
         `<label class="s"><input type="checkbox" id="qassess" ${settings.quickAssess === false ? '' : 'checked'}> Assessment: "All normal" (presses No Abnormalities on every category in ESO's Quick Ax) and "A&amp;Ox4" on each assessment (Assessments tab)</label>` +
+        `<label class="s"><input type="checkbox" id="qnarrative" ${settings.quickNarrative === false ? '' : 'checked'}> Narrative: rows for Primary and Secondary Impression, Provided Care Level, Anatomic Location and the complaint duration units, plus a 0-9 pad for the duration (Narrative tab)</label>` +
+        `<label class="s"><input type="checkbox" id="qpatient" ${settings.quickPatient === false ? '' : 'checked'}> Patient: Race row and 0-9 pads for Weight and Height (Patient tab)</label>` +
+        `<label class="s"><input type="checkbox" id="qrefusal" ${settings.quickRefusal === false ? '' : 'checked'}> Refusal form: chips for Legal, Decision-Making, Medical, Check All notifications and the four Patient Refusals inside ESO's Patient Refusal Form (Signatures tab)</label>` +
+        `<label class="s"><input type="checkbox" id="qsynccare" ${settings.syncCareLevel === false ? '' : 'checked'}> Match ALS / BLS between Level of Service (Incident) and Local Protocol Provided Care Level (Narrative): setting one sets the other, then returns to the page you were on</label>` +
         facilityPicker('facilitySending', 'Sending facility chips (Scene)') + facilityPicker('facilityDestination', 'Destination facility chips') +
         `<div class="actions"><button class="a" data-act="save-settings">Save</button></div></div>`);
     }
@@ -458,6 +464,10 @@
       settings.quickIncident = !!panel.querySelector('#qincident').checked;
       settings.quickMechanism = !!panel.querySelector('#qmechanism').checked;
       settings.autoResponse = !!panel.querySelector('#qautoresp').checked;
+      settings.quickNarrative = !!panel.querySelector('#qnarrative').checked;
+      settings.quickPatient = !!panel.querySelector('#qpatient').checked;
+      settings.quickRefusal = !!panel.querySelector('#qrefusal').checked;
+      settings.syncCareLevel = !!panel.querySelector('#qsynccare').checked;
       layoutQuick();
       await sset({ settings }); toPage('settings', settings); settingsOpen = false; renderPanel(); renderTimes();
     }
@@ -855,14 +865,31 @@
     },
     allergies: {
       setting: 'quickAllergies', button: /^Add Allergies$/i, title: /^Add Allergies$/i, listKey: 'allergies',
-      chips: [
-        ['NKDA', 'No known allergies', 518], ['Penicillin', 'Penicillin allergy', 528], ['Amoxicillin', 'Amoxicillin', 11990], ['Keflex', 'Keflex', 10245],
-        ['Sulfa', 'Sulfa', 10243], ['Bactrim', 'Bactrim', 10255], ['Codeine', 'Codeine', 524], ['Morphine', 'Morphine', 8200],
-        ['Hydrocodone', 'Hydrocodone', 10068], ['Oxycodone', 'Oxycodone', 11980], ['Tramadol', 'Tramadol', 11983], ['Toradol', 'Toradol', 11981],
-        ['Aspirin', 'Aspirin', 521], ['Ibuprofen', 'Ibuprofen', 11010], ['Latex', 'Latex allergy', 527], ['Iodine', 'Iodine', 10249],
-        ['IV contrast', 'IV Contrast Dye', 1338701], ['Shellfish', 'Shellfish allergy', 11045], ['Peanut', 'Peanut allergy', 10262], ['Egg', 'Egg allergy', 10995],
-        ['Bee sting', 'Bee sting allergy', 10975], ['Adhesive tape', 'Adhesive Tape', 11974], ['Other drug', 'Other drug allergy', 11027],
-      ],
+      chips: [['NKDA', 'No known allergies', 518]],
+    },
+    // Inside ESO's Patient Refusal Form (Signatures tab). The form is not a picker itself, so its
+    // chips show while it is open and hide while one of its own pickers is on top. Ids here are
+    // the agency's (GUIDs) or ESO's; what is set is read from the field's own display text.
+    rfLegal: {
+      setting: 'quickRefusal', form: /^Patient Refusal Form$/i, field: 'STANDARDREFUSALLEGALIDS', title: /^Legal$/i, what: 'Legal',
+      chips: [['18+', '18 years of age or older', 'e8baca53-0bd8-4041-9761-392b38716aed'], ['Guardian', 'Parent/Legal guardian present', 'b7121c7f-3203-4a0e-9311-6b5945d2f7c3']],
+    },
+    rfDecision: {
+      setting: 'quickRefusal', form: /^Patient Refusal Form$/i, field: 'STANDARDREFUSALDECISIONMAKINGIDS', title: /^Decision-Making$/i, what: 'Decision-Making',
+      chips: [['Clear', 'Cleared capacity assessment', '0ebe23fe-29a7-43a3-881e-33995648ffd6'], ['Drug/Alcohol', 'Possible ETOH/drug use', 'fedb6b92-b47f-4d1b-bb6d-ec51264038c5'], ['Threat', 'Presents a significant life threat to self or others', 'afd73a13-f1d9-4115-9df1-24af3eb74578']],
+    },
+    rfMedical: {
+      setting: 'quickRefusal', form: /^Patient Refusal Form$/i, field: 'STANDARDREFUSALMEDICALIDS', title: /^Medical$/i, what: 'Medical',
+      chips: [['Cleared', 'Cleared capacity assessment', '7f59c7f9-779a-45ce-9eb5-0d95d8b70fb0']],
+    },
+    rfNotify: {
+      setting: 'quickRefusal', form: /^Patient Refusal Form$/i, field: 'STANDARDREFUSALPATIENTNOTIFICATIONIDS', title: /Notifications$/i, what: 'notifications',
+      all: ['Medical treatment/evaluation recommendation(s)', 'Further harm could result without medical treatment or evaluation', 'Transport by means other than ambulance could be hazardous in light of present illness/injury', 'EMS preference to provide transport to the closest appropriate medical facility'],
+      chips: [['Check All', null, 'all']],
+    },
+    rfRefusals: {
+      setting: 'quickRefusal', form: /^Patient Refusal Form$/i, field: 'STANDARDREFUSALPATIENTREFUSALIDS', title: /^Patient Refusals$/i, what: 'Patient Refusals', noOther: true,
+      chips: [['Assessment', 'Assessment', 12817], ['Treatment', 'Treatment', 12818], ['Transport by EMS', 'Transport by EMS', 12819], ['Recommended Destination', 'Recommended Destination', 12820]],
     },
   };
   const ACUITY = {
@@ -913,6 +940,14 @@
   function onTab(view) { const s = lastStatus; return s && s.lastView && s.lastView.view === view && s.lastView.recordId === s.currentRecordId; }
   // ESO's pickers slide over the page; while one is open no quick button is shown
   const shelfOpen = () => Array.from(document.querySelectorAll('shelf-panel')).some(visible);
+  // a form ESO shows as a modal that is not a picker (the Patient Refusal Form): open when its
+  // title is on screen and no picker sits on top of it
+  const formOpen = (re) => {
+    const h = Array.from(document.querySelectorAll('standard-refusal h1, jump-link-shelf-panel h1, shelf-panel h1')).find(x => visible(x) && re.test(norm(x.textContent)));
+    return !!h && !Array.from(document.querySelectorAll('shelf-panel')).some(p => visible(p) && !p.contains(h));
+  };
+  // the names a multi-select field shows, upper-cased
+  const shownParts = (ref) => { const v = fieldValue(ref); return v ? v.split(',').map(x => norm(x).toUpperCase()).filter(Boolean) : []; };
 
   // ---- chips: to the right of the group's Add button and in rows under it
   function anchorButton(group) {
@@ -923,7 +958,7 @@
   function layoutChips(gk) {
     const g = CHIP_GROUPS[gk];
     const run = currentRun();
-    const ok = settings[g.setting] !== false && run && !run.locked && onTab(g.tab || 'Patient') && !shelfOpen();
+    const ok = settings[g.setting] !== false && run && !run.locked && (g.form ? formOpen(g.form) : onTab(g.tab || 'Patient') && !shelfOpen());
     // anchored to an Add button (chips to its right, rows under it) or to a field (chips after its
     // label, rows under the field)
     const btn = ok ? (g.field ? fieldEl(g.field) : anchorButton(g)) : null;
@@ -935,6 +970,8 @@
     const box = g.field ? fr : (btn.parentElement ? btn.parentElement.getBoundingClientRect() : r);
     const right = g.field ? fr.right - 4 : Math.max(r.right + 200, box.right - 8);
     const have = new Set(((run.lists && run.lists[g.listKey]) || []).map(Number));
+    const shown = g.field ? shownParts(g.field) : [];
+    const isOn = (name, id) => have.has(id) || (!!name && shown.includes(name.toUpperCase()));
     const gap = 6, rowH = 34;
     let x = r.left + r.width + 12, y = r.top + (r.height - 28) / 2, row = 0;
     const under = g.field ? fr.bottom : r.bottom;
@@ -946,8 +983,8 @@
         c.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); if (id === 'other') openNative(gk); else tapChip(gk, name, id); });
         return c;
       });
-      chip.classList.toggle('added', id !== 'other' && have.has(id));
-      chip.classList.toggle('on', id !== 'other' && pend(gk).has(name));
+      chip.classList.toggle('added', id === 'all' ? g.all.every(n => isOn(n)) : id !== 'other' && isOn(name, id));
+      chip.classList.toggle('on', id === 'all' ? g.all.some(n => pend(gk).has(n)) : id !== 'other' && pend(gk).has(name));
       chip.classList.toggle('busy', quickBusy);
       chip.style.display = 'block';
       chip.style.visibility = 'hidden';
@@ -974,8 +1011,15 @@
     if (quickBusy) return;
     const g = CHIP_GROUPS[gk];
     const run = currentRun();
-    if (run && run.lists && (run.lists[g.listKey] || []).map(Number).includes(id)) return; // already on the run
-    if (pend(gk).has(name)) pend(gk).delete(name); else pend(gk).add(name);
+    const shown = g.field ? shownParts(g.field) : [];
+    if (id === 'all') { // every name of the group not yet set
+      const want = g.all.filter(n => !shown.includes(n.toUpperCase()));
+      if (want.some(n => pend(gk).has(n))) for (const n of want) pend(gk).delete(n); else for (const n of want) pend(gk).add(n);
+    } else {
+      if (run && run.lists && (run.lists[g.listKey] || []).map(Number).includes(id)) return; // already on the run
+      if (shown.includes(name.toUpperCase())) return; // already shown in the field
+      if (pend(gk).has(name)) pend(gk).delete(name); else pend(gk).add(name);
+    }
     layoutChips(gk);
     clearTimeout(commitTimers[gk]);
     if (pend(gk).size) commitTimers[gk] = setTimeout(() => commitChips(gk), 1500);
@@ -986,7 +1030,7 @@
     const names = [...pend(gk)];
     quickBusy = true; layoutChips(gk);
     const missed = [];
-    const what = gk === 'history' ? 'history' : gk === 'meds' ? 'medications' : gk === 'allergies' ? 'allergies' : 'transport';
+    const what = g.what || (gk === 'history' ? 'history' : gk === 'meds' ? 'medications' : gk === 'allergies' ? 'allergies' : 'transport');
     try {
       const btn = g.field ? fieldEl(g.field) : anchorButton(g);
       if (!btn) throw new Error(g.field ? 'the field was not found' : 'the Add button was not found');
@@ -1422,22 +1466,33 @@
   // once the field is set (ESO's own quick-picks only show while it is empty)
   // Rows of one-tap choices above a single-select field, one tap even once the field is set (ESO's
   // own quick-picks only show while it is empty). [label, ESO's full name, ESO quick-pick label]
+  const IMPRESSIONS = [['Chest Pain', 'Chest Pain / Discomfort'], ['SOB', 'Acute Respiratory Distress (Dyspnea)'], ['Abd Pain', 'Abdominal Pain'], ['AMS', 'Altered Mental Status'], ['Weakness', 'Generalized Weakness'],
+    ['Syncope', 'Syncope / Fainting'], ['Seizure', 'Seizures without status epilepticus'], ['Injury', 'Injury'], ['Stroke', 'Stroke'], ['No Complaint', 'No Complaints or Injury/Illness Noted']];
   const SINGLE_ROWS = {
     resp: { setting: 'quickDisposition', ref: 'PRIORITYID', what: 'Response Mode', items: [['Emergent', 'Emergent', 'Emergent'], ['Non-Emergent', 'Non-Emergent', 'Non-Emergent']] },
     runtype: { setting: 'quickIncident', ref: 'RUNTYPEID', what: 'Run Type', items: [['911/PL', 'Emergency Response (Primary Response Area)', '911 Response'], ['Hosp-Hosp', 'Hospital-to-Hospital Transfer'], ['Intercept', 'Emergency Response (Intercept)', 'Emergency Response (Intercept)'], ['Mutual Aid', 'Emergency Response (Mutual Aid)'], ['Hosp-NonHosp', 'Hospital to Non-Hospital Facility Transfer'], ['NonHosp-Hosp', 'Non-Hospital Facility to Hospital Transfer']] },
     mutual: { setting: 'quickIncident', ref: 'MUTUALAIDID', what: 'Mutual Aid', items: [['Given', 'Mutual Aid Given'], ['Received', 'Mutual Aid Received'], ['No Unit Available', 'No Unit Available']] },
     emd: { setting: 'quickIncident', ref: 'EMDCOMPLAINTID', what: 'EMD Complaint', items: [['Breathing', 'Breathing Problem', 'Breathing Problem'], ['Sick Person', 'Sick Person', 'Sick Person'], ['Traffic Accident', 'Traffic Accident', 'Traffic Accident'], ['Abd Pain', 'Abdominal Pain/Problems'], ['AMS', 'Altered Mental Status'], ['Allergic', 'Allergic Reaction/Stings'], ['Assault', 'Assault'], ['Chest Pain', 'Chest Pain (Non-Traumatic)'], ['Cardiac Arrest', 'Cardiac Arrest/Death'], ['Diabetic', 'Diabetic Problem'], ['Falls', 'Falls'], ['Hemorrhage/Lac', 'Hemorrhage/Laceration'], ['Medical Alarm', 'Medical Alarm'], ['Overdose', 'Overdose/Poisoning/Ingestion'], ['Pregnancy', 'Pregnancy/Childbirth'], ['Psych', 'Psychiatric Problem/Abnormal Behavior/Suicide Attempt'], ['Seizure', 'Convulsions/Seizure'], ['Stroke', 'Stroke/CVA']] },
     reqby: { setting: 'quickIncident', ref: 'REQUESTEDBYITEMID', what: 'Requested By', items: [['Patient', 'Patient', 'Patient'], ['Family', 'Family', 'Family'], ['Bystander', 'Bystander', 'Bystander'], ['Physician', 'Physician'], ['Law Enforcement', 'Law Enforcement'], ['Fire Dept', 'Fire Department'], ['Other Healthcare', 'Other Healthcare Provider']] },
+    // Narrative tab. The ten impressions a rural service sees most; the secondary list carries the
+    // same names.
+    primary: { setting: 'quickNarrative', tab: 'Narrative', ref: 'PRIMARYIMPRESSIONID', what: 'Primary Impression', items: IMPRESSIONS },
+    secondary: { setting: 'quickNarrative', tab: 'Narrative', ref: 'SECONDARYIMPRESSIONID', what: 'Secondary Impression', items: IMPRESSIONS },
+    care: { setting: 'quickNarrative', tab: 'Narrative', ref: 'PROVIDEDCARELEVELID', what: 'Provided Care Level', items: [['ALS Paramedic', 'ALS - Paramedic'], ['BLS', 'BLS - All Levels']] },
+    units: { setting: 'quickNarrative', tab: 'Narrative', ref: 'CHIEFTIMEUNITSOFCOMPLAINTDURATION', what: 'Duration Unit', items: [['Minutes', 'Minutes'], ['Hours', 'Hours'], ['Days', 'Days']] },
+    anatomic: { setting: 'quickNarrative', tab: 'Narrative', ref: 'CHIEFCOMPLAINTANATOMICLOCATIONID', what: 'Anatomic Location', noOther: true, items: [['Head', 'Head'], ['Neck', 'Neck'], ['Chest', 'Chest'], ['Abd', 'Abdomen'], ['Back', 'Back'], ['Upper Ext', 'Extremity-Upper'], ['Lower Ext', 'Extremity-Lower'], ['Genitalia', 'Genitalia'], ['General', 'General/Global']] },
+    // Patient tab
+    race: { setting: 'quickPatient', tab: 'Patient', ref: 'PATIENTRACEIDS', what: 'Race', items: [['White', 'White', 'White'], ['Asian', 'Asian'], ['Black', 'Black or African American', 'Black'], ['Latino', 'Hispanic or Latino']] },
   };
   function layoutSingleRows() {
     const run = currentRun();
     for (const [rk, row] of Object.entries(SINGLE_ROWS)) {
-      const f = settings[row.setting] === false || !run || run.locked || !onTab('Incident') || shelfOpen() ? null : fieldEl(row.ref);
+      const f = settings[row.setting] === false || !run || run.locked || !onTab(row.tab || 'Incident') || shelfOpen() ? null : fieldEl(row.ref);
       if (!f) { dropQuick(`sr:${rk}:`); continue; }
       const r = f.getBoundingClientRect();
       if (!r.width) { dropQuick(`sr:${rk}:`); continue; }
-      const cur = norm(fieldValue(row.ref)).toUpperCase();
-      const entries = [...row.items.map((it, i) => [String(i), ...it]), ['other', 'Other…', null, null]];
+      const cur = shownParts(row.ref);
+      const entries = [...row.items.map((it, i) => [String(i), ...it]), ...(row.noOther ? [] : [['other', 'Other…', null, null]])];
       // measure, wrap within the field width, then place the rows above the field
       const els = entries.map(([k, text, full, quick]) => {
         const b = quickEl(`sr:${rk}:${k}`, () => {
@@ -1454,7 +1509,7 @@
           });
           return el;
         });
-        b.classList.toggle('added', k !== 'other' && !!full && cur === full.toUpperCase());
+        b.classList.toggle('added', k !== 'other' && !!full && cur.includes(full.toUpperCase()));
         b.classList.toggle('busy', quickBusy);
         b.style.display = 'block'; b.style.visibility = 'hidden';
         return b;
@@ -1467,6 +1522,88 @@
       const top0 = r.top - lines.length * rowH - 6;
       lines.forEach((line, li) => { let lx = r.left; for (const [b, w] of line) { b.style.left = Math.round(lx) + 'px'; b.style.top = Math.round(top0 + li * rowH) + 'px'; b.style.visibility = ''; lx += w + gap; } });
     }
+  }
+  // ---- 0-9 pads above ESO's numeric fields: digits gather for a moment, then ESO's own number
+  // shelf is opened once, the value entered and OK pressed
+  const NUM_PADS = {
+    duration: { setting: 'quickNarrative', tab: 'Narrative', ref: 'CHIEFCOMPLAINTDURATION', what: 'Duration of Chief Complaint', max: 3 },
+    weight: { setting: 'quickPatient', tab: 'Patient', ref: 'PATIENTWEIGHT', what: 'Weight', max: 3 },
+    feet: { setting: 'quickPatient', tab: 'Patient', ref: 'HEIGHTFTCOMPONENT', what: 'Height (feet)', max: 1 },
+    inches: { setting: 'quickPatient', tab: 'Patient', ref: 'HEIGHTINCOMPONENT', what: 'Height (inches)', max: 2 },
+  };
+  const padValue = {}; // pad -> digits tapped, not yet entered
+  const padTimers = {};
+  function layoutPads() {
+    const run = currentRun();
+    for (const [pk, pad] of Object.entries(NUM_PADS)) {
+      const f = settings[pad.setting] === false || !run || run.locked || !onTab(pad.tab) || shelfOpen() ? null : fieldEl(pad.ref);
+      if (!f) { dropQuick(`np:${pk}:`); continue; }
+      const r = f.getBoundingClientRect();
+      if (!r.width) { dropQuick(`np:${pk}:`); continue; }
+      const cur = norm(fieldValue(pad.ref));
+      const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', 'back', 'val'];
+      const els = keys.map((k) => {
+        const b = quickEl(`np:${pk}:${k}`, () => {
+          const el = document.createElement(k === 'val' ? 'span' : 'button'); if (k !== 'val') el.type = 'button';
+          el.className = 'chip' + (k === 'val' ? ' padval' : k === 'back' ? ' other' : ''); el.dataset.group = 'np-' + pk;
+          el.textContent = k === 'back' ? '⌫' : k === 'val' ? '' : k; el.title = k === 'back' ? 'Remove the last digit' : k === 'val' ? pad.what : `${pad.what}: ${k}`;
+          el.addEventListener('pointerdown', (e) => e.stopPropagation());
+          if (k !== 'val') el.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); tapPad(pk, k); });
+          return el;
+        });
+        if (k === 'val') { const v = padValue[pk]; b.textContent = v ? v + ' …' : (cur || '—'); b.classList.toggle('on', !!v); }
+        b.classList.toggle('busy', quickBusy);
+        b.style.display = 'block'; b.style.visibility = 'hidden';
+        return b;
+      });
+      const gap = 6, rowH = 34;
+      const lines = [[]]; let x = 0;
+      for (const b of els) { const w = b.getBoundingClientRect().width || 36; if (x + w > r.width && lines[lines.length - 1].length) { lines.push([]); x = 0; } lines[lines.length - 1].push([b, w]); x += w + gap; }
+      const need = lines.length * rowH + 10;
+      if (f.style.marginTop !== need + 'px') f.style.marginTop = need + 'px';
+      const top0 = r.top - lines.length * rowH - 6;
+      lines.forEach((line, li) => { let lx = r.left; for (const [b, w] of line) { b.style.left = Math.round(lx) + 'px'; b.style.top = Math.round(top0 + li * rowH) + 'px'; b.style.visibility = ''; lx += w + gap; } });
+    }
+  }
+  function tapPad(pk, k) {
+    if (quickBusy) return;
+    const pad = NUM_PADS[pk];
+    let v = padValue[pk] || '';
+    if (k === 'back') v = v.slice(0, -1); else if (v.length < pad.max) v = v === '0' ? k : v + k;
+    padValue[pk] = v;
+    layoutPads();
+    clearTimeout(padTimers[pk]);
+    if (v) padTimers[pk] = setTimeout(() => enterNumber(pk), v.length >= pad.max ? 700 : 1500);
+  }
+  async function enterNumber(pk) {
+    const pad = NUM_PADS[pk];
+    const v = padValue[pk];
+    if (quickBusy || !v) return;
+    quickBusy = true; layoutPads();
+    try {
+      const f = fieldReady(pad.ref);
+      if (!f) throw new Error('the field was not found');
+      showVeilMessage('Entering it in ESO…', `${pad.what}: ${v}`);
+      (f.querySelector('.shelf-click-indicator') || f.querySelector('.field-area') || f).click();
+      const shelf = await until(() => Array.from(document.querySelectorAll('shelf-panel')).find(p => visible(p) && p.querySelector('eso-masked-input input, numpad, eso-numpad')), 4000);
+      if (!shelf) throw new Error('the number pad did not open');
+      const input = await until(() => shelf.querySelector('eso-masked-input input, input[type=text], input:not([type])'), 2000);
+      if (!input) throw new Error('no number box in the pad');
+      input.focus(); input.value = v;
+      input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event('change', { bubbles: true }));
+      await wait(150);
+      const okBtn = Array.from(shelf.querySelectorAll('header button, button')).find(b => /^OK$/i.test(norm(b.textContent)));
+      if (!okBtn) throw new Error('no OK button');
+      okBtn.click();
+      const closed = await until(() => !document.body.contains(shelf) || !visible(shelf), 3000);
+      if (!closed) throw new Error('ESO did not accept ' + v);
+      await until(() => norm(fieldValue(pad.ref)).startsWith(v), 2000);
+    } catch (e) {
+      hideVeil(); quickBusy = false; padValue[pk] = ''; layoutPads();
+      alert(`ESO Save: could not enter ${pad.what}. ` + (e && e.message ? e.message : '') + ' Enter it by hand.');
+      return;
+    }
+    hideVeil(); quickBusy = false; padValue[pk] = ''; layoutPads();
   }
   function layoutNeeds() {
     const run = currentRun();
@@ -1486,6 +1623,18 @@
 
   // ---- auto-fill after a mode is chosen: response mode to scene, and transport mode
   const AUTO = {
+    // ALS / BLS kept the same on both pages: Level of Service (Incident) and Local Protocol
+    // Provided Care Level (Narrative). Setting one sets the other on its page, then comes back.
+    LEVELOFSERVICEID: {
+      tab: 'Incident', setting: 'syncCareLevel',
+      match: (v) => /^Advanced Life Support$/i.test(v) ? 'als' : /^Basic Life Support$/i.test(v) ? 'bls' : null,
+      cross: (kind) => ({ tab: 'Narrative', ref: 'PROVIDEDCARELEVELID', name: kind === 'als' ? 'ALS - Paramedic' : 'BLS - All Levels', same: kind === 'als' ? /^ALS - / : /^BLS - / }),
+    },
+    PROVIDEDCARELEVELID: {
+      tab: 'Narrative', setting: 'syncCareLevel',
+      match: (v) => /^ALS - /i.test(v) ? 'als' : /^BLS - /i.test(v) ? 'bls' : null,
+      cross: (kind) => ({ tab: 'Incident', ref: 'LEVELOFSERVICEID', name: kind === 'als' ? 'Advanced Life Support' : 'Basic Life Support', quick: kind === 'als' ? 'ALS' : 'BLS', same: kind === 'als' ? /^Advanced Life Support$/ : /^Basic Life Support$/ }),
+    },
     PRIORITYID: {
       match: (v) => /^Emergent$/i.test(v) ? 'e' : /^Non-Emergent$/i.test(v) ? 'n' : /Emergent/i.test(v) ? 'other' : null,
       fill: (kind) => [
@@ -1500,19 +1649,50 @@
     },
   };
   const seenMode = {};
+  const known = {}; // recordId -> ref -> value last seen on its page, so a hop is skipped when it already matches
   let autoBusy = false;
   function watchModes() {
-    if (settings.autoResponse === false || !onTab('Incident')) { for (const k of Object.keys(seenMode)) delete seenMode[k]; return; }
+    if (quickBusy || autoBusy || warming) return; // look again once the buttons and the warm-up are done
+    const run = currentRun();
     for (const [ref, rule] of Object.entries(AUTO)) {
+      if (settings[rule.setting || 'autoResponse'] === false || !onTab(rule.tab || 'Incident')) { delete seenMode[ref]; continue; }
       const v = fieldValue(ref);
       if (v === null) { delete seenMode[ref]; continue; }
+      if (run) (known[run.recordId] = known[run.recordId] || {})[ref] = v;
       const prev = seenMode[ref];
       seenMode[ref] = v;
       if (prev === undefined || prev === v || !v) continue; // first look, or unchanged, or cleared
       const kind = rule.match(v);
       if (!kind) continue;
-      autoFill(rule.fill(kind));
+      if (rule.fill) autoFill(rule.fill(kind));
+      if (rule.cross) crossFill(rule.cross(kind), rule.tab);
     }
+  }
+  // set a field on another page: hop there, set it if it does not already match, hop back
+  async function crossFill(c, backView) {
+    const s = lastStatus; const id = s && s.currentRecordId;
+    if (autoBusy || !id) return;
+    const k = known[id] || {};
+    if (k[c.ref] !== undefined && c.same.test(k[c.ref])) return; // already matching, no hop
+    autoBusy = true;
+    try {
+      const go = tabElement(TAB_LABELS[c.tab]), back = tabElement(TAB_LABELS[backView]);
+      if (!go || !back) throw new Error('tabs not found');
+      showVeilMessage('Matching ' + (c.tab === 'Incident' ? 'Level of Service' : 'Provided Care Level') + '…', c.name);
+      go.click();
+      await waitViewLoaded(c.tab, id, 8000);
+      const f = await until(() => fieldReady(c.ref), 4000);
+      if (f) {
+        const cur = norm(fieldValue(c.ref));
+        if (!c.same.test(cur)) await setSingle(c.ref, c.name, c.quick);
+        (known[id] = known[id] || {})[c.ref] = norm(fieldValue(c.ref));
+        await wait(400);
+      }
+      back.click();
+      await waitViewLoaded(backView, id, 8000);
+    } catch (e) { /* leave the rest to the crew */ }
+    hideVeil();
+    autoBusy = false;
   }
   async function autoFill(steps) {
     if (autoBusy) return;
@@ -1531,6 +1711,7 @@
     try { layoutAssess(); } catch (e) { /* keep going */ }
     try { layoutDisposition(); } catch (e) { /* keep going */ }
     try { layoutSingleRows(); } catch (e) { /* keep going */ }
+    try { layoutPads(); } catch (e) { /* keep going */ }
     try { layoutNeeds(); } catch (e) { /* keep going */ }
     try { watchModes(); } catch (e) { /* keep going */ }
     for (const gk of Object.keys(CHIP_GROUPS)) { try { layoutChips(gk); } catch (e) { /* keep going */ } }

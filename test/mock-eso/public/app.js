@@ -23,7 +23,7 @@
     async start() {
       const r = await xhr('POST', '/ehr/api/PatientCareRecords', JSON.stringify({ createdDateTime: '09/15/2026 14:08:24 -05:00' }));
       const j = JSON.parse(r.text);
-      this.recordId = j.data; this.keyMap = {}; this.dirty = []; this.views = {};
+      this.recordId = j.data; this.keyMap = {}; this.dirty = []; this.views = {}; this.rf = {}; this.num = {}; this.ss = {};
       await this.openTab('Incident');
       return this.recordId;
     },
@@ -76,8 +76,9 @@
       }
       if (view === 'Incident') { renderDelays(out.body); renderSS(out.body); loadBundle(); }
       document.getElementById('narrative').style.display = view === 'Narrative' ? 'block' : 'none';
-      if (view === 'Patient') renderHistory(out.body);
-      if (view === 'Narrative') { renderAcuity(out.body); renderTransport(out.body); }
+      document.getElementById('signatures').style.display = view === 'Signatures' ? 'block' : 'none';
+      if (view === 'Patient') { renderHistory(out.body); renderSS(out.body, 'patient'); renderNum(out.body, 'patient'); }
+      if (view === 'Narrative') { renderAcuity(out.body); renderTransport(out.body); renderSS(out.body, 'narrative'); renderNum(out.body, 'narrative'); }
       return out;
     },
     // the real app validates, then POSTs lock with a timestamp; unlock likewise
@@ -201,8 +202,17 @@
     TRANSPORTMODELIGHTSANDSIRENSUSE: { label: 'Transport Mode Lights & Sirens Use', addr: 'incident.disposition.transportModeLightsAndSirensUseId', list: [[14813, 'Lights and Sirens'], [14814, 'Lights and No Sirens'], [14815, 'No Lights or Sirens']], quick: { 14813: 'Lights & Sirens', 14815: 'No Lights or Sirens', 14814: 'Lights and No Sirens' } },
     TRANSPORTMETHODID: { label: 'Transport Method', addr: 'incident.disposition.transportMethodID', list: [[10353, 'Ground-Ambulance'], [10352, 'Air Medical-Rotor Craft'], [10355, 'Ground-Bariatric']], quick: { 10353: 'Ambulance', 10352: 'Rotor Craft', 10355: 'Bariatric' } },
     LEVELOFSERVICEID: { label: 'Level Of Service', addr: 'incident.disposition.levelOfServiceId', list: [[8196, 'Advanced Life Support'], [8197, 'Basic Life Support'], [8198, 'Critical Care']], quick: { 8197: 'BLS', 8196: 'ALS', 8198: 'Critical Care' } },
+    // Narrative tab
+    PRIMARYIMPRESSIONID: { scope: 'narrative', host: 'narrative-ss', label: 'Primary Impression', addr: 'narrative.clinicalImpression.primaryImpressionId', list: [[575, 'Abdominal Pain'], [595, 'Acute Respiratory Distress (Dyspnea)'], [578, 'Altered Mental Status'], [582, 'Chest Pain / Discomfort'], [12640, 'Chest pain on breathing'], [585, 'Generalized Weakness'], [602, 'Injury'], [10733, 'Injury of Head'], [604, 'No Complaints or Injury/Illness Noted'], [10698, 'Seizures with status epilepticus'], [10699, 'Seizures without status epilepticus'], [600, 'Stroke'], [601, 'Syncope / Fainting']] },
+    SECONDARYIMPRESSIONID: { scope: 'narrative', host: 'narrative-ss', label: 'Secondary Impression', addr: 'narrative.clinicalImpression.secondaryImpressionId', list: [[610, 'Abdominal Pain'], [630, 'Acute Respiratory Distress (Dyspnea)'], [613, 'Altered Mental Status'], [617, 'Chest Pain / Discomfort'], [620, 'Generalized Weakness'], [637, 'Injury'], [1338786, 'Near Syncope'], [639, 'Syncope / Fainting']] },
+    PROVIDEDCARELEVELID: { scope: 'narrative', host: 'narrative-ss', label: 'Local Protocol Provided Care Level', addr: 'narrative.clinicalImpression.providedCareLevelId', list: [[14195, 'ALS - AEMT/Intermediate'], [14196, 'ALS - Paramedic'], [14194, 'BLS - All Levels'], [14200, 'No Care Provided']] },
+    CHIEFTIMEUNITSOFCOMPLAINTDURATION: { scope: 'narrative', host: 'narrative-ss', label: 'Unit', addr: 'narrative.patientComplaint.chiefTimeUnitsOfComplaintDuration', list: [[7080, 'Seconds'], [7081, 'Minutes'], [7082, 'Hours'], [7083, 'Days'], [7084, 'Weeks'], [7085, 'Months'], [7086, 'Years']] },
+    CHIEFCOMPLAINTANATOMICLOCATIONID: { scope: 'narrative', host: 'narrative-ss', label: 'Anatomic Location', addr: 'narrative.patientComplaint.chiefComplaintAnatomicLocationId', list: [[7094, 'Abdomen'], [7095, 'Back'], [7096, 'Chest'], [7097, 'Extremity-Lower'], [7098, 'Extremity-Upper'], [7099, 'General/Global'], [7100, 'Genitalia'], [7101, 'Head'], [7102, 'Neck']] },
+    // Patient tab
+    PATIENTRACEIDS: { scope: 'patient', host: 'patient-ss', label: 'Race', addr: 'patient.demographics.raceIds', multi: true, list: [[315, 'American Indian or Alaska Native'], [316, 'Asian'], [317, 'Black or African American'], [10317, 'Hispanic or Latino'], [1338789, 'Middle Eastern or North African'], [318, 'Native Hawaiian or Other Pacific Islander'], [319, 'White']], quick: { 319: 'White', 317: 'Black' } },
   };
   app.ss = {}; // ref -> value id(s)
+  app.ssSetForTest = (ref, id) => ssSet(ref, id);
   function ssHtml(ref) {
     const d = SS[ref];
     const qp = d.quick ? `<div class="quick-picks">${Object.entries(d.quick).map(([id, l]) => `<button class="btn" data-id="${id}">${l}</button>`).join('')}</div>` : '';
@@ -222,12 +232,84 @@
   }
   function ssSet(ref, id) {
     const d = SS[ref];
-    if (d.multi) { app.ss[ref] = (app.ss[ref] || []).concat([id]); app.addScalar('incident', `${d.addr}.['${id}']`, id); }
-    else { app.ss[ref] = id; app.edit('incident', d.addr, id, 'singleselect'); }
+    if (d.multi) { app.ss[ref] = (app.ss[ref] || []).concat([id]); app.addScalar(d.scope || 'incident', `${d.addr}.['${id}']`, id); }
+    else { app.ss[ref] = id; app.edit(d.scope || 'incident', d.addr, id, 'singleselect'); }
     ssRender(ref);
   }
   document.getElementById('response').innerHTML = ['RUNTYPEID', 'MUTUALAIDID', 'PRIORITYID', 'RESPONSEMODELIGHTSANDSIRENSUSE', 'RESPONSEMODEINTERSECTIONNAVIGATION', 'RESPONSEMODESCHEDULED', 'RESPONSEMODESPEED', 'EMDCOMPLAINTID', 'EMDPERFORMEDID', 'REQUESTEDBYITEMID'].map(ssHtml).join('');
   document.getElementById('disposition').innerHTML = ['UNITDISPOSITIONITEMID', 'PATIENTEVALUATIONCAREDISPOSITIONITEMID', 'CREWDISPOSITIONITEMID', 'TRANSPORTDISPOSITIONITEMID', 'REFUSALRELEASEITEMIDS', 'TRANSPORTMODEID', 'TRANSPORTMODELIGHTSANDSIRENSUSE', 'TRANSPORTMETHODID', 'LEVELOFSERVICEID'].map(ssHtml).join('');
+  // ---- numeric fields, as ESO draws them: display value with a suffix, numpad indicator, and a
+  // number shelf (masked input + numpad + OK) when tapped
+  const NUM = {
+    CHIEFCOMPLAINTDURATION: { scope: 'narrative', host: 'narrative-ss', label: 'Duration of Chief Complaint', addr: 'narrative.patientComplaint.chiefComplaintDuration', type: 'integer', suffix: '' },
+    PATIENTWEIGHT: { scope: 'patient', host: 'patient-ss', label: 'Weight', addr: 'patient.demographics.weight', type: 'number', suffix: 'lbs' },
+    HEIGHTFTCOMPONENT: { scope: 'patient', host: 'patient-ss', label: 'Height', addr: 'patient.demographics.heightFtComponent', type: 'integer', suffix: 'ft', max: 1 },
+    HEIGHTINCOMPONENT: { scope: 'patient', host: 'patient-ss', label: 'Height', addr: 'patient.demographics.heightInComponent', type: 'number', suffix: 'in' },
+  };
+  app.num = {};
+  const numHtml = (ref) => `<eso-field class="field" data-field-ref="${ref}"><div class="label-container"><label>${NUM[ref].label}</label></div><div class="line field-area"><div class="display-value placeholder"></div><div class="shelf-click-indicator numpad-icon">#</div></div></eso-field>`;
+  function numRender(ref) {
+    const f = document.querySelector(`eso-field[data-field-ref="${ref}"]`); if (!f) return;
+    const v = app.num[ref]; const dv = f.querySelector('.display-value');
+    dv.textContent = v == null || v === '' ? '' : `${v}${NUM[ref].suffix ? ' ' + NUM[ref].suffix : ''}`; dv.classList.toggle('placeholder', v == null || v === '');
+  }
+  function renderNum(body, scope) {
+    const m = body && body.data && body.data.model; if (!m) return;
+    for (const [ref, d] of Object.entries(NUM)) { if (d.scope !== scope) continue; const v = d.addr.split('.').slice(1).reduce((o, k) => o && o[k], m); app.num[ref] = v == null ? null : v; numRender(ref); }
+  }
+  function openNumShelf({ title, value, max, onOk }) {
+    app.shelfOpens++;
+    const el = document.createElement('shelf-panel');
+    el.innerHTML = `<header><h1>${title}</h1><button class="btn green-btn workflow-btn">OK</button></header><main class="viewport"><div class="content">
+      <div class="banded"><eso-display-field class="no-label"><eso-masked-input><input value="${value == null ? '' : value}" placeholder="enter a number"></eso-masked-input></eso-display-field></div>
+      <eso-numpad><numpad>${['7', '8', '9', '4', '5', '6', '1', '2', '3', '.', '0', 'back'].map(c => `<button class="btn numpad-btn" data-char="${c}">${c === 'back' ? '<div class="back"></div>' : c}</button>`).join('')}<div class="clear"><a data-char="clear">Clear</a></div></numpad></eso-numpad></div></main>`;
+    const input = el.querySelector('input');
+    // like ESO: the numpad keys act on mousedown/touchstart and feed the input
+    el.querySelectorAll('[data-char]').forEach(b => b.addEventListener('mousedown', (e) => { e.preventDefault(); const c = b.dataset.char; input.value = c === 'clear' ? '' : c === 'back' ? input.value.slice(0, -1) : input.value + c; input.dispatchEvent(new Event('change', { bubbles: true })); }));
+    el.querySelector('header button').addEventListener('click', () => {
+      const v = input.value.trim();
+      if (v && !new RegExp(`^\\d{0,${max || 3}}(\\.\\d)?$`).test(v)) { el.classList.add('invalid'); return; } // ESO keeps the shelf open on an invalid number
+      onOk(v === '' ? null : Number(v)); el.remove();
+    });
+    shelfHost.appendChild(el);
+  }
+  for (const [ref, d] of Object.entries(NUM)) {
+    document.getElementById(d.host).insertAdjacentHTML('beforeend', numHtml(ref));
+    const f = document.querySelector(`eso-field[data-field-ref="${ref}"]`);
+    f.querySelector('.shelf-click-indicator').addEventListener('click', () => openNumShelf({ title: d.label + (d.suffix ? ` (${d.suffix})` : ''), value: app.num[ref], max: d.max, onOk: (v) => { app.num[ref] = v; app.edit(d.scope, d.addr, v, d.type); numRender(ref); } }));
+  }
+  // ---- the Patient Refusal Form (Signatures tab): a modal of ESO's own, not a picker; each
+  // multi-select inside opens a picker on top. Ids are the agency's GUIDs or ESO's.
+  const RF = {
+    STANDARDREFUSALLEGALIDS: { label: 'Legal', addr: 'signatures.standardSignatures.standardRefusal.capacityAssessment.legalIds', list: [['e8baca53-0bd8-4041-9761-392b38716aed', '18 years of age or older'], ['0d212922-7ebc-4444-82f8-4cf0332ee498', 'Under 18 years of age'], ['76ad7f8b-9e96-49e2-b8fb-def651b6a709', 'Minor - married'], ['f1271937-0b4c-446e-a5c7-62ec5441dc28', 'Minor - pregnant'], ['ee20b271-ca90-41db-a8f0-f67148f124dd', 'Minor - emancipated'], ['b7121c7f-3203-4a0e-9311-6b5945d2f7c3', 'Parent/Legal guardian present'], ['7858469c-2cc1-4a1f-b218-d765889f74a1', 'Unable to determine']] },
+    STANDARDREFUSALDECISIONMAKINGIDS: { label: 'Decision-Making', addr: 'signatures.standardSignatures.standardRefusal.capacityAssessment.decisionMakingIds', list: [['afd73a13-f1d9-4115-9df1-24af3eb74578', 'Presents a significant life threat to self or others'], ['6cafdf25-3c18-47a0-a977-dfb580cecf0a', 'Unable to understand information in order to communicate a choice'], ['24225284-0292-4f52-8645-91edc0f58ba2', 'Disoriented to person/place/time/event'], ['fedb6b92-b47f-4d1b-bb6d-ec51264038c5', 'Possible ETOH/drug use'], ['339389e9-0fd3-46e6-b188-17a19e1d7ce3', 'Unable to determine'], ['0ebe23fe-29a7-43a3-881e-33995648ffd6', 'Cleared capacity assessment']] },
+    STANDARDREFUSALMEDICALIDS: { label: 'Medical', addr: 'signatures.standardSignatures.standardRefusal.capacityAssessment.medicalIds', list: [['e0518ddf-2722-43b4-b51e-444d09680bb9', 'Abnormal glucose'], ['0bdb29e0-de10-4b23-b373-c21090d86ade', 'Altered level of consciousness (ALOC)'], ['326c3754-6634-4e96-8db5-52f979b88c4e', 'Unable to determine'], ['7f59c7f9-779a-45ce-9eb5-0d95d8b70fb0', 'Cleared capacity assessment']] },
+    STANDARDREFUSALPATIENTNOTIFICATIONIDS: { label: 'Patient / Parent / Legal Guardian Notifications', addr: 'signatures.standardSignatures.standardRefusal.patientNotifications.patientNotificationIds', list: [['70736d53-e0ce-4f4e-bffc-232ec55acb51', 'Medical treatment/evaluation recommendation(s)'], ['29cfa6f3-46ce-451b-9e6e-2caf6cdd6e25', 'Further harm could result without medical treatment or evaluation'], ['5844b0ae-ee6b-4ef4-b187-935fde6945c6', 'Transport by means other than ambulance could be hazardous in light of present illness/injury'], ['51237c84-63a5-4171-8d6a-928ec9a3d65a', 'EMS preference to provide transport to the closest appropriate medical facility']] },
+    STANDARDREFUSALPATIENTREFUSALIDS: { label: 'Patient Refusals', addr: 'signatures.standardSignatures.standardRefusal.patientRefusals.patientRefusalIds', list: [[12817, 'Assessment'], [12818, 'Treatment'], [12819, 'Transport by EMS'], [12820, 'Recommended Destination']] },
+  };
+  app.rf = {};
+  app.refusalOpens = 0;
+  document.getElementById('openrefusal').addEventListener('click', () => {
+    app.refusalOpens++;
+    const el = document.createElement('standard-refusal'); el.className = 'signature-panel';
+    el.innerHTML = `<jump-link-shelf-panel><header><h1>Patient Refusal Form</h1><button class="btn workflow-btn green-btn">OK</button></header><main><div class="content">${Object.entries(RF).map(([ref, d]) =>
+      `<eso-field class="field" data-field-ref="${ref}"><div class="label-container"><label>${d.label}</label></div><div class="line field-area"><div class="display-value"></div><div class="shelf-click-indicator multi-select-icon">&#9776;</div></div></eso-field>`).join('')}</div></main></jump-link-shelf-panel>`;
+    const show = (ref) => { const f = el.querySelector(`eso-field[data-field-ref="${ref}"]`); f.querySelector('.display-value').textContent = (app.rf[ref] || []).map(id => (RF[ref].list.find(x => x[0] === id) || [0, id])[1]).join(', '); };
+    for (const [ref, d] of Object.entries(RF)) {
+      show(ref);
+      el.querySelector(`eso-field[data-field-ref="${ref}"] .shelf-click-indicator`).addEventListener('click', () => {
+        openShelf({ title: d.label, items: d.list, multi: true, checked: app.rf[ref] || [], onOk: (ids) => {
+          const had = app.rf[ref] || [];
+          for (const id of ids) if (!had.includes(id)) app.addScalar('signatures', `${d.addr}.['${id}']`, id);
+          for (const id of had) if (!ids.includes(id)) app.del('signatures', `${d.addr}.['${id}']`, 'multiselect');
+          app.rf[ref] = ids; show(ref);
+        } });
+      });
+    }
+    el.querySelector('header button').addEventListener('click', () => el.remove());
+    shelfHost.appendChild(el);
+  });
+  for (const [ref, d] of Object.entries(SS)) if (d.host) document.getElementById(d.host).insertAdjacentHTML('beforeend', ssHtml(ref));
   for (const ref of Object.keys(SS)) {
     const f = document.querySelector(`eso-field[data-field-ref="${ref}"]`); if (!f) continue;
     f.querySelectorAll('.quick-picks button').forEach(b => b.addEventListener('click', () => { if (f.hasAttribute('disabled')) return; ssSet(ref, Number(b.dataset.id)); }));
@@ -238,9 +320,10 @@
     });
     ssRender(ref);
   }
-  function renderSS(body) {
+  function renderSS(body, scope = 'incident') {
     const m = body && body.data && body.data.model; if (!m) return;
     for (const [ref, d] of Object.entries(SS)) {
+      if ((d.scope || 'incident') !== scope) continue;
       const v = d.addr.split('.').slice(1).reduce((o, k) => o && o[k], m);
       app.ss[ref] = Array.isArray(v) ? v.map(Number) : (v == null ? null : Number(v));
       ssRender(ref);

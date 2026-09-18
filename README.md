@@ -32,10 +32,13 @@ to bad signal or a hung page.
   email destination and no fax in ESO's history, with Fax and Email buttons. The card shows the count.
   Emails leave no history in ESO, so a run emailed from a device without the extension still shows.
   Both are settings, on by default.
-- **Quick buttons.** One-tap chips for the common history items, home medications and allergies sit
-  beside Add History, Add Medications and Add Allergies on the Patient tab; tap several and, a
-  moment later, ESO's own list is opened once, each one ticked, and OK pressed. They hide while any
-  ESO picker is open. On the Incident tab, one "All: None/No Delay" button above the delay fields
+- **Quick buttons.** One-tap chips for the common history items and home medications (each list
+  ends with None Reported) and NKDA for allergies sit beside Add History, Add Medications and Add
+  Allergies on the Patient tab; tap several and, a moment later, ESO's own list is opened once, each
+  one ticked, and OK pressed. They hide while any ESO picker is open. A Race row sits above the Race
+  field, and 0-9 pads above Weight and Height (feet and inches): digits gather for a moment, then
+  ESO's own number pad is opened once, the value entered and OK pressed, so the pad does not open on
+  every tap; ⌫ takes the last digit back first. On the Incident tab, one "All: None/No Delay" button above the delay fields
   presses ESO's own None button on every delay still empty, leaving any already answered alone. On
   the Narrative tab, chips after each transport field (moved to stretcher, to and from the
   ambulance, position during transport) pick in ESO's list the same way. Facility chips under the
@@ -50,8 +53,18 @@ to bad signal or a hung page.
   the response or transport mode fills the lights/sirens, intersection, scheduled, speed and method
   fields still empty and sets EMD Performed to No. Emergent / Non-Emergent buttons sit above
   Response Mode to Scene, and rows for Run Type, Mutual Aid, EMD Complaint and Requested By above
-  their fields; Mechanism of Injury chips on the Narrative tab. Every row ends with "Other…", which
-  simply opens ESO's own list. Red, yellow and green buttons next to Initial and Final Patient Acuity pick the
+  their fields; Mechanism of Injury chips on the Narrative tab. Also on the Narrative tab: the ten
+  most common impressions above Primary and Secondary Impression, ALS Paramedic / BLS above Local
+  Protocol Provided Care Level, Minutes / Hours / Days above the complaint duration's unit with a
+  0-9 pad for the duration itself, and every anatomic location (abbreviated) above Anatomic
+  Location. Every row ends with "Other…", which simply opens ESO's own list (a row that already
+  holds every choice has no need of one). ALS / BLS is kept the same on both pages: choosing it in
+  Level of Service (Incident) or Provided Care Level (Narrative) sets the other page's field
+  through its own picker and returns to the page it was chosen on; a matching value is left alone.
+  Inside ESO's Patient Refusal Form (Signatures tab) chips sit by its own lists: 18+ / Guardian
+  under Legal, Clear / Drug-Alcohol / Threat under Decision-Making, Cleared under Medical, Check
+  All under the patient notifications and all four Patient Refusals; they show while the form is
+  open and hide while one of its pickers is up. Red, yellow and green buttons next to Initial and Final Patient Acuity pick the
   colour in ESO's list. Nothing is written behind the app's back: the buttons do what a finger would
   in ESO's pickers, so the screen and the save are ESO's. Each group is a setting, on by default.
 - **Copy a vital.** A small copy button floats just left of each saved vital's time in the Vitals

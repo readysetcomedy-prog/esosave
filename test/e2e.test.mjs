@@ -567,7 +567,7 @@ test('quick chips for medications and allergies work the same way, and every qui
   const id = await app(() => window.app.recordId);
   await app(() => window.app.openTab('Patient'));
   const chips = () => T.page.evaluate(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .chip')).map(c => ({ short: c.textContent, name: c.title, cls: c.className, rect: c.getBoundingClientRect().toJSON() })));
-  await waitFor(async () => (await chips()).length >= 70, { label: 'all three groups drawn' });
+  await waitFor(async () => (await chips()).length >= 55, { label: 'all three groups drawn' });
   const tap = async (name) => { await waitFor(() => T.page.evaluate((n) => !!Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .chip')).find(x => x.title === n), name), { label: 'chip ' + name }); await T.page.evaluate((n) => { Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .chip')).find(x => x.title === n).click(); }, name); };
   // meds: the exact names win over lookalikes ("Insulin" not "Insulin Detemir")
   await tap('Lisinopril'); await tap('Insulin');
@@ -582,7 +582,7 @@ test('quick chips for medications and allergies work the same way, and every qui
   await app(() => document.getElementById('addallergy').click());
   await waitFor(async () => (await chips()).length === 0, { label: 'chips gone while the list is open' });
   await app(() => document.querySelector('shelf-panel header button').click());
-  await waitFor(async () => (await chips()).length >= 70, { label: 'chips back' });
+  await waitFor(async () => (await chips()).length >= 55, { label: 'chips back' });
   // history chips do not anchor to the open list's own "Add History" title
   await app(() => document.getElementById('addhist').click());
   await waitFor(async () => (await chips()).length === 0, { label: 'none while Add History is open' });
@@ -860,6 +860,114 @@ test('mechanism of injury: all four as chips, more than one allowed', async () =
   await waitFor(async () => ((await T.record(id)).tree.narrative?.injuries?.mechanismOfInjuryIds || []).length === 2, { label: 'both saved', timeout: 15000 });
   assert.deepEqual((await T.record(id)).tree.narrative.injuries.mechanismOfInjuryIds.map(Number).sort(), [7117, 7120]);
   await waitFor(async () => (await chips()).filter(c => /added/.test(c.cls)).length === 2, { label: 'both shown as set' });
+});
+
+test('Narrative rows: impressions, care level, duration units and every anatomic location, plus a 0-9 pad for the duration', async () => {
+  const id = await app(() => window.app.recordId);
+  await app(() => window.app.openTab('Narrative'));
+  const row = (g) => T.page.evaluate((gg) => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll(`.quick [data-group=${gg}]`)).map(b => ({ text: b.textContent, cls: b.className })), g);
+  await waitFor(async () => (await row('sr-primary')).length === 11 && (await row('sr-secondary')).length === 11 && (await row('sr-care')).length === 3 && (await row('sr-units')).length === 4 && (await row('sr-anatomic')).length === 9 && (await row('np-duration')).length === 12, { label: 'rows drawn' });
+  assert.deepEqual((await row('sr-anatomic')).map(b => b.text), ['Head', 'Neck', 'Chest', 'Abd', 'Back', 'Upper Ext', 'Lower Ext', 'Genitalia', 'General'], 'every location, abbreviated, no Other…');
+  assert.equal((await row('sr-primary')).at(-1).text, 'Other…');
+  const tap = async (g, text) => { await waitFor(async () => (await row(g)).some(b => b.text === text && !/busy/.test(b.cls)), { label: text }); await T.page.evaluate(([gg, t]) => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll(`.quick [data-group=${gg}]`)).find(b => b.textContent === t).click(), [g, text]); };
+  const nar = async () => (await T.record(id)).tree.narrative || {};
+  await tap('sr-primary', 'Chest Pain');
+  await waitFor(async () => (await nar()).clinicalImpression?.primaryImpressionId === 582, { label: 'primary impression', timeout: 15000 });
+  await tap('sr-secondary', 'SOB');
+  await waitFor(async () => (await nar()).clinicalImpression?.secondaryImpressionId === 630, { label: 'secondary impression', timeout: 15000 });
+  await tap('sr-anatomic', 'Chest');
+  await waitFor(async () => (await nar()).patientComplaint?.chiefComplaintAnatomicLocationId === 7096, { label: 'anatomic location', timeout: 15000 });
+  await tap('sr-units', 'Hours');
+  await waitFor(async () => (await nar()).patientComplaint?.chiefTimeUnitsOfComplaintDuration === 7082, { label: 'units', timeout: 15000 });
+  // the pad: digits gather, then ESO's own number shelf is opened once, the value entered, OK pressed
+  const opens = await app(() => window.app.shelfOpens);
+  await tap('np-duration', '4');
+  await waitFor(async () => (await row('np-duration')).some(b => /padval/.test(b.cls) && b.text === '4 …'), { label: 'pending value shown', interval: 30, timeout: 1200 });
+  await tap('np-duration', '5');
+  await waitFor(async () => (await nar()).patientComplaint?.chiefComplaintDuration === 45, { label: 'duration entered', timeout: 15000 });
+  assert.equal(await app(() => window.app.shelfOpens), opens + 1, 'one open of the number shelf');
+  await waitFor(() => T.page.evaluate(() => document.querySelector('eso-field[data-field-ref=CHIEFCOMPLAINTDURATION] .display-value').textContent === '45'), { label: 'shown in the field' });
+  await waitFor(async () => (await row('np-duration')).some(b => /padval/.test(b.cls) && b.text === '45'), { label: 'pad shows the value' });
+  assert.equal(await app(() => document.querySelectorAll('shelf-panel').length), 0);
+});
+
+test('ALS / BLS chosen on either page sets the other page too, then comes back to where it was chosen', async () => {
+  const id = await freshRun();
+  await app(() => window.app.openTab('Narrative'));
+  const row = (g) => T.page.evaluate((gg) => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll(`.quick [data-group=${gg}]`)).map(b => ({ text: b.textContent, cls: b.className })), g);
+  const tap = async (g, text) => { await waitFor(async () => (await row(g)).some(b => b.text === text && !/busy/.test(b.cls)), { label: text }); await T.page.evaluate(([gg, t]) => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll(`.quick [data-group=${gg}]`)).find(b => b.textContent === t).click(), [g, text]); };
+  await app(() => { window.app.clicks = []; });
+  await tap('sr-care', 'ALS Paramedic');
+  await waitFor(async () => (await T.record(id)).tree.narrative?.clinicalImpression?.providedCareLevelId === 14196, { label: 'care level', timeout: 15000 });
+  await waitFor(async () => (await T.record(id)).tree.incident?.disposition?.levelOfServiceId === 8196, { label: 'level of service matched on the Incident page', timeout: 20000 });
+  await waitFor(() => app(() => window.app.clicks.join(',') === 'Incident,Narrative'), { label: 'went to Incident and came back', timeout: 15000 });
+  await waitFor(() => app(() => location.hash.endsWith('/narrative')), { label: 'back on Narrative' });
+  await waitFor(() => T.page.evaluate(() => !document.getElementById('esosave-host').shadowRoot.querySelector('.veil')), { label: 'hop finished' });
+  // the other way: BLS through ESO's own quick-pick on the Incident page
+  await app(() => window.app.openTab('Incident'));
+  await waitFor(() => app(() => !!document.querySelector('eso-field[data-field-ref=LEVELOFSERVICEID] .display-value')?.textContent.includes('Advanced')), { label: 'Incident shows ALS' });
+  await sleep(1500); // the watcher takes its first look
+  await app(() => { window.app.clicks = []; window.app.ssSetForTest('LEVELOFSERVICEID', 8197); });
+  await waitFor(async () => (await T.record(id)).tree.narrative?.clinicalImpression?.providedCareLevelId === 14194, { label: 'care level matched to BLS', timeout: 20000 });
+  await waitFor(() => app(() => window.app.clicks.join(',') === 'Narrative,Incident'), { label: 'went to Narrative and came back', timeout: 15000 });
+  assert.equal(await app(() => document.querySelectorAll('shelf-panel').length), 0);
+});
+
+test('Patient tab: Race row and 0-9 pads for Weight and Height (feet, inches); allergies keep only NKDA and Other…', async () => {
+  const id = await app(() => window.app.recordId);
+  await app(() => window.app.openTab('Patient'));
+  const row = (g) => T.page.evaluate((gg) => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll(`.quick [data-group=${gg}]`)).map(b => ({ text: b.textContent, cls: b.className })), g);
+  await waitFor(async () => (await row('sr-race')).length === 5 && (await row('np-weight')).length === 12 && (await row('np-feet')).length === 12 && (await row('np-inches')).length === 12 && (await row('allergies')).length === 2, { label: 'rows drawn' });
+  assert.deepEqual((await row('allergies')).map(b => b.text), ['NKDA', 'Other…']);
+  const tap = async (g, text) => { await waitFor(async () => (await row(g)).some(b => b.text === text && !/busy/.test(b.cls)), { label: text }); await T.page.evaluate(([gg, t]) => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll(`.quick [data-group=${gg}]`)).find(b => b.textContent === t).click(), [g, text]); };
+  const demo = async () => (await T.record(id)).tree.patient?.demographics || {};
+  await tap('sr-race', 'Latino'); // no ESO quick-pick for this one: through the picker (a multi-select, so OK is pressed)
+  await waitFor(async () => ((await demo()).raceIds || []).map(Number).includes(10317), { label: 'race', timeout: 15000 });
+  await waitFor(async () => (await row('sr-race')).some(b => b.text === 'Latino' && /added/.test(b.cls)), { label: 'shown as set' });
+  await tap('np-weight', '1'); await tap('np-weight', '5'); await tap('np-weight', '0');
+  await waitFor(async () => (await demo()).weight === 150, { label: 'weight', timeout: 15000 });
+  await waitFor(() => T.page.evaluate(() => document.querySelector('eso-field[data-field-ref=PATIENTWEIGHT] .display-value').textContent === '150 lbs'), { label: 'shown with its unit' });
+  await tap('np-feet', '5'); // a one-digit field goes in after a shorter pause
+  await waitFor(async () => (await demo()).heightFtComponent === 5, { label: 'feet', timeout: 15000 });
+  await tap('np-inches', '1'); await tap('np-inches', '0');
+  await waitFor(async () => (await demo()).heightInComponent === 10, { label: 'inches', timeout: 15000 });
+  // ⌫ takes the last digit back before it goes in
+  await tap('np-weight', '2'); await tap('np-weight', '9'); await tap('np-weight', '⌫');
+  await waitFor(async () => (await demo()).weight === 2, { label: 'weight re-entered', timeout: 15000 });
+  assert.equal(await app(() => document.querySelectorAll('shelf-panel').length), 0);
+});
+
+test('refusal form: chips inside ESO\'s Patient Refusal Form tick its own lists; Check All; they hide while one of its pickers is up', async () => {
+  const id = await app(() => window.app.recordId);
+  await app(() => window.app.openTab('Signatures'));
+  const chips = (g) => T.page.evaluate((gg) => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll(gg ? `.quick .chip[data-group=${gg}]` : '.quick .chip')).map(c => ({ text: c.textContent, cls: c.className })), g);
+  await sleep(1200);
+  assert.equal((await chips()).length, 0, 'nothing on the Signatures tab until the form opens');
+  await app(() => document.getElementById('openrefusal').click());
+  await waitFor(async () => (await chips('rfLegal')).length === 3 && (await chips('rfDecision')).length === 4 && (await chips('rfMedical')).length === 2 && (await chips('rfNotify')).length === 2 && (await chips('rfRefusals')).length === 4, { label: 'chips in the form' });
+  assert.deepEqual((await chips('rfLegal')).map(c => c.text), ['18+', 'Guardian', 'Other…']);
+  assert.deepEqual((await chips('rfRefusals')).map(c => c.text), ['Assessment', 'Treatment', 'Transport by EMS', 'Recommended Destination']);
+  const tap = async (g, text) => { await waitFor(async () => (await chips(g)).some(b => b.text === text && !/busy/.test(b.cls)), { label: text }); await T.page.evaluate(([gg, t]) => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll(`.quick .chip[data-group=${gg}]`)).find(b => b.textContent === t).click(), [g, text]); };
+  const rf = async () => (await T.record(id)).tree.signatures?.standardSignatures?.standardRefusal || {};
+  await tap('rfLegal', '18+');
+  await waitFor(async () => ((await rf()).capacityAssessment?.legalIds || []).includes('e8baca53-0bd8-4041-9761-392b38716aed'), { label: 'legal', timeout: 15000 });
+  await tap('rfDecision', 'Clear');
+  await waitFor(async () => ((await rf()).capacityAssessment?.decisionMakingIds || []).includes('0ebe23fe-29a7-43a3-881e-33995648ffd6'), { label: 'decision-making', timeout: 15000 });
+  await tap('rfMedical', 'Cleared');
+  await waitFor(async () => ((await rf()).capacityAssessment?.medicalIds || []).includes('7f59c7f9-779a-45ce-9eb5-0d95d8b70fb0'), { label: 'medical', timeout: 15000 });
+  await tap('rfNotify', 'Check All');
+  await waitFor(async () => ((await rf()).patientNotifications?.patientNotificationIds || []).length === 4, { label: 'all four notifications', timeout: 15000 });
+  await waitFor(async () => (await chips('rfNotify')).some(c => c.text === 'Check All' && /added/.test(c.cls)), { label: 'Check All shown done' });
+  await tap('rfRefusals', 'Assessment'); await tap('rfRefusals', 'Transport by EMS');
+  await waitFor(async () => ((await rf()).patientRefusals?.patientRefusalIds || []).map(Number).sort().join() === '12817,12819', { label: 'two refusals in one open', timeout: 15000 });
+  await waitFor(async () => (await chips('rfRefusals')).filter(c => /added/.test(c.cls)).length === 2, { label: 'shown as set' });
+  // a picker the medic opens by hand from the form: no chips until it closes; the form itself stays
+  await app(() => document.querySelector('standard-refusal eso-field[data-field-ref=STANDARDREFUSALLEGALIDS] .shelf-click-indicator').click());
+  await waitFor(async () => (await chips()).length === 0, { label: 'chips gone while the picker is up' });
+  await app(() => document.querySelector('shelf-panel header button').click());
+  await waitFor(async () => (await chips('rfLegal')).length === 3, { label: 'chips back' });
+  await app(() => document.querySelector('standard-refusal header button').click());
+  await waitFor(async () => (await chips()).length === 0, { label: 'gone with the form' });
 });
 
 test('quick acuity: red, yellow, green next to each acuity field, one tap picks it in ESO\'s list', async () => {
