@@ -43,7 +43,7 @@
   const sget = (keys) => new Promise(res => storage.get(keys, (v) => res(v || {})));
   const sset = (obj) => new Promise(res => storage.set(obj, () => res()));
   const sremove = (keys) => new Promise(res => storage.remove(keys, () => res()));
-  const DEFAULT_SETTINGS = { purgeHoursAfterLock: 0, probeSec: 20, heldProbeSec: 8, warmTabs: true, cardCollapsed: false, showTimes: true, sendPrompt: true, unsentList: true, quickHistory: true, quickMeds: true, quickAllergies: true, quickAcuity: true, quickDelays: true, quickTransport: true, quickFacilities: true, facilitySending: [], facilityDestination: [] };
+  const DEFAULT_SETTINGS = { purgeHoursAfterLock: 0, probeSec: 20, heldProbeSec: 8, warmTabs: true, cardCollapsed: false, showTimes: true, sendPrompt: true, unsentList: true, quickHistory: true, quickMeds: true, quickAllergies: true, quickAcuity: true, quickDelays: true, quickTransport: true, quickAssess: true, quickFacilities: true, facilitySending: [], facilityDestination: [] };
   // The agency's standard facility chips (ids and names from ESO's saved facilities). Every install
   // starts with these; Settings can add or remove per device.
   const FAC = {
@@ -359,6 +359,7 @@
         `<label class="s"><input type="checkbox" id="qacuity" ${settings.quickAcuity === false ? '' : 'checked'}> Acuity: red, yellow and green buttons next to Initial and Final Patient Acuity (Narrative tab)</label>` +
         `<label class="s"><input type="checkbox" id="qtransport" ${settings.quickTransport === false ? '' : 'checked'}> Transport: chips for how the patient was moved and positioned (Narrative tab)</label>` +
         `<label class="s"><input type="checkbox" id="qfacilities" ${settings.quickFacilities === false ? '' : 'checked'}> Facilities: chips for saved facilities above the Scene and Destination locations (Incident tab)</label>` +
+        `<label class="s"><input type="checkbox" id="qassess" ${settings.quickAssess === false ? '' : 'checked'}> Assessment: "All normal" (presses No Abnormalities on every category in ESO's Quick Ax) and "A&amp;Ox4" on each assessment (Assessments tab)</label>` +
         facilityPicker('facilitySending', 'Sending facility chips (Scene)') + facilityPicker('facilityDestination', 'Destination facility chips') +
         `<div class="actions"><button class="a" data-act="save-settings">Save</button></div></div>`);
     }
@@ -445,6 +446,7 @@
       settings.quickAcuity = !!panel.querySelector('#qacuity').checked;
       settings.quickTransport = !!panel.querySelector('#qtransport').checked;
       settings.quickFacilities = !!panel.querySelector('#qfacilities').checked;
+      settings.quickAssess = !!panel.querySelector('#qassess').checked;
       layoutQuick();
       await sset({ settings }); toPage('settings', settings); settingsOpen = false; renderPanel(); renderTimes();
     }
@@ -1212,7 +1214,109 @@
     }
     hideVeil(); quickBusy = false; layoutFacilities(gk);
   }
+  // ---- assessments: "All normal" opens ESO's own Quick Ax for that assessment and presses
+  // No Abnormalities on every category still unset, then OK; "A&Ox4" opens Mental Status and
+  // presses ESO's Alert and Oriented x4.
+  const NORMAL_RE = /^(No Abnormalities|Normal Baseline( For Patient)?)$/i;
+  function layoutAssess() {
+    const run = currentRun();
+    const ok = settings.quickAssess !== false && run && !run.locked && onTab('Assessments') && !shelfOpen();
+    const records = ok ? Array.from(document.querySelectorAll('assessment-record')).filter(visible) : [];
+    const keep = new Set();
+    records.forEach((rec, i) => {
+      const id = rec.getAttribute('data-item-id') || String(i);
+      const anchor = rec.querySelector('.ax-edit-buttons') || rec.querySelector('header');
+      if (!anchor) return;
+      const ar = anchor.getBoundingClientRect();
+      if (!ar.width) return;
+      // done when every category row of the record shows the No Abnormalities check
+      const rows = Array.from(rec.querySelectorAll('.assessment-summary')).filter(r => !/Neonatal/i.test(r.textContent));
+      const normal = rows.length && rows.every(r => r.querySelector('.no-abnormalities-or-not-assessed .assess-circle-check-bg, .no-abnormalities-or-not-assessed.assess-circle-check-bg'));
+      const defs = [['all', normal ? '✓ All normal' : 'All normal', 'Press No Abnormalities on every category of this assessment (ESO\'s Quick Ax), then OK'], ['ao', 'A&Ox4', 'Open Mental Status and press Alert and Oriented x4']];
+      let right = ar.left - 10;
+      for (const [k, text, title] of defs.reverse()) {
+        const key = `x:${id}:${k}`; keep.add(key);
+        const b = quickEl(key, () => {
+          const el = document.createElement('button'); el.type = 'button'; el.className = 'allnone'; el.dataset.group = 'assess-' + k;
+          el.addEventListener('pointerdown', (e) => e.stopPropagation());
+          el.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); if (k === 'all') assessAllNormal(rec); else assessAOx4(rec); });
+          return el;
+        });
+        b.textContent = text; b.title = title;
+        b.classList.toggle('done', k === 'all' && !!normal);
+        b.classList.toggle('busy', quickBusy);
+        b.style.visibility = 'hidden'; b.style.display = 'block';
+        const w = b.getBoundingClientRect().width || 100;
+        b.style.left = Math.round(right - w) + 'px';
+        b.style.top = Math.round(ar.top + (ar.height - 30) / 2) + 'px';
+        b.style.visibility = '';
+        right -= w + 8;
+      }
+    });
+    for (const [k, el] of quickEls) if (k.startsWith('x:') && !keep.has(k)) { el.remove(); quickEls.delete(k); }
+  }
+  async function confirmIfAsked() {
+    // ESO asks "Change assessment?" when a category already has findings; answer it
+    const dlg = await until(() => Array.from(document.querySelectorAll('eso-modal-dialog, .eso-modal-dialog')).find(visible), 250, 50);
+    if (!dlg) return;
+    const ok = Array.from(dlg.querySelectorAll('button')).find(b => /change assessment|^ok$|^yes$/i.test(norm(b.textContent)));
+    if (ok) { ok.click(); await until(() => !document.body.contains(dlg) || !visible(dlg), 2000); }
+  }
+  async function assessAllNormal(rec) {
+    if (quickBusy) return;
+    quickBusy = true; layoutAssess();
+    try {
+      const qa = rec.querySelector('button.quick-assess');
+      if (!qa) throw new Error('this assessment has no Quick Ax button');
+      showVeilMessage('Setting every category to No Abnormalities…', 'through ESO\'s Quick Ax');
+      qa.click();
+      const shelf = await until(() => Array.from(document.querySelectorAll('shelf-panel')).find(p => visible(p) && p.querySelector('.categories .category')), 5000);
+      if (!shelf) throw new Error('Quick Ax did not open');
+      for (const cat of Array.from(shelf.querySelectorAll('.categories .category'))) {
+        const name = norm((cat.querySelector('header') || cat).textContent).replace(/Assess$/i, '').trim();
+        if (/neonatal/i.test(name)) continue;
+        const btn = Array.from(cat.querySelectorAll('button.radio-btn')).find(b => NORMAL_RE.test(norm(b.textContent)));
+        if (!btn || btn.classList.contains('selected')) continue;
+        btn.click();
+        await confirmIfAsked();
+        await wait(60);
+      }
+      const okBtn = Array.from(shelf.querySelectorAll('header button, button')).find(b => /^OK$/i.test(norm(b.textContent)));
+      if (!okBtn) throw new Error('no OK button');
+      okBtn.click();
+      await until(() => !document.body.contains(shelf) || !visible(shelf), 4000);
+    } catch (e) {
+      hideVeil(); quickBusy = false; layoutAssess();
+      alert('ESO Save: could not set the assessment. ' + (e && e.message ? e.message : ''));
+      return;
+    }
+    hideVeil(); quickBusy = false; setTimeout(layoutAssess, 300);
+  }
+  async function assessAOx4(rec) {
+    if (quickBusy) return;
+    quickBusy = true; layoutAssess();
+    try {
+      const row = Array.from(rec.querySelectorAll('.assessment-summary')).find(r => /Mental Status/i.test(r.textContent));
+      if (!row) throw new Error('Mental Status row not found');
+      showVeilMessage('Setting Alert and Oriented x4…', 'in ESO\'s Mental Status section');
+      row.click();
+      const btn = await until(() => Array.from(document.querySelectorAll('shelf-panel button.radio-btn')).find(b => visible(b) && /Alert and Oriented x4/i.test(norm(b.textContent))), 5000);
+      if (!btn) throw new Error('the Mental Status section did not open');
+      if (!btn.classList.contains('selected')) { btn.click(); await confirmIfAsked(); await wait(80); }
+      const shelf = btn.closest('shelf-panel');
+      const okBtn = Array.from(shelf.querySelectorAll('header button, button')).find(b => /^OK$/i.test(norm(b.textContent)));
+      if (!okBtn) throw new Error('no OK button');
+      okBtn.click();
+      await until(() => !document.body.contains(shelf) || !visible(shelf), 4000);
+    } catch (e) {
+      hideVeil(); quickBusy = false; layoutAssess();
+      alert('ESO Save: could not set orientation. ' + (e && e.message ? e.message : ''));
+      return;
+    }
+    hideVeil(); quickBusy = false; setTimeout(layoutAssess, 300);
+  }
   function layoutQuick() {
+    try { layoutAssess(); } catch (e) { /* keep going */ }
     for (const gk of Object.keys(CHIP_GROUPS)) { try { layoutChips(gk); } catch (e) { /* keep going */ } }
     for (const gk of Object.keys(FACILITY_GROUPS)) { try { layoutFacilities(gk); } catch (e) { /* keep going */ } }
     try { layoutDelays(); } catch (e) { /* keep going */ }

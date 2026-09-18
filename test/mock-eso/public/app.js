@@ -68,6 +68,12 @@
       if (view === 'Vitals') renderVitals(out.body);
       document.getElementById('patient').style.display = view === 'Patient' ? 'block' : 'none';
       document.getElementById('incident').style.display = view === 'Incident' ? 'block' : 'none';
+      document.getElementById('assess').style.display = view === 'Assessments' ? 'block' : 'none';
+      if (view === 'Assessments') {
+        const list = (out.body && out.body.data && out.body.data.model && out.body.data.model.assessmentsV2) || [];
+        app.assessments = list.map(a => ({ key: String(a.itemId), time: String(a.assessmentTime || '').slice(-8), findings: (a.findings || []).map(f => ({ key: String(f.itemId), findingId: f.findingId, findingLocationId: f.findingLocationId, present: f.present })) }));
+        renderAx();
+      }
       if (view === 'Incident') { renderDelays(out.body); loadBundle(); }
       document.getElementById('narrative').style.display = view === 'Narrative' ? 'block' : 'none';
       if (view === 'Patient') renderHistory(out.body);
@@ -204,6 +210,71 @@
         nameField.querySelector('.display-value').textContent = it.itemName;
       } });
     });
+  });
+  // ---- assessments, the way ESO's app keeps them: every location starts Not_Assessed; Quick Ax sets a
+  // whole category; the Mental Status section has Alert and Oriented x4
+  const AX_CATS = { MentalStatus: ['MentalStatus'], Skin: ['Skin'], HEENT: ['Head', 'Face', 'Eyes', 'Neck'],
+    Chest: ['GeneralAnterior', 'LeftAnterior', 'RightAnterior', 'GeneralPosterior', 'LeftSide', 'RightSide', 'HeartSounds', 'LungSounds_Bilateral', 'LungSounds_LL', 'LungSounds_LU', 'LungSounds_RL', 'LungSounds_RU'],
+    Abdomen: ['AbdomenGeneral'], Back: ['BackGeneral'], PelvisGUGI: ['PelvisGUGI'], Extremities: ['ArmWholeArmAndHandLeft', 'ArmWholeArmAndHandRight', 'LegWholeLegAndFootLeft', 'LegWholeLegAndFootRight'], Neurological: ['Neurological'] };
+  const AX_NAMES = { MentalStatus: 'Mental Status', Skin: 'Skin', HEENT: 'HEENT', Chest: 'Chest', Abdomen: 'Abdomen', Back: 'Back', PelvisGUGI: 'Pelvis/GU/GI', Extremities: 'Extremities', Neurological: 'Neurological' };
+  app.assessments = []; // { key, findings: [{key, findingId, findingLocationId, present}] }
+  const axAddr = (a) => `assessments.assessmentsV2.['${a.key}']`;
+  function axSet(a, loc, findingId) {
+    for (const f of a.findings.filter(f => f.findingLocationId === loc)) { app.del('assessments', `${axAddr(a)}.findings.['${f.key}']`, 'binary'); }
+    a.findings = a.findings.filter(f => f.findingLocationId !== loc);
+    const f = { key: uuid(), findingId, findingLocationId: loc, present: true };
+    a.findings.push(f);
+    app.dirty.push({ scope: 'assessments', op: { verb: 'ADD', address: `${axAddr(a)}.findings.['${f.key}']`, fieldRef: 'ASSESSMENT2FINDINGS', value: { findingId, findingLocationId: loc, present: true }, dataType: 'binary' } });
+  }
+  function axAddFinding(a, loc, findingId) {
+    const f = { key: uuid(), findingId, findingLocationId: loc, present: true }; a.findings.push(f);
+    app.dirty.push({ scope: 'assessments', op: { verb: 'ADD', address: `${axAddr(a)}.findings.['${f.key}']`, fieldRef: 'ASSESSMENT2FINDINGS', value: { findingId, findingLocationId: loc, present: true }, dataType: 'binary' } });
+  }
+  const catNormal = (a, cat) => AX_CATS[cat].every(loc => a.findings.some(f => f.findingLocationId === loc && f.findingId === 'No_Abnormalities'));
+  function renderAx() {
+    document.getElementById('axlist').innerHTML = app.assessments.map(a => `<assessment-record data-item-id="${a.key}"><header><section class="date-and-time">${a.time}</section><section class="ax-edit-buttons"><button class="btn link-btn delete">Delete</button><button class="btn link-btn has-bg quick-assess" title="Quick Ax">Quick Ax</button><button class="btn link-btn has-bg anatomical-figure">Figure</button></section></header>` +
+      Object.keys(AX_CATS).map(cat => `<div class="assessment-summary" data-cat="${cat}"><span class="heading"><strong>${AX_NAMES[cat]}</strong></span><span class="no-abnormalities-or-not-assessed"><span class="finding-display ${catNormal(a, cat) ? 'assess-circle-check-bg' : ''}"></span></span></div>`).join('') + '</assessment-record>').join('');
+  }
+  app.quickAxOpens = 0; app.mentalOpens = 0;
+  document.getElementById('addax').addEventListener('click', () => {
+    const a = { key: uuid(), time: new Date().toTimeString().slice(0, 8), findings: [] };
+    app.dirty.push({ scope: 'assessments', op: { verb: 'ADD', address: axAddr(a), fieldRef: 'ASSESSMENT2', value: { assessmentDate: '09/18/2026 09:00:00', assessmentTime: '09/18/2026 09:00:00' }, dataType: 'collectionWithData', isComplexType: true } });
+    for (const locs of Object.values(AX_CATS)) for (const loc of locs) axAddFinding(a, loc, 'Not_Assessed');
+    app.assessments.unshift(a); renderAx();
+  });
+  document.getElementById('axlist').addEventListener('click', (e) => {
+    const rec = e.target.closest('assessment-record'); if (!rec) return;
+    const a = app.assessments.find(x => x.key === rec.dataset.itemId);
+    if (e.target.closest('.quick-assess')) {
+      app.quickAxOpens++;
+      const el = document.createElement('shelf-panel');
+      el.innerHTML = `<header><h1>Quick Ax</h1><button class="btn green-btn workflow-btn">OK</button></header><div class="disclaimer">If No Abnormalities is selected…</div><div class="categories">` +
+        Object.keys(AX_CATS).map(cat => `<div class="category" data-cat="${cat}"><header class="name">${AX_NAMES[cat]} <a class="assess">Assess</a></header><div class="buttons"><button class="btn radio-btn na ${catNormal(a, cat) ? 'selected' : ''}"><span class="label">${cat === 'MentalStatus' || cat === 'Neurological' ? 'Normal Baseline' : 'No Abnormalities'}</span></button><button class="btn radio-btn nas ${AX_CATS[cat].every(loc => a.findings.some(f => f.findingLocationId === loc && f.findingId === 'Not_Assessed')) ? 'selected' : ''}"><span class="label">Not Assessed</span></button></div></div>`).join('') + '</div>';
+      el.querySelectorAll('.category').forEach(c => {
+        const cat = c.dataset.cat;
+        c.querySelector('.na').addEventListener('click', () => {
+          const hasFindings = AX_CATS[cat].some(loc => a.findings.some(f => f.findingLocationId === loc && !['No_Abnormalities', 'Not_Assessed'].includes(f.findingId)));
+          const apply = () => { for (const loc of AX_CATS[cat]) axSet(a, loc, 'No_Abnormalities'); c.querySelector('.na').classList.add('selected'); c.querySelector('.nas').classList.remove('selected'); };
+          if (!hasFindings) return apply();
+          // ESO asks before wiping findings in a category
+          const d = document.createElement('eso-modal-dialog'); d.innerHTML = '<header>Change assessment?</header><div class="dialog-content">By changing this you will lose assessment information for this section.</div><div class="button-set"><button class="btn green-btn">Change assessment</button></div>';
+          d.querySelector('button').addEventListener('click', () => { apply(); d.remove(); }); document.body.appendChild(d);
+        });
+      });
+      el.querySelector('header button').addEventListener('click', () => { el.remove(); renderAx(); });
+      shelfHost.appendChild(el);
+    } else if (e.target.closest('.assessment-summary')) {
+      const cat = e.target.closest('.assessment-summary').dataset.cat;
+      if (cat === 'MentalStatus') app.mentalOpens++;
+      const ao = ['Oriented_Person', 'Oriented_Place', 'Oriented_Time', 'Oriented_Event'].every(id => a.findings.some(f => f.findingLocationId === 'MentalStatus' && f.findingId === id));
+      const el = document.createElement('shelf-panel');
+      el.innerHTML = `<nav class="jumplinks"><ul>${Object.keys(AX_CATS).map(c => `<li class="${c === cat ? 'selected' : ''}"><div><div>${AX_NAMES[c]}</div></div></li>`).join('')}</ul></nav><header><h1>Assessment - ${a.time}</h1><button class="btn green-btn workflow-btn">OK</button></header><div class="assessment-entry"><main class="assessment">` +
+        (cat === 'MentalStatus' ? `<section><header><h2>Mental Status</h2><div><button class="btn radio-btn ${catNormal(a, 'MentalStatus') ? 'selected' : ''}"><span class="label">Normal Baseline For Patient</span></button><button class="btn radio-btn"><span class="label">Not Assessed</span></button></div></header></section><section><header><h2>Orientation</h2><div><button class="btn radio-btn aox4 ${ao ? 'selected' : ''}"><span class="label">Alert and Oriented x4</span></button></div></header></section>` : `<section><header><h2>${AX_NAMES[cat]}</h2><div><button class="btn radio-btn"><span class="label">No Abnormalities</span></button><button class="btn radio-btn"><span class="label">Not Assessed</span></button></div></header></section>`) + '</main></div>';
+      const aox = el.querySelector('.aox4');
+      if (aox) aox.addEventListener('click', () => { for (const id of ['Oriented_Person', 'Oriented_Place', 'Oriented_Time', 'Oriented_Event']) if (!a.findings.some(f => f.findingLocationId === 'MentalStatus' && f.findingId === id)) axAddFinding(a, 'MentalStatus', id); aox.classList.add('selected'); });
+      el.querySelector('header button').addEventListener('click', () => { el.remove(); renderAx(); });
+      shelfHost.appendChild(el);
+    }
   });
   const shelfHost = document.getElementById('shelfhost');
   function openShelf({ title, items, multi, checked, onOk, onPick }) {

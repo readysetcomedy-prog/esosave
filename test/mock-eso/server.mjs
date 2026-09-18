@@ -153,6 +153,10 @@ export function createMockEso() {
       }
       if (!('patientHistoriesPertinentNegativeId' in model)) model.patientHistoriesPertinentNegativeId = null;
     }
+    if (name === 'Assessments') {
+      model.assessmentsV2 = (model.assessmentsV2 || []).map(a => ({ ...a, findings: (a.findings || []).map(f => ({ present: true, ...f })) }));
+      if (!model.assessments) model.assessments = [];
+    }
     if (name === 'Narrative') {
       model.patientComplaint = { initialPatientAcuityId: null, finalPatientAcuityId: null, ...(model.patientComplaint || {}) };
       const pt = model.patientTransport || {};

@@ -682,6 +682,40 @@ test('facility chips: chosen in Settings from ESO\'s saved facilities, one tap s
   await T.setStorage({ settings: { ...(await T.storage()).settings, facilitySending: [], facilityDestination: [] } });
 });
 
+test('assessment: "All normal" presses No Abnormalities on every category in ESO\'s Quick Ax and OK; "A&Ox4" sets orientation', async () => {
+  const id = await freshRun();
+  await app(() => window.app.openTab('Assessments'));
+  await app(() => document.getElementById('addax').click());
+  const rec0 = await waitFor(async () => { const r = await T.record(id); const a = r.tree.assessments?.assessmentsV2?.[0]; return a && (a.findings || []).length === 26 ? r : null; }, { label: 'assessment with 26 Not Assessed findings', timeout: 15000 });
+  assert.ok(rec0.tree.assessments.assessmentsV2[0].findings.every(f => f.findingId === 'Not_Assessed'));
+  const btns = () => T.page.evaluate(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick [data-group^=assess-]')).map(b => ({ g: b.dataset.group, text: b.textContent, cls: b.className, rect: b.getBoundingClientRect().toJSON() })));
+  await waitFor(async () => (await btns()).length === 2, { label: 'All normal and A&Ox4 buttons' });
+  const edit = await T.page.evaluate(() => document.querySelector('assessment-record .ax-edit-buttons').getBoundingClientRect().toJSON());
+  const all = (await btns()).find(b => b.g === 'assess-all');
+  assert.ok(all.rect.right < edit.left && Math.abs(all.rect.top + all.rect.height / 2 - (edit.top + edit.height / 2)) < 10, 'sits just left of ESO\'s edit buttons on the record header');
+  await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.quick [data-group=assess-all]').click());
+  const rec = await waitFor(async () => { const r = await T.record(id); const a = r.tree.assessments?.assessmentsV2?.[0]; return a && (a.findings || []).length === 26 && a.findings.every(f => f.findingId === 'No_Abnormalities') ? r : null; }, { label: 'every location No Abnormalities', timeout: 20000 });
+  assert.equal(await app(() => window.app.quickAxOpens), 1, 'one Quick Ax open');
+  await waitFor(async () => (await app(() => document.querySelectorAll('shelf-panel').length)) === 0, { label: 'Quick Ax closed with OK' });
+  const dels = rec.ops.filter(o => o.verb === 'DELETE' && /findings/.test(o.address)).length;
+  assert.equal(dels, 26, 'each Not Assessed finding was removed the way ESO does it');
+  await waitFor(async () => /done/.test((await btns()).find(b => b.g === 'assess-all').cls), { label: 'All normal shows done' });
+  // A&Ox4
+  await waitFor(async () => { const b = await btns(); return b.length === 2 && !b.some(x => /busy/.test(x.cls)); }, { label: 'free' });
+  await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.quick [data-group=assess-ao]').click());
+  await waitFor(async () => { const a = (await T.record(id)).tree.assessments.assessmentsV2[0]; return ['Oriented_Person', 'Oriented_Place', 'Oriented_Time', 'Oriented_Event'].every(x => a.findings.some(f => f.findingId === x && f.findingLocationId === 'MentalStatus')); }, { label: 'oriented x4 saved', timeout: 15000 });
+  assert.equal(await app(() => window.app.mentalOpens), 1);
+  await waitFor(async () => (await app(() => document.querySelectorAll('shelf-panel').length)) === 0, { label: 'Mental Status closed with OK' });
+  // a second press of All normal on an already-normal record presses nothing and still closes cleanly
+  await waitFor(async () => { const b = await btns(); return b.length === 2 && !b.some(x => /busy/.test(x.cls)); }, { label: 'free again' });
+  const before = (await T.record(id)).ops.length;
+  await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.quick [data-group=assess-all]').click());
+  await waitFor(async () => (await app(() => window.app.quickAxOpens)) === 2, { label: 'opened again' });
+  await waitFor(async () => (await app(() => document.querySelectorAll('shelf-panel').length)) === 0, { label: 'closed again' });
+  await sleep(800);
+  assert.equal((await T.record(id)).ops.length, before, 'nothing re-saved');
+});
+
 test('quick acuity: red, yellow, green next to each acuity field, one tap picks it in ESO\'s list', async () => {
   const id = await app(() => window.app.recordId);
   await app(() => window.app.openTab('Narrative'));
