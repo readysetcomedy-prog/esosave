@@ -34,8 +34,9 @@ to bad signal or a hung page.
   Both are settings, on by default.
 - **Quick buttons.** One-tap chips for the common history items and home medications (each list
   ends with None Reported) and NKDA for allergies sit beside Add History, Add Medications and Add
-  Allergies on the Patient tab; tap several and, a moment later, ESO's own list is opened once, each
-  one ticked, and OK pressed. They hide while any ESO picker is open, and every button scrolls under
+  Allergies on the Patient tab; each tap opens ESO's own list, ticks the row and presses OK, the way
+  a finger would (taps that land while a list is being worked ride the next open). They hide while
+  any ESO picker is open, and every button scrolls under
   ESO's top bar and tab strip with the page. A Race row (Asian, Latino: the rest are ESO's own
   quick-picks) sits under the Race label, and 0-9 pads above Weight and Height (feet and inches): digits gather for a moment, then
   ESO's own number pad is opened once, the value entered and OK pressed, so the pad does not open on
@@ -61,7 +62,9 @@ to bad signal or a hung page.
   Protocol Provided Care Level, Minutes / Hours / Days above the complaint duration's unit with a
   0-9 pad for the duration itself, and every anatomic location (abbreviated) above Anatomic
   Location. Every row ends with "Other…", which simply opens ESO's own list (a row that already
-  holds every choice has no need of one). ALS / BLS is kept the same on both pages: choosing it in
+  holds every choice has no need of one). Every pick takes its row straight from the open list;
+  only a list too long to show it all gets the name typed into its search box first, and the
+  overlay only appears when a pick takes longer than a blink. ALS / BLS is kept the same on both pages: choosing it in
   Level of Service (Incident) or Provided Care Level (Narrative) sets the other page's field
   through its own picker and returns to the page it was chosen on; a matching value is left alone.
   Inside ESO's Patient Refusal Form (Signatures tab) chips sit by its own lists: 18+ / Guardian
