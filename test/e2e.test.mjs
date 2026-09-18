@@ -96,8 +96,7 @@ test('offline: saves are held, the app is told "saved", banner warns, then every
   assert.ok(!/^[0-9a-f-]{20,}$/.test(vital.itemId) || vital.itemId !== tmpVital, 'server key used');
   assert.equal(rec.tree.flowchartTreatments.treatments[0].provider, 'CREWID');
   assert.deepEqual(rec.tree.signatures.billingAuthorization.sectionOne.patientSignature.strokes.strokes, [[0.1, 0.2, 0.3, 0.4]]);
-  const bar2 = await T.bar();
-  assert.match(bar2.cls, /good/);
+  await waitFor(async () => /good/.test((await T.bar()).cls), { label: 'bar green after the push' });
   // later live edits from the app still use the temporary key; they must keep being rewritten
   await app(({ v }) => { window.app.edit('vitals', `vitals.vitalSigns.['${v}'].respirations`, 16, 'integer'); }, { v: tmpVital });
   await waitFor(async () => (await T.record(id)).tree.vitals.vitalSigns.find(v => v.pulse === 120).respirations === 16, { label: 'post-recovery edit remapped' });
@@ -599,6 +598,32 @@ test('quick delays: one button presses ESO\'s own None/No Delay on every delay s
   assert.deepEqual(a.sceneDelays.map(Number), [365], 'the hand-entered delay was left alone');
   await waitFor(async () => { const b = await btn(); return b && /done/.test(b.cls); }, { label: 'button shows done' });
   await waitFor(async () => !(await btn()), { label: 'button gone once every delay is answered', timeout: 8000 });
+});
+
+test('quick transport: chips after each transport field pick in ESO\'s list; a field with a value shows it as added', async () => {
+  const id = await freshRun();
+  await app(() => window.app.openTab('Narrative'));
+  const chips = (gk) => T.page.evaluate((g) => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll(`.quick .chip[data-group=${g}]`)).map(c => ({ short: c.textContent, name: c.title, cls: c.className, rect: c.getBoundingClientRect().toJSON() })), gk);
+  await waitFor(async () => (await chips('toStretcher')).length === 7 && (await chips('position')).length === 4 && (await chips('toAmbulance')).length === 1, { label: 'transport chips drawn' });
+  const lab = await T.page.evaluate(() => document.querySelector('eso-field[data-field-ref=HOWPATIENTWASMOVEDTOSTRETCHERIDS] label').getBoundingClientRect().toJSON());
+  const fld = await T.page.evaluate(() => document.querySelector('eso-field[data-field-ref=HOWPATIENTWASMOVEDTOSTRETCHERIDS]').getBoundingClientRect().toJSON());
+  const c0 = (await chips('toStretcher'))[0];
+  assert.ok(c0.rect.left > lab.right && c0.rect.right <= fld.right, 'first chip sits after the label, inside the field width');
+  const tap = async (name) => { await waitFor(() => T.page.evaluate((n) => { const c = Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .chip')).find(x => x.title === n); return !!c && !/busy/.test(c.className); }, name), { label: 'chip ' + name }); await T.page.evaluate((n) => { Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .chip')).find(x => x.title === n).click(); }, name); };
+  await tap('Lifted to stretcher via draw-sheet');
+  const rec = await waitFor(async () => { const r = await T.record(id); return (r.tree.narrative?.patientTransport?.howPatientWasMovedToStretcherIds || []).length ? r : null; }, { label: 'to-stretcher saved by the app', timeout: 15000 });
+  assert.deepEqual(rec.tree.narrative.patientTransport.howPatientWasMovedToStretcherIds.map(Number), [15113]);
+  await waitFor(async () => (await chips('toStretcher')).some(c => /added/.test(c.cls) && c.name === 'Lifted to stretcher via draw-sheet'), { label: 'chip shows added' });
+  // to ambulance: Stretcher; from ambulance: Stretcher (two fields, one after the other)
+  await tap('Stretcher');
+  await waitFor(async () => ((await T.record(id)).tree.narrative?.patientTransport?.patientMovedFromSceneToAmbulanceMethodIds || []).map(Number).includes(7183), { label: 'to ambulance', timeout: 15000 });
+  await waitFor(() => T.page.evaluate(() => { const cs = Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .chip[data-group=fromAmbulance]')); return cs.length === 1 && !/busy/.test(cs[0].className); }), { label: 'from-ambulance chip free' });
+  await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.quick .chip[data-group=fromAmbulance]').click());
+  await waitFor(async () => ((await T.record(id)).tree.narrative?.patientTransport?.patientMovedFromAmbulanceToDestinationMethodIds || []).map(Number).includes(7196), { label: 'from ambulance', timeout: 15000 });
+  await tap('Semi-Fowlers');
+  await waitFor(async () => ((await T.record(id)).tree.narrative?.patientTransport?.patientPositionDuringTransportIds || []).map(Number).includes(7189), { label: 'position', timeout: 15000 });
+  assert.equal(await app(() => document.querySelectorAll('shelf-panel').length), 0, 'every picker closed');
+  assert.match(await app(() => document.querySelector('eso-field[data-field-ref=PATIENTPOSITIONDURINGTRANSPORTIDS] .display-value').textContent), /Semi-Fowlers/);
 });
 
 test('quick acuity: red, yellow, green next to each acuity field, one tap picks it in ESO\'s list', async () => {

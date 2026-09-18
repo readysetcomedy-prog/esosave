@@ -71,7 +71,7 @@
       if (view === 'Incident') renderDelays(out.body);
       document.getElementById('narrative').style.display = view === 'Narrative' ? 'block' : 'none';
       if (view === 'Patient') renderHistory(out.body);
-      if (view === 'Narrative') renderAcuity(out.body);
+      if (view === 'Narrative') { renderAcuity(out.body); renderTransport(out.body); }
       return out;
     },
     // the real app validates, then POSTs lock with a timestamp; unlock likewise
@@ -145,6 +145,30 @@
     const f = b.closest('eso-field'); const id = Number(f.dataset.list);
     app.addScalar('incident', `incident.additionalFactors.${DELAY_ADDR[f.dataset.fieldRef]}.['${id}']`, id);
     f.querySelector('.display-value').textContent = 'None/No Delay'; b.style.display = 'none';
+  }));
+  const TRANSPORT = {
+    howPatientWasMovedToStretcherIds: [[15110, 'Ambulated with assistance'], [15111, 'Ambulated to stretcher no assistance'], [15112, 'Lifted to stretcher'], [15113, 'Lifted to stretcher via draw-sheet'], [15114, 'Lifted to stretcher via Hoyer lift'], [15115, 'Lifted to stretcher with backboard'], [15119, 'Via stand and pivot'], [15120, 'Via stair chair']],
+    patientMovedFromSceneToAmbulanceMethodIds: [[7180, 'Assisted/Walk'], [7182, 'Stairchair'], [7183, 'Stretcher'], [10552, 'Wheelchair']],
+    patientMovedFromAmbulanceToDestinationMethodIds: [[7193, 'Assisted/Walk'], [7195, 'Stairchair'], [7196, 'Stretcher'], [10555, 'Wheelchair']],
+    patientPositionDuringTransportIds: [[7186, 'Fowlers (Semi-Upright Sitting)'], [7189, 'Semi-Fowlers'], [7190, 'Sitting'], [7191, 'Supine'], [10558, 'Trendelenburg']],
+  };
+  app.transport = {};
+  function renderTransport(body) {
+    const m = body && body.data && body.data.model && body.data.model.patientTransport;
+    for (const f of document.querySelectorAll('#narrative eso-field.ms')) {
+      const k = f.dataset.key; const ids = ((m && m[k]) || []).map(Number); app.transport[k] = ids;
+      f.querySelector('.display-value').textContent = ids.map(id => (TRANSPORT[k].find(t => t[0] === id) || [0, id])[1]).join(', ');
+    }
+  }
+  document.querySelectorAll('#narrative eso-field.ms .shelf-click-indicator').forEach(ic => ic.addEventListener('click', () => {
+    const f = ic.closest('eso-field'); const k = f.dataset.key;
+    openShelf({ title: f.dataset.title, items: TRANSPORT[k], multi: true, checked: app.transport[k] || [], onOk: (ids) => {
+      const had = app.transport[k] || [];
+      for (const id of ids) if (!had.includes(id)) app.addScalar('narrative', `narrative.patientTransport.${k}.['${id}']`, id);
+      for (const id of had) if (!ids.includes(id)) app.del('narrative', `narrative.patientTransport.${k}.['${id}']`, 'multiselect');
+      app.transport[k] = ids;
+      f.querySelector('.display-value').textContent = ids.map(id => (TRANSPORT[k].find(t => t[0] === id) || [0, id])[1]).join(', ');
+    } });
   }));
   const shelfHost = document.getElementById('shelfhost');
   function openShelf({ title, items, multi, checked, onOk, onPick }) {

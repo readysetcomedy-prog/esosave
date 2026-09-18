@@ -43,7 +43,7 @@
   const sget = (keys) => new Promise(res => storage.get(keys, (v) => res(v || {})));
   const sset = (obj) => new Promise(res => storage.set(obj, () => res()));
   const sremove = (keys) => new Promise(res => storage.remove(keys, () => res()));
-  const DEFAULT_SETTINGS = { purgeHoursAfterLock: 0, probeSec: 20, heldProbeSec: 8, warmTabs: true, cardCollapsed: false, showTimes: true, sendPrompt: true, unsentList: true, quickHistory: true, quickMeds: true, quickAllergies: true, quickAcuity: true, quickDelays: true };
+  const DEFAULT_SETTINGS = { purgeHoursAfterLock: 0, probeSec: 20, heldProbeSec: 8, warmTabs: true, cardCollapsed: false, showTimes: true, sendPrompt: true, unsentList: true, quickHistory: true, quickMeds: true, quickAllergies: true, quickAcuity: true, quickDelays: true, quickTransport: true };
 
   async function loadAll() {
     const all = await sget(null);
@@ -325,6 +325,7 @@
         `<label class="s"><input type="checkbox" id="qmeds" ${settings.quickMeds === false ? '' : 'checked'}> Medications: chips for common home meds under Add Medications (Patient tab)</label>` +
         `<label class="s"><input type="checkbox" id="qallergies" ${settings.quickAllergies === false ? '' : 'checked'}> Allergies: chips for common allergies under Add Allergies (Patient tab)</label>` +
         `<label class="s"><input type="checkbox" id="qacuity" ${settings.quickAcuity === false ? '' : 'checked'}> Acuity: red, yellow and green buttons next to Initial and Final Patient Acuity (Narrative tab)</label>` +
+        `<label class="s"><input type="checkbox" id="qtransport" ${settings.quickTransport === false ? '' : 'checked'}> Transport: chips for how the patient was moved and positioned (Narrative tab)</label>` +
         `<div class="actions"><button class="a" data-act="save-settings">Save</button></div></div>`);
     }
     if (settings.unsentList !== false) {
@@ -390,6 +391,7 @@
       settings.quickMeds = !!panel.querySelector('#qmeds').checked;
       settings.quickAllergies = !!panel.querySelector('#qallergies').checked;
       settings.quickAcuity = !!panel.querySelector('#qacuity').checked;
+      settings.quickTransport = !!panel.querySelector('#qtransport').checked;
       layoutQuick();
       await sset({ settings }); toPage('settings', settings); settingsOpen = false; renderPanel(); renderTimes();
     }
@@ -757,6 +759,23 @@
         ['Trazodone', 'Trazodone', 507], ['Alprazolam', 'Alprazolam', 7590], ['None reported', 'None Reported', 12223],
       ],
     },
+    toStretcher: {
+      setting: 'quickTransport', tab: 'Narrative', field: 'HOWPATIENTWASMOVEDTOSTRETCHERIDS', title: /moved to stretcher/i, listKey: 'howPatientWasMovedToStretcherIds',
+      chips: [['Ambulated w/ assist', 'Ambulated with assistance', 15110], ['No assist', 'Ambulated to stretcher no assistance', 15111], ['Lifted', 'Lifted to stretcher', 15112],
+        ['Draw-sheet', 'Lifted to stretcher via draw-sheet', 15113], ['Hoyer', 'Lifted to stretcher via Hoyer lift', 15114], ['Backboard', 'Lifted to stretcher with backboard', 15115], ['Stand & pivot', 'Via stand and pivot', 15119]],
+    },
+    toAmbulance: {
+      setting: 'quickTransport', tab: 'Narrative', field: 'PATIENTMOVEDFROMSCENETOAMBULANCEMETHODIDS', title: /to ambulance/i, listKey: 'patientMovedFromSceneToAmbulanceMethodIds',
+      chips: [['Stretcher', 'Stretcher', 7183]],
+    },
+    fromAmbulance: {
+      setting: 'quickTransport', tab: 'Narrative', field: 'PATIENTMOVEDFROMAMBULANCETODESTINATIONMETHODIDS', title: /from ambulance/i, listKey: 'patientMovedFromAmbulanceToDestinationMethodIds',
+      chips: [['Stretcher', 'Stretcher', 7196]],
+    },
+    position: {
+      setting: 'quickTransport', tab: 'Narrative', field: 'PATIENTPOSITIONDURINGTRANSPORTIDS', title: /position during transport/i, listKey: 'patientPositionDuringTransportIds',
+      chips: [['Fowlers', 'Fowlers (Semi-Upright Sitting)', 7186], ['Semi-Fowlers', 'Semi-Fowlers', 7189], ['Supine', 'Supine', 7191], ['Sitting', 'Sitting', 7190]],
+    },
     allergies: {
       setting: 'quickAllergies', button: /^Add Allergies$/i, title: /^Add Allergies$/i, listKey: 'allergies',
       chips: [
@@ -775,7 +794,8 @@
   };
   let quickLayer = null;
   const quickEls = new Map();   // key -> element in our layer
-  const pending = { history: new Set(), meds: new Set(), allergies: new Set() }; // names tapped, not yet committed
+  const pending = {}; // group -> names tapped, not yet committed
+  const pend = (gk) => (pending[gk] = pending[gk] || new Set());
   const commitTimers = {};
   let quickBusy = false;
   const norm = (t) => (t || '').replace(/\s+/g, ' ').trim();
@@ -822,18 +842,25 @@
     const el = findByText('button, a', group.button, { notInShelf: true });
     return el ? (el.closest('button, a') || el) : null;
   }
+  const fieldEl = (ref) => { const f = document.querySelector(`eso-field[data-field-ref="${ref}"]`); return f && visible(f) ? f : null; };
   function layoutChips(gk) {
     const g = CHIP_GROUPS[gk];
     const run = currentRun();
-    const btn = settings[g.setting] !== false && run && !run.locked && onTab('Patient') && !shelfOpen() ? anchorButton(g) : null;
+    const ok = settings[g.setting] !== false && run && !run.locked && onTab(g.tab || 'Patient') && !shelfOpen();
+    // anchored to an Add button (chips to its right, rows under it) or to a field (chips after its
+    // label, rows under the field)
+    const btn = ok ? (g.field ? fieldEl(g.field) : anchorButton(g)) : null;
     if (!btn) { dropQuick(gk + ':'); return; }
-    const r = btn.getBoundingClientRect();
-    if (!r.width) { dropQuick(gk + ':'); return; }
-    const box = btn.parentElement ? btn.parentElement.getBoundingClientRect() : r;
-    const right = Math.max(r.right + 200, box.right - 8);
+    const fr = btn.getBoundingClientRect();
+    if (!fr.width) { dropQuick(gk + ':'); return; }
+    const lab = g.field ? btn.querySelector('label') : null;
+    const r = lab ? lab.getBoundingClientRect() : fr;
+    const box = g.field ? fr : (btn.parentElement ? btn.parentElement.getBoundingClientRect() : r);
+    const right = g.field ? fr.right - 4 : Math.max(r.right + 200, box.right - 8);
     const have = new Set(((run.lists && run.lists[g.listKey]) || []).map(Number));
     const gap = 6, rowH = 34;
     let x = r.left + r.width + 12, y = r.top + (r.height - 28) / 2, row = 0;
+    const under = g.field ? fr.bottom : r.bottom;
     const layer = ensureQuickLayer();
     for (const [short, name, id] of g.chips) {
       const chip = quickEl(`${gk}:${id}`, () => {
@@ -843,13 +870,13 @@
         return c;
       });
       chip.classList.toggle('added', have.has(id));
-      chip.classList.toggle('on', pending[gk].has(name));
+      chip.classList.toggle('on', pend(gk).has(name));
       chip.classList.toggle('busy', quickBusy);
       chip.style.display = 'block';
       chip.style.visibility = 'hidden';
       layer.appendChild(chip);
       const w = chip.getBoundingClientRect().width || 60;
-      if (x + w > right) { row++; x = r.left; y = r.bottom + 8 + (row - 1) * rowH; }
+      if (x + w > right) { row++; x = r.left; y = under + 8 + (row - 1) * rowH; }
       chip.style.left = Math.round(x) + 'px'; chip.style.top = Math.round(y) + 'px';
       chip.style.visibility = '';
       x += w + gap;
@@ -863,23 +890,23 @@
     const g = CHIP_GROUPS[gk];
     const run = currentRun();
     if (run && run.lists && (run.lists[g.listKey] || []).map(Number).includes(id)) return; // already on the run
-    if (pending[gk].has(name)) pending[gk].delete(name); else pending[gk].add(name);
+    if (pend(gk).has(name)) pend(gk).delete(name); else pend(gk).add(name);
     layoutChips(gk);
     clearTimeout(commitTimers[gk]);
-    if (pending[gk].size) commitTimers[gk] = setTimeout(() => commitChips(gk), 1500);
+    if (pend(gk).size) commitTimers[gk] = setTimeout(() => commitChips(gk), 1500);
   }
   async function commitChips(gk) {
     const g = CHIP_GROUPS[gk];
-    if (quickBusy || !pending[gk].size) return;
-    const names = [...pending[gk]];
+    if (quickBusy || !pend(gk).size) return;
+    const names = [...pend(gk)];
     quickBusy = true; layoutChips(gk);
     const missed = [];
-    const what = gk === 'history' ? 'history' : gk === 'meds' ? 'medications' : 'allergies';
+    const what = gk === 'history' ? 'history' : gk === 'meds' ? 'medications' : gk === 'allergies' ? 'allergies' : 'transport';
     try {
-      const btn = anchorButton(g);
-      if (!btn) throw new Error('the Add button was not found');
-      showVeilMessage(`Adding ${what}…`, names.join(', '));
-      btn.click();
+      const btn = g.field ? fieldEl(g.field) : anchorButton(g);
+      if (!btn) throw new Error(g.field ? 'the field was not found' : 'the Add button was not found');
+      showVeilMessage(g.field ? 'Setting it in ESO…' : `Adding ${what}…`, names.join(', '));
+      (g.field ? (btn.querySelector('.shelf-click-indicator') || btn.querySelector('.field-area') || btn) : btn).click();
       const shelf = await until(() => Array.from(document.querySelectorAll('shelf-panel')).find(p => visible(p) && Array.from(p.querySelectorAll('h1, header')).some(h => g.title.test(norm(h.textContent)))), 5000);
       if (!shelf) throw new Error(`the ${what} list did not open`);
       const input = await until(() => shelf.querySelector('eso-search-input input, input[type=text]'), 3000);
@@ -891,10 +918,10 @@
         const li = await until(() => Array.from(shelf.querySelectorAll('li')).find(l => visible(l) && labelOf(l) === name.toUpperCase()), 3000);
         if (!li) { missed.push(name); continue; }
         const mark = li.querySelector('check-mark');
-        if (mark && mark.classList.contains('selected')) { pending[gk].delete(name); continue; } // already ticked
+        if (mark && mark.classList.contains('selected')) { pend(gk).delete(name); continue; } // already ticked
         (li.querySelector('.label-content') || li).click();
         const ok = await until(() => { const m = li.querySelector('check-mark'); return m && m.classList.contains('selected'); }, 1500);
-        if (!ok) missed.push(name); else pending[gk].delete(name);
+        if (!ok) missed.push(name); else pend(gk).delete(name);
       }
       await setSearch('');
       const okBtn = Array.from(shelf.querySelectorAll('header button, button')).find(b => /^OK$/i.test(norm(b.textContent)));
@@ -907,7 +934,7 @@
       return;
     }
     hideVeil(); quickBusy = false;
-    for (const n of names) if (!missed.includes(n)) pending[gk].delete(n);
+    for (const n of names) if (!missed.includes(n)) pend(gk).delete(n);
     layoutChips(gk);
     if (missed.length) alert('ESO Save: not found in ESO\'s list, add by hand: ' + missed.join(', '));
   }

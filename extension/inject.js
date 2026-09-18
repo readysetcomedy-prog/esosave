@@ -27,7 +27,7 @@
   if (ext) return;
   if (window.__esosave) return;
 
-  const VERSION = '0.5.2';
+  const VERSION = '0.5.3';
   const API_PREFIX_RE = /^\/ehr\/api\/+/i;
   const FAKE_OK_TEXT = '{"result":"Success","data":[]}';
   const PROBE_PATH = '/ehr/api/thirdpartydata/partners';
@@ -631,7 +631,13 @@
       run.lists.initialAcuity = model.patientComplaint.initialPatientAcuityId || null;
       run.lists.finalAcuity = model.patientComplaint.finalPatientAcuityId || null;
     }
+    if (view === 'Narrative' && model.patientTransport) {
+      run.lists = run.lists || {};
+      for (const k of TRANSPORT_KEYS) run.lists[k] = Array.isArray(model.patientTransport[k]) ? model.patientTransport[k].map(Number) : [];
+    }
   }
+  const TRANSPORT_KEYS = ['howPatientWasMovedToStretcherIds', 'patientMovedFromSceneToAmbulanceMethodIds', 'patientMovedFromAmbulanceToDestinationMethodIds', 'patientPositionDuringTransportIds'];
+  const TRANSPORT_ADDR_RE = /^narrative\.patientTransport\.(\w+Ids)\.\['(\d+)'\]$/;
   const LIST_ADDR_RE = /^patient\.(patientMedicalHistories|patientMedications|patientAllergies)\.\['(\d+)'\]$/;
   const LIST_KEY = { patientMedicalHistories: 'histories', patientMedications: 'meds', patientAllergies: 'allergies' };
   function noteListOps(run, ops) {
@@ -644,6 +650,14 @@
         const id = Number(m[2]);
         if (op.verb === 'ADD' && !run.lists[k].includes(id)) { run.lists[k].push(id); changed = true; }
         if (op.verb === 'DELETE' && run.lists[k].includes(id)) { run.lists[k] = run.lists[k].filter(x => x !== id); changed = true; }
+        continue;
+      }
+      const t = TRANSPORT_ADDR_RE.exec(op.address || '');
+      if (t && TRANSPORT_KEYS.includes(t[1])) {
+        run.lists = run.lists || {}; run.lists[t[1]] = run.lists[t[1]] || [];
+        const id = Number(t[2]);
+        if (op.verb === 'ADD' && !run.lists[t[1]].includes(id)) { run.lists[t[1]].push(id); changed = true; }
+        if (op.verb === 'DELETE' && run.lists[t[1]].includes(id)) { run.lists[t[1]] = run.lists[t[1]].filter(x => x !== id); changed = true; }
         continue;
       }
       if (op.address === 'narrative.patientComplaint.initialPatientAcuityId') { run.lists = run.lists || {}; run.lists.initialAcuity = op.value == null ? null : op.value; changed = true; }

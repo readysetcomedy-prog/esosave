@@ -153,7 +153,12 @@ export function createMockEso() {
       }
       if (!('patientHistoriesPertinentNegativeId' in model)) model.patientHistoriesPertinentNegativeId = null;
     }
-    if (name === 'Narrative') model.patientComplaint = { initialPatientAcuityId: null, finalPatientAcuityId: null, ...(model.patientComplaint || {}) };
+    if (name === 'Narrative') {
+      model.patientComplaint = { initialPatientAcuityId: null, finalPatientAcuityId: null, ...(model.patientComplaint || {}) };
+      const pt = model.patientTransport || {};
+      for (const k of ['howPatientWasMovedToStretcherIds', 'patientMovedFromSceneToAmbulanceMethodIds', 'patientMovedFromAmbulanceToDestinationMethodIds', 'patientPositionDuringTransportIds']) pt[k] = (pt[k] || []).map(x => /^\d+$/.test(String(x)) ? Number(x) : x);
+      model.patientTransport = pt;
+    }
     if (!('version' in model)) model.version = null;
     // a saved vital comes back the way ESO returns it: numbers for numeric text, every group
     // present with nulls, plus bookkeeping fields the app never saves
