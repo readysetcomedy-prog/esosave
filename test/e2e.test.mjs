@@ -737,12 +737,12 @@ test('disposition buttons set the whole set through ESO\'s pickers and quick-pic
   await app(() => document.querySelector('shelf-panel header button').click());
   await waitFor(async () => (await btns()).length === 6, { label: 'buttons back' });
   // the response-mode row: Emergent sets the field, the watcher fills the rest
-  const rb = () => T.page.evaluate(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick [data-group^=resp-]')).map(b => ({ g: b.dataset.group, cls: b.className })));
+  const rb = () => T.page.evaluate(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick [data-group=sr-resp]')).map(b => ({ text: b.textContent, cls: b.className })));
   await waitFor(async () => (await rb()).length === 3, { label: 'Emergent / Non-Emergent / Other… row' });
-  await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.quick [data-group=resp-e]').click());
+  await T.page.evaluate(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick [data-group=sr-resp]')).find(b => b.textContent === 'Emergent').click());
   await waitFor(async () => ((await T.record(id)).tree.incident?.response || {}).emdPerformedID === 6868, { label: 'Emergent set and follow-ons filled', timeout: 15000 });
   assert.equal((await T.record(id)).tree.incident.response.priorityId, 338);
-  await waitFor(async () => /done/.test((await rb()).find(b => b.g === 'resp-e').cls), { label: 'Emergent shown as current' });
+  await waitFor(async () => /added/.test((await rb()).find(b => b.text === 'Emergent').cls), { label: 'Emergent shown as current' });
   const unit = await T.page.evaluate(() => document.querySelector('eso-field[data-field-ref=UNITDISPOSITIONITEMID]').getBoundingClientRect().toJSON());
   const first = (await btns())[0];
   assert.ok(first.rect.bottom <= unit.top && Math.abs(first.rect.left - unit.left) < 4, 'row sits just above Unit Disposition');
@@ -818,6 +818,48 @@ test('choosing a response mode fills the follow-on fields that are empty and set
   await sleep(1500);
   const r3 = (await T.record(id3)).tree.incident.response;
   assert.equal(r3.responseModeLightsAndSirensUseId, undefined, 'lights & sirens left for the crew on a downgraded response');
+});
+
+test('Run Type, Mutual Aid, EMD Complaint and Requested By rows; Mutual Aid only once the run type is mutual aid', async () => {
+  const id = await freshRun();
+  await app(() => window.app.openTab('Incident'));
+  const row = (g) => T.page.evaluate((gg) => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll(`.quick [data-group=${gg}]`)).map(b => ({ text: b.textContent, cls: b.className, rect: b.getBoundingClientRect().toJSON() })), g);
+  await waitFor(async () => (await row('sr-runtype')).length === 7 && (await row('sr-emd')).length === 19 && (await row('sr-reqby')).length === 8, { label: 'rows drawn' });
+  assert.equal((await row('sr-mutual')).length, 0, 'Mutual Aid row hidden while the field is hidden');
+  const fld = await T.page.evaluate(() => document.querySelector('eso-field[data-field-ref=EMDCOMPLAINTID]').getBoundingClientRect().toJSON());
+  const emd = await row('sr-emd');
+  assert.ok(emd.every(c => c.rect.bottom <= fld.top + 2 && c.rect.right <= fld.right + 2), 'EMD chips wrap into rows above the field, within its width');
+  assert.ok(new Set(emd.map(c => Math.round(c.rect.top))).size >= 2, 'more than one row');
+  const tap = async (g, text) => { await waitFor(async () => (await row(g)).some(b => b.text === text && !/busy/.test(b.cls)), { label: text }); await T.page.evaluate(([gg, t]) => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll(`.quick [data-group=${gg}]`)).find(b => b.textContent === t).click(), [g, text]); };
+  const resp = async () => (await T.record(id)).tree.incident?.response || {};
+  await tap('sr-runtype', 'Hosp-Hosp'); // no ESO quick-pick for this one: goes through the picker
+  await waitFor(async () => (await resp()).runTypeId === 14627, { label: 'run type', timeout: 15000 });
+  await tap('sr-runtype', 'Mutual Aid');
+  await waitFor(async () => (await resp()).runTypeId === 328, { label: 'mutual aid run type', timeout: 15000 });
+  await waitFor(async () => (await row('sr-mutual')).length === 4, { label: 'Mutual Aid row appears with the field' });
+  await tap('sr-mutual', 'No Unit Available');
+  await waitFor(async () => (await resp()).mutualAidID === 1338313, { label: 'mutual aid', timeout: 15000 });
+  await tap('sr-emd', 'Seizure');
+  await waitFor(async () => (await resp()).emdComplaintId === 6845, { label: 'Convulsions/Seizure', timeout: 15000 });
+  await tap('sr-emd', 'Breathing'); // one of ESO's own quick-picks, taken through its picker since the field is set
+  await waitFor(async () => (await resp()).emdComplaintId === 6839, { label: 'Breathing Problem', timeout: 15000 });
+  await tap('sr-reqby', 'Law Enforcement');
+  await waitFor(async () => (await resp()).requestedByItemID === 438, { label: 'requested by', timeout: 15000 });
+  await waitFor(async () => (await row('sr-reqby')).some(b => b.text === 'Law Enforcement' && /added/.test(b.cls)), { label: 'shown as current' });
+  assert.equal(await app(() => document.querySelectorAll('shelf-panel').length), 0);
+});
+
+test('mechanism of injury: all four as chips, more than one allowed', async () => {
+  const id = await app(() => window.app.recordId);
+  await app(() => window.app.openTab('Narrative'));
+  const chips = () => T.page.evaluate(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .chip[data-group=mechanism]')).map(c => ({ short: c.textContent, cls: c.className })));
+  await waitFor(async () => (await chips()).length === 4, { label: 'four chips, no extra Other…' });
+  assert.deepEqual((await chips()).map(c => c.short), ['Blunt', 'Burn', 'Penetrating', 'Other']);
+  const tap = async (t) => { await waitFor(async () => (await chips()).some(c => c.short === t && !/busy/.test(c.cls)), { label: t }); await T.page.evaluate((tt) => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .chip[data-group=mechanism]')).find(c => c.textContent === tt).click(), t); };
+  await tap('Blunt'); await tap('Penetrating');
+  await waitFor(async () => ((await T.record(id)).tree.narrative?.injuries?.mechanismOfInjuryIds || []).length === 2, { label: 'both saved', timeout: 15000 });
+  assert.deepEqual((await T.record(id)).tree.narrative.injuries.mechanismOfInjuryIds.map(Number).sort(), [7117, 7120]);
+  await waitFor(async () => (await chips()).filter(c => /added/.test(c.cls)).length === 2, { label: 'both shown as set' });
 });
 
 test('quick acuity: red, yellow, green next to each acuity field, one tap picks it in ESO\'s list', async () => {

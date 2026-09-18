@@ -162,6 +162,7 @@ export function createMockEso() {
       const pt = model.patientTransport || {};
       for (const k of ['howPatientWasMovedToStretcherIds', 'patientMovedFromSceneToAmbulanceMethodIds', 'patientMovedFromAmbulanceToDestinationMethodIds', 'patientPositionDuringTransportIds']) pt[k] = (pt[k] || []).map(x => /^\d+$/.test(String(x)) ? Number(x) : x);
       model.patientTransport = pt;
+      model.injuries = { ...(model.injuries || {}), mechanismOfInjuryIds: ((model.injuries || {}).mechanismOfInjuryIds || []).map(x => /^\d+$/.test(String(x)) ? Number(x) : x) };
     }
     if (!('version' in model)) model.version = null;
     // a saved vital comes back the way ESO returns it: numbers for numeric text, every group

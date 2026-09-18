@@ -152,7 +152,9 @@
     app.addScalar('incident', `incident.additionalFactors.${DELAY_ADDR[f.dataset.fieldRef]}.['${id}']`, id);
     f.querySelector('.display-value').textContent = 'None/No Delay'; b.style.display = 'none';
   }));
+  const TRANSPORT_ADDR = { mechanismOfInjuryIds: 'narrative.injuries' };
   const TRANSPORT = {
+    mechanismOfInjuryIds: [[7117, 'Blunt'], [7118, 'Burn'], [7119, 'Other'], [7120, 'Penetrating']],
     howPatientWasMovedToStretcherIds: [[15110, 'Ambulated with assistance'], [15111, 'Ambulated to stretcher no assistance'], [15112, 'Lifted to stretcher'], [15113, 'Lifted to stretcher via draw-sheet'], [15114, 'Lifted to stretcher via Hoyer lift'], [15115, 'Lifted to stretcher with backboard'], [15119, 'Via stand and pivot'], [15120, 'Via stair chair']],
     patientMovedFromSceneToAmbulanceMethodIds: [[7180, 'Assisted/Walk'], [7182, 'Stairchair'], [7183, 'Stretcher'], [10552, 'Wheelchair']],
     patientMovedFromAmbulanceToDestinationMethodIds: [[7193, 'Assisted/Walk'], [7195, 'Stairchair'], [7196, 'Stretcher'], [10555, 'Wheelchair']],
@@ -160,9 +162,9 @@
   };
   app.transport = {};
   function renderTransport(body) {
-    const m = body && body.data && body.data.model && body.data.model.patientTransport;
+    const model = body && body.data && body.data.model;
     for (const f of document.querySelectorAll('#narrative eso-field.ms')) {
-      const k = f.dataset.key; const ids = ((m && m[k]) || []).map(Number); app.transport[k] = ids;
+      const k = f.dataset.key; const src = model && (k === 'mechanismOfInjuryIds' ? model.injuries : model.patientTransport); const ids = ((src && src[k]) || []).map(Number); app.transport[k] = ids;
       f.querySelector('.display-value').textContent = ids.map(id => (TRANSPORT[k].find(t => t[0] === id) || [0, id])[1]).join(', ');
     }
   }
@@ -170,8 +172,9 @@
     const f = ic.closest('eso-field'); const k = f.dataset.key;
     openShelf({ title: f.dataset.title, items: TRANSPORT[k], multi: true, checked: app.transport[k] || [], onOk: (ids) => {
       const had = app.transport[k] || [];
-      for (const id of ids) if (!had.includes(id)) app.addScalar('narrative', `narrative.patientTransport.${k}.['${id}']`, id);
-      for (const id of had) if (!ids.includes(id)) app.del('narrative', `narrative.patientTransport.${k}.['${id}']`, 'multiselect');
+      const base = TRANSPORT_ADDR[k] || 'narrative.patientTransport';
+      for (const id of ids) if (!had.includes(id)) app.addScalar('narrative', `${base}.${k}.['${id}']`, id);
+      for (const id of had) if (!ids.includes(id)) app.del('narrative', `${base}.${k}.['${id}']`, 'multiselect');
       app.transport[k] = ids;
       f.querySelector('.display-value').textContent = ids.map(id => (TRANSPORT[k].find(t => t[0] === id) || [0, id])[1]).join(', ');
     } });
@@ -179,6 +182,10 @@
   // ---- single-select fields the way ESO draws them: display value, click indicator, and quick-pick
   // buttons shown while the field is empty. Ids and names are ESO's.
   const SS = {
+    RUNTYPEID: { label: 'Run Type', addr: 'incident.response.runTypeId', list: [[325, 'Emergency Interfacility Transfer'], [329, 'Standby'], [324, 'Emergency Response (Intercept)'], [328, 'Emergency Response (Mutual Aid)'], [323, 'Emergency Response (Primary Response Area)'], [14628, 'Hospital to Non-Hospital Facility Transfer'], [14627, 'Hospital-to-Hospital Transfer'], [14630, 'Non-Hospital Facility to Hospital Transfer']], quick: { 323: '911 Response', 325: 'Emergency IFT', 324: 'Emergency Response (Intercept)' } },
+    MUTUALAIDID: { label: 'Mutual Aid', addr: 'incident.response.mutualAidID', list: [[12635, 'Mutual Aid Given'], [12637, 'Mutual Aid Received'], [1338313, 'No Unit Available'], [334, 'Rendezvous for level of care'], [335, 'Rendezvous for patient pickup']], quick: { 334: 'Rv for level of care', 335: 'Rv for patient pickup' } },
+    EMDCOMPLAINTID: { label: 'EMD Complaint', addr: 'incident.response.emdComplaintId', list: [[6834, 'Abdominal Pain/Problems'], [12706, 'Altered Mental Status'], [6839, 'Breathing Problem'], [6843, 'Chest Pain (Non-Traumatic)'], [6845, 'Convulsions/Seizure'], [6850, 'Falls'], [6859, 'Sick Person'], [6862, 'Traffic Accident']], quick: { 6839: 'Breathing Problem', 6859: 'Sick Person', 6862: 'Traffic Accident' } },
+    REQUESTEDBYITEMID: { label: 'Requested By', addr: 'incident.response.requestedByItemID', list: [[433, 'Patient'], [434, 'Family'], [435, 'Bystander'], [436, 'Physician'], [438, 'Law Enforcement'], [9356, 'Fire Department'], [12696, 'Other Healthcare Provider'], [439, 'Other']], quick: { 433: 'Patient', 434: 'Family', 435: 'Bystander' } },
     PRIORITYID: { label: 'Response Mode to Scene', addr: 'incident.response.priorityId', list: [[338, 'Emergent'], [339, 'Non-Emergent'], [336, 'Emergent Downgraded to Non-Emergent'], [337, 'Non-Emergent Upgraded to Emergent']], quick: { 338: 'Emergent', 336: 'Emergent Downgraded to Non-Emergent', 339: 'Non-Emergent' } },
     RESPONSEMODELIGHTSANDSIRENSUSE: { label: 'Response Mode Lights & Sirens Use', addr: 'incident.response.responseModeLightsAndSirensUseId', list: [[14797, 'Lights and Sirens'], [14798, 'Lights and No Sirens'], [14799, 'No Lights or Sirens']], quick: { 14797: 'Lights & Sirens', 14799: 'No Lights or Sirens', 14798: 'Lights and No Sirens' } },
     RESPONSEMODEINTERSECTIONNAVIGATION: { label: 'Response Mode Intersection Navigation', addr: 'incident.response.responseModeIntersectionNavigationId', list: [[14803, 'Against Normal Light Patterns'], [14804, 'With Automated Light Changing Technology'], [14805, 'With Normal Light Patterns']], quick: { 14805: 'With Normal Light Pattern', 14803: 'Against Normal Light Pattern', 14804: 'With Light Change Tech' } },
@@ -210,6 +217,7 @@
     const qp = f.querySelector('.quick-picks'); if (qp) qp.style.display = names ? 'none' : '';
     // like ESO: patient/transport dispositions only apply once contact was made; transport mode only when transporting
     if (ref === 'UNITDISPOSITIONITEMID') for (const dep of ['PATIENTEVALUATIONCAREDISPOSITIONITEMID', 'TRANSPORTDISPOSITIONITEMID']) document.querySelector(`eso-field[data-field-ref="${dep}"]`).toggleAttribute('disabled', v !== 14402);
+    if (ref === 'RUNTYPEID') document.querySelector('eso-field[data-field-ref="MUTUALAIDID"]').style.display = v === 328 ? '' : 'none'; // ESO only shows Mutual Aid for that run type
     if (ref === 'TRANSPORTDISPOSITIONITEMID') for (const dep of ['TRANSPORTMODEID', 'TRANSPORTMODELIGHTSANDSIRENSUSE', 'TRANSPORTMETHODID']) document.querySelector(`eso-field[data-field-ref="${dep}"]`).toggleAttribute('disabled', !(v === 14435 || v === 14436));
   }
   function ssSet(ref, id) {
@@ -218,7 +226,7 @@
     else { app.ss[ref] = id; app.edit('incident', d.addr, id, 'singleselect'); }
     ssRender(ref);
   }
-  document.getElementById('response').innerHTML = ['PRIORITYID', 'RESPONSEMODELIGHTSANDSIRENSUSE', 'RESPONSEMODEINTERSECTIONNAVIGATION', 'RESPONSEMODESCHEDULED', 'RESPONSEMODESPEED', 'EMDPERFORMEDID'].map(ssHtml).join('');
+  document.getElementById('response').innerHTML = ['RUNTYPEID', 'MUTUALAIDID', 'PRIORITYID', 'RESPONSEMODELIGHTSANDSIRENSUSE', 'RESPONSEMODEINTERSECTIONNAVIGATION', 'RESPONSEMODESCHEDULED', 'RESPONSEMODESPEED', 'EMDCOMPLAINTID', 'EMDPERFORMEDID', 'REQUESTEDBYITEMID'].map(ssHtml).join('');
   document.getElementById('disposition').innerHTML = ['UNITDISPOSITIONITEMID', 'PATIENTEVALUATIONCAREDISPOSITIONITEMID', 'CREWDISPOSITIONITEMID', 'TRANSPORTDISPOSITIONITEMID', 'REFUSALRELEASEITEMIDS', 'TRANSPORTMODEID', 'TRANSPORTMODELIGHTSANDSIRENSUSE', 'TRANSPORTMETHODID', 'LEVELOFSERVICEID'].map(ssHtml).join('');
   for (const ref of Object.keys(SS)) {
     const f = document.querySelector(`eso-field[data-field-ref="${ref}"]`); if (!f) continue;

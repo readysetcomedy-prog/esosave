@@ -27,7 +27,7 @@
   if (ext) return;
   if (window.__esosave) return;
 
-  const VERSION = '0.8.0';
+  const VERSION = '0.8.1';
   const API_PREFIX_RE = /^\/ehr\/api\/+/i;
   const FAKE_OK_TEXT = '{"result":"Success","data":[]}';
   const PROBE_PATH = '/ehr/api/thirdpartydata/partners';
@@ -635,9 +635,13 @@
       run.lists = run.lists || {};
       for (const k of TRANSPORT_KEYS) run.lists[k] = Array.isArray(model.patientTransport[k]) ? model.patientTransport[k].map(Number) : [];
     }
+    if (view === 'Narrative' && model.injuries) {
+      run.lists = run.lists || {};
+      run.lists.mechanismOfInjuryIds = Array.isArray(model.injuries.mechanismOfInjuryIds) ? model.injuries.mechanismOfInjuryIds.map(Number) : [];
+    }
   }
   const TRANSPORT_KEYS = ['howPatientWasMovedToStretcherIds', 'patientMovedFromSceneToAmbulanceMethodIds', 'patientMovedFromAmbulanceToDestinationMethodIds', 'patientPositionDuringTransportIds'];
-  const TRANSPORT_ADDR_RE = /^narrative\.patientTransport\.(\w+Ids)\.\['(\d+)'\]$/;
+  const TRANSPORT_ADDR_RE = /^narrative\.(?:patientTransport|injuries)\.(\w+Ids)\.\['(\d+)'\]$/;
   const LIST_ADDR_RE = /^patient\.(patientMedicalHistories|patientMedications|patientAllergies)\.\['(\d+)'\]$/;
   const LIST_KEY = { patientMedicalHistories: 'histories', patientMedications: 'meds', patientAllergies: 'allergies' };
   function noteListOps(run, ops) {
@@ -653,7 +657,7 @@
         continue;
       }
       const t = TRANSPORT_ADDR_RE.exec(op.address || '');
-      if (t && TRANSPORT_KEYS.includes(t[1])) {
+      if (t && (TRANSPORT_KEYS.includes(t[1]) || t[1] === 'mechanismOfInjuryIds')) {
         run.lists = run.lists || {}; run.lists[t[1]] = run.lists[t[1]] || [];
         const id = Number(t[2]);
         if (op.verb === 'ADD' && !run.lists[t[1]].includes(id)) { run.lists[t[1]].push(id); changed = true; }

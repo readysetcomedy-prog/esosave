@@ -49,7 +49,9 @@ to bad signal or a hung page.
   Transport Mode or Reason for Refusal in red until answered; choosing Emergent or Non-Emergent for
   the response or transport mode fills the lights/sirens, intersection, scheduled, speed and method
   fields still empty and sets EMD Performed to No. Emergent / Non-Emergent buttons sit above
-  Response Mode to Scene. Every row ends with "Other…", which simply opens ESO's own list. Red, yellow and green buttons next to Initial and Final Patient Acuity pick the
+  Response Mode to Scene, and rows for Run Type, Mutual Aid, EMD Complaint and Requested By above
+  their fields; Mechanism of Injury chips on the Narrative tab. Every row ends with "Other…", which
+  simply opens ESO's own list. Red, yellow and green buttons next to Initial and Final Patient Acuity pick the
   colour in ESO's list. Nothing is written behind the app's back: the buttons do what a finger would
   in ESO's pickers, so the screen and the save are ESO's. Each group is a setting, on by default.
 - **Copy a vital.** A small copy button floats just left of each saved vital's time in the Vitals

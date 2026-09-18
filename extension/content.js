@@ -43,7 +43,7 @@
   const sget = (keys) => new Promise(res => storage.get(keys, (v) => res(v || {})));
   const sset = (obj) => new Promise(res => storage.set(obj, () => res()));
   const sremove = (keys) => new Promise(res => storage.remove(keys, () => res()));
-  const DEFAULT_SETTINGS = { purgeHoursAfterLock: 0, probeSec: 20, heldProbeSec: 8, warmTabs: true, cardCollapsed: false, showTimes: true, sendPrompt: true, unsentList: true, quickHistory: true, quickMeds: true, quickAllergies: true, quickAcuity: true, quickDelays: true, quickTransport: true, quickAssess: true, quickDisposition: true, autoResponse: true, quickFacilities: true, facilitySending: [], facilityDestination: [] };
+  const DEFAULT_SETTINGS = { purgeHoursAfterLock: 0, probeSec: 20, heldProbeSec: 8, warmTabs: true, cardCollapsed: false, showTimes: true, sendPrompt: true, unsentList: true, quickHistory: true, quickMeds: true, quickAllergies: true, quickAcuity: true, quickDelays: true, quickTransport: true, quickAssess: true, quickDisposition: true, autoResponse: true, quickIncident: true, quickMechanism: true, quickFacilities: true, facilitySending: [], facilityDestination: [] };
   // The agency's standard facility chips (ids and names from ESO's saved facilities). Every install
   // starts with these; Settings can add or remove per device.
   const FAC = {
@@ -362,6 +362,8 @@
         `<label class="s"><input type="checkbox" id="qacuity" ${settings.quickAcuity === false ? '' : 'checked'}> Acuity: red, yellow and green buttons next to Initial and Final Patient Acuity (Narrative tab)</label>` +
         `<label class="s"><input type="checkbox" id="qtransport" ${settings.quickTransport === false ? '' : 'checked'}> Transport: chips for how the patient was moved and positioned (Narrative tab)</label>` +
         `<label class="s"><input type="checkbox" id="qfacilities" ${settings.quickFacilities === false ? '' : 'checked'}> Facilities: chips for saved facilities above the Scene and Destination locations (Incident tab)</label>` +
+        `<label class="s"><input type="checkbox" id="qincident" ${settings.quickIncident === false ? '' : 'checked'}> Incident: Run Type, Mutual Aid, EMD Complaint and Requested By rows above their fields</label>` +
+        `<label class="s"><input type="checkbox" id="qmechanism" ${settings.quickMechanism === false ? '' : 'checked'}> Mechanism of injury: Blunt, Burn, Penetrating, Other chips (Narrative tab)</label>` +
         `<label class="s"><input type="checkbox" id="qdisposition" ${settings.quickDisposition === false ? '' : 'checked'}> Disposition: Transported ALS/BLS, Refusal, Canceled (Prior/Scene) buttons above Unit Disposition; Transport Mode and Reason for Refusal outlined in red until answered (Incident tab)</label>` +
         `<label class="s"><input type="checkbox" id="qautoresp" ${settings.autoResponse === false ? '' : 'checked'}> Auto-fill: choosing Emergent or Non-Emergent (response or transport mode) fills the lights/sirens, intersection, scheduled, speed and method fields that are still empty, and sets EMD Performed to No</label>` +
         `<label class="s"><input type="checkbox" id="qassess" ${settings.quickAssess === false ? '' : 'checked'}> Assessment: "All normal" (presses No Abnormalities on every category in ESO's Quick Ax) and "A&amp;Ox4" on each assessment (Assessments tab)</label>` +
@@ -453,6 +455,8 @@
       settings.quickFacilities = !!panel.querySelector('#qfacilities').checked;
       settings.quickAssess = !!panel.querySelector('#qassess').checked;
       settings.quickDisposition = !!panel.querySelector('#qdisposition').checked;
+      settings.quickIncident = !!panel.querySelector('#qincident').checked;
+      settings.quickMechanism = !!panel.querySelector('#qmechanism').checked;
       settings.autoResponse = !!panel.querySelector('#qautoresp').checked;
       layoutQuick();
       await sset({ settings }); toPage('settings', settings); settingsOpen = false; renderPanel(); renderTimes();
@@ -845,6 +849,10 @@
       setting: 'quickTransport', tab: 'Narrative', field: 'PATIENTPOSITIONDURINGTRANSPORTIDS', title: /position during transport/i, listKey: 'patientPositionDuringTransportIds',
       chips: [['Fowlers', 'Fowlers (Semi-Upright Sitting)', 7186], ['Semi-Fowlers', 'Semi-Fowlers', 7189], ['Supine', 'Supine', 7191], ['Sitting', 'Sitting', 7190]],
     },
+    mechanism: {
+      setting: 'quickMechanism', tab: 'Narrative', field: 'MECHANISMOFINJURYIDS', title: /mechanism/i, listKey: 'mechanismOfInjuryIds', noOther: true,
+      chips: [['Blunt', 'Blunt', 7117], ['Burn', 'Burn', 7118], ['Penetrating', 'Penetrating', 7120], ['Other', 'Other', 7119]],
+    },
     allergies: {
       setting: 'quickAllergies', button: /^Add Allergies$/i, title: /^Add Allergies$/i, listKey: 'allergies',
       chips: [
@@ -931,7 +939,7 @@
     let x = r.left + r.width + 12, y = r.top + (r.height - 28) / 2, row = 0;
     const under = g.field ? fr.bottom : r.bottom;
     const layer = ensureQuickLayer();
-    for (const [short, name, id] of [...g.chips, ['Other…', null, 'other']]) {
+    for (const [short, name, id] of [...g.chips, ...(g.noOther ? [] : [['Other…', null, 'other']])]) {
       const chip = quickEl(`${gk}:${id}`, () => {
         const c = document.createElement('button'); c.type = 'button'; c.className = 'chip' + (id === 'other' ? ' other' : ''); c.textContent = short; c.title = name || 'Open ESO\'s full list'; c.dataset.group = gk;
         c.addEventListener('pointerdown', (e) => e.stopPropagation());
@@ -1412,38 +1420,52 @@
   }
   // ---- response mode to scene: Emergent / Non-Emergent / Other… above the field, one tap even
   // once the field is set (ESO's own quick-picks only show while it is empty)
-  const RESPONSE = [['e', 'Emergent', 'Emergent', 'Emergent'], ['n', 'Non-Emergent', 'Non-Emergent', 'Non-Emergent']];
-  function layoutResponse() {
+  // Rows of one-tap choices above a single-select field, one tap even once the field is set (ESO's
+  // own quick-picks only show while it is empty). [label, ESO's full name, ESO quick-pick label]
+  const SINGLE_ROWS = {
+    resp: { setting: 'quickDisposition', ref: 'PRIORITYID', what: 'Response Mode', items: [['Emergent', 'Emergent', 'Emergent'], ['Non-Emergent', 'Non-Emergent', 'Non-Emergent']] },
+    runtype: { setting: 'quickIncident', ref: 'RUNTYPEID', what: 'Run Type', items: [['911/PL', 'Emergency Response (Primary Response Area)', '911 Response'], ['Hosp-Hosp', 'Hospital-to-Hospital Transfer'], ['Intercept', 'Emergency Response (Intercept)', 'Emergency Response (Intercept)'], ['Mutual Aid', 'Emergency Response (Mutual Aid)'], ['Hosp-NonHosp', 'Hospital to Non-Hospital Facility Transfer'], ['NonHosp-Hosp', 'Non-Hospital Facility to Hospital Transfer']] },
+    mutual: { setting: 'quickIncident', ref: 'MUTUALAIDID', what: 'Mutual Aid', items: [['Given', 'Mutual Aid Given'], ['Received', 'Mutual Aid Received'], ['No Unit Available', 'No Unit Available']] },
+    emd: { setting: 'quickIncident', ref: 'EMDCOMPLAINTID', what: 'EMD Complaint', items: [['Breathing', 'Breathing Problem', 'Breathing Problem'], ['Sick Person', 'Sick Person', 'Sick Person'], ['Traffic Accident', 'Traffic Accident', 'Traffic Accident'], ['Abd Pain', 'Abdominal Pain/Problems'], ['AMS', 'Altered Mental Status'], ['Allergic', 'Allergic Reaction/Stings'], ['Assault', 'Assault'], ['Chest Pain', 'Chest Pain (Non-Traumatic)'], ['Cardiac Arrest', 'Cardiac Arrest/Death'], ['Diabetic', 'Diabetic Problem'], ['Falls', 'Falls'], ['Hemorrhage/Lac', 'Hemorrhage/Laceration'], ['Medical Alarm', 'Medical Alarm'], ['Overdose', 'Overdose/Poisoning/Ingestion'], ['Pregnancy', 'Pregnancy/Childbirth'], ['Psych', 'Psychiatric Problem/Abnormal Behavior/Suicide Attempt'], ['Seizure', 'Convulsions/Seizure'], ['Stroke', 'Stroke/CVA']] },
+    reqby: { setting: 'quickIncident', ref: 'REQUESTEDBYITEMID', what: 'Requested By', items: [['Patient', 'Patient', 'Patient'], ['Family', 'Family', 'Family'], ['Bystander', 'Bystander', 'Bystander'], ['Physician', 'Physician'], ['Law Enforcement', 'Law Enforcement'], ['Fire Dept', 'Fire Department'], ['Other Healthcare', 'Other Healthcare Provider']] },
+  };
+  function layoutSingleRows() {
     const run = currentRun();
-    const f = settings.quickDisposition === false || !run || run.locked || !onTab('Incident') || shelfOpen() ? null : fieldEl('PRIORITYID');
-    if (!f) { dropQuick('rp:'); return; }
-    const r = f.getBoundingClientRect();
-    if (!r.width) { dropQuick('rp:'); return; }
-    if (f.style.marginTop !== '44px') f.style.marginTop = '44px';
-    const cur = norm(fieldValue('PRIORITYID')).toUpperCase();
-    let x = r.left;
-    for (const [k, text, full, quick] of [...RESPONSE, ['other', 'Other…', null, null]]) {
-      const b = quickEl('rp:' + k, () => {
-        const el = document.createElement('button'); el.type = 'button'; el.className = 'allnone' + (k === 'other' ? ' other' : ''); el.dataset.group = 'resp-' + k; el.textContent = text; el.title = k === 'other' ? 'Open ESO\'s Response Mode list' : 'Response Mode to Scene: ' + full;
-        el.addEventListener('pointerdown', (e) => e.stopPropagation());
-        el.addEventListener('click', async (e) => {
-          e.preventDefault(); e.stopPropagation();
-          if (quickBusy) return;
-          const f2 = fieldEl('PRIORITYID'); if (!f2) return;
-          if (k === 'other') { (f2.querySelector('.shelf-click-indicator') || f2).click(); return; }
-          quickBusy = true; layoutResponse();
-          try { await setSingle('PRIORITYID', full, quick); } catch (err) { alert('ESO Save: could not set the response mode. ' + (err && err.message ? err.message : '')); }
-          quickBusy = false; layoutResponse();
+    for (const [rk, row] of Object.entries(SINGLE_ROWS)) {
+      const f = settings[row.setting] === false || !run || run.locked || !onTab('Incident') || shelfOpen() ? null : fieldEl(row.ref);
+      if (!f) { dropQuick(`sr:${rk}:`); continue; }
+      const r = f.getBoundingClientRect();
+      if (!r.width) { dropQuick(`sr:${rk}:`); continue; }
+      const cur = norm(fieldValue(row.ref)).toUpperCase();
+      const entries = [...row.items.map((it, i) => [String(i), ...it]), ['other', 'Other…', null, null]];
+      // measure, wrap within the field width, then place the rows above the field
+      const els = entries.map(([k, text, full, quick]) => {
+        const b = quickEl(`sr:${rk}:${k}`, () => {
+          const el = document.createElement('button'); el.type = 'button'; el.className = 'chip' + (k === 'other' ? ' other' : ''); el.dataset.group = 'sr-' + rk; el.textContent = text; el.title = k === 'other' ? `Open ESO's ${row.what} list` : `${row.what}: ${full}`;
+          el.addEventListener('pointerdown', (e) => e.stopPropagation());
+          el.addEventListener('click', async (e) => {
+            e.preventDefault(); e.stopPropagation();
+            if (quickBusy) return;
+            const f2 = fieldEl(row.ref); if (!f2) return;
+            if (k === 'other') { (f2.querySelector('.shelf-click-indicator') || f2).click(); return; }
+            quickBusy = true; layoutSingleRows();
+            try { await setSingle(row.ref, full, quick); } catch (err) { alert(`ESO Save: could not set ${row.what}. ` + (err && err.message ? err.message : '')); }
+            quickBusy = false; layoutSingleRows();
+          });
+          return el;
         });
-        return el;
+        b.classList.toggle('added', k !== 'other' && !!full && cur === full.toUpperCase());
+        b.classList.toggle('busy', quickBusy);
+        b.style.display = 'block'; b.style.visibility = 'hidden';
+        return b;
       });
-      b.classList.toggle('done', k !== 'other' && cur === full.toUpperCase());
-      b.classList.toggle('busy', quickBusy);
-      b.style.visibility = 'hidden'; b.style.display = 'block';
-      const w = b.getBoundingClientRect().width || 100;
-      b.style.left = Math.round(x) + 'px'; b.style.top = Math.round(r.top - 40) + 'px';
-      b.style.visibility = '';
-      x += w + 8;
+      const gap = 6, rowH = 34;
+      const lines = [[]]; let x = 0;
+      for (const b of els) { const w = b.getBoundingClientRect().width || 80; if (x + w > r.width && lines[lines.length - 1].length) { lines.push([]); x = 0; } lines[lines.length - 1].push([b, w]); x += w + gap; }
+      const need = lines.length * rowH + 10;
+      if (f.style.marginTop !== need + 'px') f.style.marginTop = need + 'px';
+      const top0 = r.top - lines.length * rowH - 6;
+      lines.forEach((line, li) => { let lx = r.left; for (const [b, w] of line) { b.style.left = Math.round(lx) + 'px'; b.style.top = Math.round(top0 + li * rowH) + 'px'; b.style.visibility = ''; lx += w + gap; } });
     }
   }
   function layoutNeeds() {
@@ -1508,7 +1530,7 @@
   function layoutQuick() {
     try { layoutAssess(); } catch (e) { /* keep going */ }
     try { layoutDisposition(); } catch (e) { /* keep going */ }
-    try { layoutResponse(); } catch (e) { /* keep going */ }
+    try { layoutSingleRows(); } catch (e) { /* keep going */ }
     try { layoutNeeds(); } catch (e) { /* keep going */ }
     try { watchModes(); } catch (e) { /* keep going */ }
     for (const gk of Object.keys(CHIP_GROUPS)) { try { layoutChips(gk); } catch (e) { /* keep going */ } }
