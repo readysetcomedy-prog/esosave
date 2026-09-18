@@ -40,8 +40,9 @@ to bad signal or a hung page.
   any ESO picker is open, and every button scrolls under
   ESO's top bar and tab strip with the page. A Race row (Asian, Latino: the rest are ESO's own
   quick-picks) sits under the Race label, and 0-9 pads under Weight and Height (feet and inches): digits gather beside the field with a
-  green OK; OK opens ESO's own number dial once, enters the value and presses its OK, so the dial
-  does not open on every tap; ⌫ takes the last digit back first. On the Incident tab, one "All: None/No Delay" button above the delay fields
+  green OK; OK opens ESO's own number dial once, presses its keys for each digit the way a finger
+  would (typing into its box only if the keys do not take), and presses its OK, so the dial does
+  not open on every tap; ⌫ takes the last digit back first. On the Incident tab, one "All: None/No Delay" button above the delay fields
   presses ESO's own None button on every delay still empty, leaving any already answered alone. On
   the Narrative tab, chips after each transport field (moved to stretcher, to and from the
   ambulance, position during transport) pick in ESO's list the same way. Facility chips under the
@@ -85,6 +86,9 @@ to bad signal or a hung page.
   sees it too and nobody else does; held changes still push whoever is signed in. Only those
   settings go to the table (`supabase/esosave_users.sql`), never a run nor which runs were
   worked; with no signal the tablet's copy stands and the row is written when signal returns.
+- **Crew roles.** On the Incident tab every role (Lead Scene, Lead Trans, Drv Resp, Drv Trans,
+  Other Scene, Other Trans, Other) sits above each crew member. A tap does what a finger would:
+  opens the member, opens Roles, ticks the role, OK, OK. A second tap takes the role back out.
 - **Loaded mileage.** Once the scene and the destination both have an address (a predefined
   place, or a typed street, city, state and zip), ESO's own Calculate Mileage button is pressed
   once for the crew, and again only if an address changes. A complaint ESO raises about it is

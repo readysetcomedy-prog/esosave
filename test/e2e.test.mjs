@@ -768,9 +768,8 @@ test('disposition buttons set the whole set through ESO\'s pickers and quick-pic
   await waitFor(async () => (await btns()).length === 6, { label: 'buttons back' });
   // no row of ours over Response Mode to Scene: ESO shows Emergent / Non-Emergent / Other itself
   assert.equal(await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick [data-group=sr-resp]').length), 0);
-  const unit = await T.page.evaluate(() => { const f = document.querySelector('eso-field[data-field-ref=UNITDISPOSITIONITEMID]'); return { f: f.getBoundingClientRect().toJSON(), lab: f.querySelector('label').getBoundingClientRect().toJSON(), area: (f.querySelector('eso-control') || f.querySelector('.field-area')).getBoundingClientRect().toJSON() }; });
-  const first = (await btns())[0];
-  assert.ok(first.rect.top >= unit.lab.bottom && first.rect.bottom <= unit.area.top && Math.abs(first.rect.left - unit.f.left) < 4, 'row sits under the Unit Disposition label, above its value');
+  // (the layout settles a moment after rows above reserve their room)
+  await waitFor(async () => { const unit = await T.page.evaluate(() => { const f = document.querySelector('eso-field[data-field-ref=UNITDISPOSITIONITEMID]'); return { f: f.getBoundingClientRect().toJSON(), lab: f.querySelector('label').getBoundingClientRect().toJSON(), area: (f.querySelector('eso-control') || f.querySelector('.field-area')).getBoundingClientRect().toJSON() }; }); const first = (await btns())[0]; return first && first.rect.top >= unit.lab.bottom && first.rect.bottom <= unit.area.top && Math.abs(first.rect.left - unit.f.left) < 4; }, { label: 'row sits under the Unit Disposition label, above its value' });
   const press = async (g) => { await waitFor(async () => { const b = (await btns()).find(x => x.g === g); return b && !/busy/.test(b.cls); }, { label: g }); await T.page.evaluate((gg) => document.getElementById('esosave-host').shadowRoot.querySelector(`.quick [data-group=${gg}]`).click(), g); };
   const dispo = async () => (await T.record(id)).tree.incident?.disposition || {};
   // Transported ALS
@@ -855,9 +854,9 @@ test('Run Type, Mutual Aid, EMD Complaint and Requested By rows; Mutual Aid only
   assert.deepEqual((await row('sr-reqby')).map(b => b.text), ['Physician', 'Law Enforcement', 'Fire Dept', 'Other Healthcare']);
   assert.ok(!(await row('sr-emd')).some(b => /Breathing|Sick Person|Traffic|Other/.test(b.text)));
   assert.equal((await row('sr-mutual')).length, 0, 'Mutual Aid row hidden while ESO keeps the field folded away (its box still measures)');
-  const fld = await T.page.evaluate(() => { const f = document.querySelector('eso-field[data-field-ref=EMDCOMPLAINTID]'); return { f: f.getBoundingClientRect().toJSON(), lab: f.querySelector('label').getBoundingClientRect().toJSON(), area: (f.querySelector('eso-control') || f.querySelector('.field-area')).getBoundingClientRect().toJSON() }; });
+  const geom = () => T.page.evaluate(() => { const f = document.querySelector('eso-field[data-field-ref=EMDCOMPLAINTID]'); return { f: f.getBoundingClientRect().toJSON(), lab: f.querySelector('label').getBoundingClientRect().toJSON(), area: (f.querySelector('eso-control') || f.querySelector('.field-area')).getBoundingClientRect().toJSON() }; });
+  await waitFor(async () => { const fld = await geom(); const emd = await row('sr-emd'); return emd.length === 15 && emd.every(c => c.rect.top >= fld.lab.bottom && c.rect.bottom <= fld.area.top + 2 && c.rect.right <= fld.f.right + 2); }, { label: 'EMD chips wrap into rows under the label, above the value, within the field width' });
   const emd = await row('sr-emd');
-  assert.ok(emd.every(c => c.rect.top >= fld.lab.bottom && c.rect.bottom <= fld.area.top + 2 && c.rect.right <= fld.f.right + 2), 'EMD chips wrap into rows under the label, above the value, within the field width');
   assert.ok(new Set(emd.map(c => Math.round(c.rect.top))).size >= 2, 'more than one row');
   const tap = async (g, text) => { await waitFor(async () => (await row(g)).some(b => b.text === text && !/busy/.test(b.cls)), { label: text }); await T.page.evaluate(([gg, t]) => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll(`.quick [data-group=${gg}]`)).find(b => b.textContent === t).click(), [g, text]); };
   const resp = async () => (await T.record(id)).tree.incident?.response || {};
@@ -991,6 +990,27 @@ test('every quick button scrolls under ESO\'s banner: the layers are clipped at 
   await sleep(300);
   assert.equal(await layer(), 'inset(64px 0px 0px)', 'still clipped after a scroll');
   await app(() => window.scrollTo(0, 0));
+});
+
+test('crew roles: every role, shortened, above each crew member; a tap opens the member, the Roles list, ticks, OK, OK; a second tap takes it out', async () => {
+  const id = await freshRun();
+  await app(() => window.app.openTab('Incident'));
+  const chips = () => T.page.evaluate(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .chip[data-group=crew]')).map(c => ({ text: c.textContent, member: c.dataset.member, cls: c.className, rect: c.getBoundingClientRect().toJSON() })));
+  await waitFor(async () => (await chips()).length === 7, { label: 'seven role chips for the one crew member' });
+  assert.deepEqual((await chips()).map(c => c.text), ['Lead Scene', 'Lead Trans', 'Drv Resp', 'Drv Trans', 'Other Scene', 'Other Trans', 'Other']);
+  assert.equal((await chips())[0].member, 'TEST, MEDIC');
+  await waitFor(async () => { const row = await T.page.evaluate(() => document.querySelector('crew-list grid-row').getBoundingClientRect().toJSON()); const cs = await chips(); return cs.length === 7 && cs.every(c => c.rect.bottom <= row.top + 2); }, { label: 'above the member' });
+  const tap = async (t) => { await waitFor(async () => (await chips()).some(c => c.text === t && !/busy/.test(c.cls)), { label: t }); await T.page.evaluate((tt) => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .chip[data-group=crew]')).find(c => c.textContent === tt).click(), t); };
+  const roles = async () => { const c = ((await T.record(id)).tree.incident?.crew || [])[0]; return (c && c.roleIds || []).map(Number).sort(); };
+  await tap('Lead Trans');
+  await waitFor(async () => (await roles()).join() === '14108', { label: 'Lead - Transport saved through the app', timeout: 15000 });
+  await waitFor(async () => (await chips()).some(c => c.text === 'Lead Trans' && /added/.test(c.cls)), { label: 'shown as set' });
+  assert.equal(await app(() => document.querySelectorAll('shelf-panel').length), 0, 'both shelves closed');
+  await tap('Drv Trans');
+  await waitFor(async () => (await roles()).join() === '14103,14108', { label: 'a second role', timeout: 15000 });
+  await tap('Lead Trans'); // out again
+  await waitFor(async () => (await roles()).join() === '14103', { label: 'taken back out', timeout: 15000 });
+  await waitFor(async () => !(await chips()).some(c => c.text === 'Lead Trans' && /added/.test(c.cls)), { label: 'chip shows it is out' });
 });
 
 test('quick acuity: red, yellow, green next to each acuity field, one tap picks it in ESO\'s list', async () => {

@@ -74,7 +74,7 @@
         app.assessments = list.map(a => ({ key: String(a.itemId), time: String(a.assessmentTime || '').slice(-8), findings: (a.findings || []).map(f => ({ key: String(f.itemId), findingId: f.findingId, findingLocationId: f.findingLocationId, present: f.present })) }));
         renderAx();
       }
-      if (view === 'Incident') { renderDelays(out.body); renderSS(out.body); loadBundle(); }
+      if (view === 'Incident') { renderDelays(out.body); renderSS(out.body); renderCrew(out.body); loadBundle(); }
       document.getElementById('narrative').style.display = view === 'Narrative' ? 'block' : 'none';
       document.getElementById('signatures').style.display = view === 'Signatures' ? 'block' : 'none';
       if (view === 'Patient') { renderHistory(out.body); renderSS(out.body, 'patient'); renderNum(out.body, 'patient'); }
@@ -371,6 +371,32 @@
       } });
     });
   });
+  // ---- crew, the way ESO draws it in multi-role mode: tap a member to edit (a shelf with the
+  // Roles multi-select, whose picker is a shelf on top); OK saves the role adds/deletes
+  const CREWROLE = [[14107, 'Lead - At Scene'], [14108, 'Lead - Transport'], [14102, 'Driver - Response'], [14103, 'Driver - Transport'], [14105, 'Other Caregiver - At Scene'], [14106, 'Other Caregiver - Transport'], [14104, 'Other']];
+  app.crew = [];
+  const roleNames = (ids) => ids.map(id => (CREWROLE.find(r => r[0] === id) || [0, id])[1]).join(', ');
+  function renderCrew(body) {
+    const m = body && body.data && body.data.model;
+    app.crew = ((m && m.crew) || []).map(c => ({ itemId: c.itemId, personnelId: c.personnelId, name: `${c.lastName || 'TEST'}, ${c.firstName || 'MEDIC'}`, roleIds: (c.roleIds || []).map(Number) }));
+    const el = document.getElementById('crew');
+    el.innerHTML = app.crew.map((c, i) => `<grid-row class="noselect" data-i="${i}"><grid-cell class="clickable"><div class="crew-info"><strong><div class="name">${c.name}</div></strong><aside>${roleNames(c.roleIds)}</aside><aside>EMT-P</aside></div></grid-cell></grid-row>`).join('');
+    el.querySelectorAll('grid-cell.clickable').forEach(cell => cell.addEventListener('click', () => {
+      const c = app.crew[Number(cell.closest('grid-row').dataset.i)];
+      app.shelfOpens++;
+      const sh = document.createElement('shelf-panel');
+      sh.innerHTML = `<header><h1>${c.name}</h1><button class="btn green-btn workflow-btn">OK</button></header><main class="viewport"><div class="content"><field-set>
+        <eso-field class="field" data-field-ref="PERSONNELROLEIDS"><div class="label-container"><label>Roles</label></div><eso-control><div class="field-area"><div class="display-value">${roleNames(c.roleIds)}</div><div class="shelf-click-indicator multi-select-icon">&#9776;</div></div></eso-control></eso-field></field-set></div></main>`;
+      let ids = c.roleIds.slice();
+      sh.querySelector('.shelf-click-indicator').addEventListener('click', () => openShelf({ title: 'Roles', items: CREWROLE, multi: true, checked: ids, onOk: (picked) => { ids = picked; sh.querySelector('.display-value').textContent = roleNames(ids); } }));
+      sh.querySelector('header button').addEventListener('click', () => {
+        for (const id of ids) if (!c.roleIds.includes(id)) app.addScalar('incident', `incident.crew.['${c.itemId}'].roleIds.['${id}']`, id);
+        for (const id of c.roleIds) if (!ids.includes(id)) app.del('incident', `incident.crew.['${c.itemId}'].roleIds.['${id}']`, 'multiselect');
+        c.roleIds = ids; cell.querySelector('aside').textContent = roleNames(ids); sh.remove();
+      });
+      shelfHost.appendChild(sh);
+    }));
+  }
   // ---- loaded mileage, the way ESO does it: only with both addresses; a Calculating dialog, then
   // the three mileage fields are saved and the button goes; otherwise an alert dialog
   app.calcClicks = 0; app.mileage = null;

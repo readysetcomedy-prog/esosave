@@ -1374,8 +1374,10 @@
     const current = nameField ? norm((nameField.querySelector('.display-value') || nameField).textContent) : '';
     const gap = 6, rowH = 34;
     const lr = blk.loc.getBoundingClientRect();
-    const right = Math.max(pr.right, lr.right - 8);
-    let x = pr.left, y = pr.bottom + 8, row = 0;
+    const firstField = Array.from(blk.loc.querySelectorAll('eso-field')).find(visible);
+    const fr0 = firstField ? firstField.getBoundingClientRect() : lr;
+    const left = Math.min(pr.left, fr0.left), right = Math.max(pr.right, fr0.right, lr.right - 8);
+    let x = left, y = pr.bottom + 8, row = 0;
     const layer = ensureQuickLayer();
     for (const fac of chosen) {
       const chip = quickEl(`f:${gk}:${fac.id}`, () => {
@@ -1389,7 +1391,7 @@
       chip.style.display = 'block'; chip.style.visibility = 'hidden';
       layer.appendChild(chip);
       const w = chip.getBoundingClientRect().width || 120;
-      if (x + w > right && x > pr.left) { row++; x = pr.left; y = pr.bottom + 8 + row * rowH; }
+      if (x + w > right && x > left) { row++; x = left; y = pr.bottom + 8 + row * rowH; }
       chip.style.left = Math.round(x) + 'px'; chip.style.top = Math.round(y) + 'px';
       chip.style.visibility = '';
       x += w + gap;
@@ -1749,9 +1751,20 @@
       if (!shelf) throw new Error('the number pad did not open');
       const input = await until(() => shelf.querySelector('eso-masked-input input, input[type=text], input:not([type])'), 2000);
       if (!input) throw new Error('no number box in the pad');
-      input.focus(); input.value = v;
-      input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event('change', { bubbles: true }));
-      await wait(150);
+      input.focus();
+      // ESO's numpad keys act on mousedown/touchstart and feed the box through the app's own key
+      // handling, the way a finger does
+      const key = (ch) => shelf.querySelector(`numpad [data-char="${ch}"], eso-numpad [data-char="${ch}"]`);
+      const press = (el) => { for (const t of ['mousedown', 'mouseup', 'click']) el.dispatchEvent(new MouseEvent(t, { bubbles: true, cancelable: true, view: window })); };
+      const clear = Array.from(shelf.querySelectorAll('[data-char="clear"]')).find(visible) || key('back');
+      if (clear && input.value) { if (clear.dataset.char === 'clear') press(clear); else for (let i = 0; i < 12 && input.value; i++) press(clear); await wait(60); }
+      for (const ch of v) { const k = key(ch); if (k) press(k); await wait(40); }
+      await until(() => input.value === v, 600);
+      if (input.value !== v) { // the keys did not take: type into the box
+        input.value = v;
+        input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event('change', { bubbles: true }));
+        await wait(150);
+      }
       const okBtn = Array.from(shelf.querySelectorAll('header button, button')).find(b => /^OK$/i.test(norm(b.textContent)));
       if (!okBtn) throw new Error('no OK button');
       okBtn.click();
@@ -1901,8 +1914,94 @@
     } catch (e) { /* the crew can press the button themselves */ }
     mileageBusy = false;
   }
+  // ---- crew roles: every role, shortened, above each crew member (Incident tab). A tap does
+  // what a finger would: open the member (Edit), open Roles, tick, OK, OK.
+  const CREW_ROLES = [['Lead Scene', 'Lead - At Scene', 14107], ['Lead Trans', 'Lead - Transport', 14108], ['Drv Resp', 'Driver - Response', 14102], ['Drv Trans', 'Driver - Transport', 14103],
+    ['Other Scene', 'Other Caregiver - At Scene', 14105], ['Other Trans', 'Other Caregiver - Transport', 14106], ['Other', 'Other', 14104]];
+  const crewPend = {}; // member name -> { on: Set, off: Set }
+  const crewPending = (name) => (crewPend[name] = crewPend[name] || { on: new Set(), off: new Set() });
+  let crewBusy = null;
+  function crewRows() {
+    return Array.from(document.querySelectorAll('crew-list grid-row, crew-grid grid-row')).filter(r => visible(r) && r.querySelector('.crew-info .name') && !r.classList.contains('add'));
+  }
+  const crewName = (row) => norm(row.querySelector('.crew-info .name').textContent);
+  const crewRoles = (row) => Array.from(row.querySelectorAll('.crew-info aside')).map(a => norm(a.textContent)).join(', ').split(',').map(x => norm(x).toUpperCase()).filter(Boolean);
+  function layoutCrew() {
+    const run = currentRun();
+    const rows = settings.quickIncident === false || !run || run.locked || !onTab('Incident') || shelfOpen() ? [] : crewRows();
+    const seen = new Set();
+    for (const row of rows) {
+      const name = crewName(row); if (!name) continue;
+      seen.add(name);
+      const have = crewRoles(row); const p = crewPending(name);
+      const els = CREW_ROLES.map(([short, full, id]) => {
+        const b = quickEl(`crew:${name}:${id}`, () => {
+          const el = document.createElement('button'); el.type = 'button'; el.className = 'chip'; el.dataset.group = 'crew'; el.dataset.member = name; el.textContent = short; el.title = `${name}: ${full}`;
+          el.addEventListener('pointerdown', (e) => e.stopPropagation());
+          el.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); tapCrew(name, full); });
+          return el;
+        });
+        const on = have.includes(full.toUpperCase());
+        b.classList.toggle('added', on); b.classList.toggle('on', p.on.has(full)); b.classList.toggle('off', p.off.has(full));
+        b.classList.toggle('busy', quickBusy);
+        b.style.display = 'block'; b.style.visibility = 'hidden';
+        return b;
+      });
+      placeRows(row, els);
+    }
+    for (const [k] of quickEls) if (k.startsWith('crew:') && !seen.has(k.split(':')[1])) dropQuick(k);
+  }
+  function tapCrew(name, full) {
+    if (quickBusy && crewBusy !== name) return;
+    const row = crewRows().find(r => crewName(r) === name); if (!row) return;
+    const p = crewPending(name);
+    if (crewRoles(row).includes(full.toUpperCase())) { p.on.delete(full); p.off.add(full); } else { p.off.delete(full); p.on.add(full); }
+    layoutCrew();
+    commitCrew(name);
+  }
+  async function commitCrew(name) {
+    const p = crewPending(name);
+    if (quickBusy || !(p.on.size || p.off.size)) return;
+    quickBusy = true; crewBusy = name; layoutCrew();
+    try {
+      while (p.on.size || p.off.size) {
+        const ons = [...p.on], offs = [...p.off];
+        const row = crewRows().find(r => crewName(r) === name);
+        if (!row) throw new Error('the crew member was not found on the page');
+        lateVeil('Setting the role…', `${name}: ${[...ons, ...offs].join(', ')}`);
+        (row.querySelector('grid-cell.clickable') || row).click(); // Edit
+        const edit = await until(() => Array.from(document.querySelectorAll('shelf-panel')).find(s => visible(s) && s.querySelector('eso-field[data-field-ref="PERSONNELROLEIDS"]')), 5000);
+        if (!edit) throw new Error('the crew member did not open');
+        const field = edit.querySelector('eso-field[data-field-ref="PERSONNELROLEIDS"]');
+        openPicker(field); // Roles
+        const list = await until(() => Array.from(document.querySelectorAll('shelf-panel')).find(s => visible(s) && s !== edit && !s.contains(edit) && Array.from(s.querySelectorAll('h1')).some(h => /^Roles?$/i.test(norm(h.textContent)))), 5000);
+        if (!list) throw new Error('the Roles list did not open');
+        const tick = async (full, want) => {
+          const li = await pickRow(list, full); if (!li) return false;
+          const sel = () => { const m = li.querySelector('check-mark'); return !!(m && m.classList.contains('selected')); };
+          if (sel() !== want) { (li.querySelector('.label-content') || li).click(); await until(() => sel() === want, 1500); }
+          return sel() === want;
+        };
+        for (const f of ons) { p.on.delete(f); await tick(f, true); }
+        for (const f of offs) { p.off.delete(f); await tick(f, false); }
+        await clearSearch(list);
+        const ok1 = Array.from(list.querySelectorAll('header button')).find(b => /^OK$/i.test(norm(b.textContent)));
+        if (!ok1) throw new Error('no OK on the Roles list'); ok1.click();
+        await until(() => closed(list), 4000);
+        const ok2 = Array.from(edit.querySelectorAll('header button')).find(b => /^OK$/i.test(norm(b.textContent)));
+        if (!ok2) throw new Error('no OK on the crew member'); ok2.click();
+        await until(() => closed(edit), 4000);
+      }
+    } catch (e) {
+      endVeil(); quickBusy = false; crewBusy = null; p.on.clear(); p.off.clear(); layoutCrew();
+      alert('ESO Save: could not set the role. ' + (e && e.message ? e.message : '') + ' Finish it by hand.');
+      return;
+    }
+    endVeil(); quickBusy = false; crewBusy = null; layoutCrew();
+  }
   function layoutQuick() {
     try { clipLayers(); } catch (e) { /* keep going */ }
+    try { layoutCrew(); } catch (e) { /* keep going */ }
     try { watchMileage(); } catch (e) { /* keep going */ }
     try { layoutAssess(); } catch (e) { /* keep going */ }
     try { layoutDisposition(); } catch (e) { /* keep going */ }

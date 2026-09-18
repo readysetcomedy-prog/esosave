@@ -78,7 +78,7 @@ export function createMockEso() {
       id, incidentNumber: `TEST-${String(seq).padStart(4, '0')}`, state: 'draft', locked: false,
       tree: {}, ops: [], mappings: [], knownKeys: new Set(), autosaves: 0,
       incidentDateTime: new Date(), destination: null, // { name, fax, email }
-      crew: [{ personnelId: control.userId, itemId: randomUUID(), firstName: null, lastName: null, rank: 0 }],
+      crew: [{ personnelId: control.userId, itemId: randomUUID(), firstName: (control.userName.split(',')[1] || 'MEDIC').trim(), lastName: control.userName.split(',')[0].trim(), rank: 0, roleIds: [] }],
     };
     rec.knownKeys.add(rec.crew[0].itemId);
     records.set(id, rec);
@@ -141,7 +141,9 @@ export function createMockEso() {
     const scope = name.charAt(0).toLowerCase() + name.slice(1);
     const model = JSON.parse(JSON.stringify(rec.tree[scope] || {}));
     if (name === 'Incident') {
-      model.response = { incidentNumber: rec.incidentNumber, ...(model.response || {}) }; model.crew = rec.crew;
+      model.response = { incidentNumber: rec.incidentNumber, ...(model.response || {}) };
+      // roles saved through the app's own ops ride along with the crew list
+      model.crew = rec.crew.map(c => { const saved = Array.isArray(model.crew) ? model.crew.find(x => x && String(x.itemId) === String(c.itemId)) : null; return { ...c, roleIds: (saved && Array.isArray(saved.roleIds) ? saved.roleIds : c.roleIds || []).map(Number) }; });
       const t = {}; for (const k of ['psapCall', 'dispatched', 'enRoute', 'onScene', 'atPatient', 'departScene', 'atDestination', 'transferPatient', 'callClosed']) { t[k + 'Time'] = null; t[k + 'Date'] = null; }
       model.incidentTimes = { ...t, ...(model.incidentTimes || {}) };
     }
