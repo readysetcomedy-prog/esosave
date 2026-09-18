@@ -162,6 +162,14 @@
     patientPositionDuringTransportIds: [[7186, 'Fowlers (Semi-Upright Sitting)'], [7189, 'Semi-Fowlers'], [7190, 'Sitting'], [7191, 'Supine'], [10558, 'Trendelenburg']],
   };
   app.transport = {};
+  // like ESO: Mechanism of Injury is disabled until Possible Patient Injury? is Yes or Unknown
+  const INJURED = { Yes: 7113, No: 7114, Unknown: 7115 };
+  document.querySelectorAll('eso-field[data-field-ref="ISINJUREDID"] .quick-picks button').forEach(b => b.addEventListener('click', () => {
+    const f = b.closest('eso-field'); const v = b.dataset.injured;
+    app.edit('narrative', 'narrative.injuries.injuredId', INJURED[v], 'singleselect');
+    f.querySelector('.display-value').textContent = v; f.querySelector('.quick-picks').style.display = 'none'; f.querySelector('.area-wrap').removeAttribute('style');
+    document.querySelector('eso-field[data-field-ref="MECHANISMOFINJURYIDS"]').toggleAttribute('disabled', v === 'No');
+  }));
   function renderTransport(body) {
     const model = body && body.data && body.data.model;
     for (const f of document.querySelectorAll('#narrative eso-field.ms')) {

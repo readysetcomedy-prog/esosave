@@ -1139,7 +1139,7 @@
     const ok = settings[g.setting] !== false && run && !run.locked && (g.form ? formOpen(g.form) : onTab(g.tab || 'Patient') && !shelfOpen());
     // anchored to an Add button (chips to its right, rows under it) or to a field (chips after its
     // label, rows under the field)
-    const btn = ok ? (g.field ? fieldEl(g.field) : anchorButton(g)) : null;
+    const btn = ok ? (g.field ? fieldReady(g.field) : anchorButton(g)) : null; // a field ESO keeps disabled gets no chips
     if (!btn) { dropQuick(gk + ':'); return; }
     const fr = btn.getBoundingClientRect();
     if (!fr.width) { dropQuick(gk + ':'); return; }
@@ -1713,7 +1713,7 @@
   function layoutSingleRows() {
     const run = currentRun();
     for (const [rk, row] of Object.entries(SINGLE_ROWS)) {
-      const f = settings[row.setting] === false || !run || run.locked || !onTab(row.tab || 'Incident') || shelfOpen() ? null : fieldEl(row.ref);
+      const f = settings[row.setting] === false || !run || run.locked || !onTab(row.tab || 'Incident') || shelfOpen() ? null : fieldReady(row.ref);
       if (!f) { dropQuick(`sr:${rk}:`); continue; }
       const r = f.getBoundingClientRect();
       if (!r.width) { dropQuick(`sr:${rk}:`); continue; }

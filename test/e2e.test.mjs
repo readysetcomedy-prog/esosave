@@ -912,6 +912,10 @@ test('mechanism of injury: all four as chips, more than one allowed', async () =
   const id = await app(() => window.app.recordId);
   await app(() => window.app.openTab('Narrative'));
   const chips = () => T.page.evaluate(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .chip[data-group=mechanism]')).map(c => ({ short: c.textContent, cls: c.className })));
+  // ESO keeps Mechanism of Injury disabled until Possible Patient Injury? is Yes or Unknown: no chips until then
+  await waitFor(async () => (await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .chip[data-group=toStretcher]').length)) > 0, { label: 'the tab is drawn' });
+  assert.equal((await chips()).length, 0, 'no chips while ESO keeps the field disabled');
+  await app(() => document.querySelector('eso-field[data-field-ref="ISINJUREDID"] [data-injured="Yes"]').click());
   await waitFor(async () => (await chips()).length === 4, { label: 'four chips, no extra Other…' });
   assert.deepEqual((await chips()).map(c => c.short), ['Blunt', 'Burn', 'Penetrating', 'Other']);
   const tap = async (t) => { await waitFor(async () => (await chips()).some(c => c.short === t && !/busy/.test(c.cls)), { label: t }); await T.page.evaluate((tt) => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .chip[data-group=mechanism]')).find(c => c.textContent === tt).click(), t); };
