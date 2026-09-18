@@ -62,7 +62,8 @@ to bad signal or a hung page.
   not already offer (where ESO shows its own buttons and Other, the row has no Other… of its own).
   Mutual Aid stays hidden until the run type is mutual aid, as in ESO. Also on the Narrative tab: the ten
   most common impressions above Primary and Secondary Impression, ALS Paramedic / BLS above Local
-  Protocol Provided Care Level, Minutes / Hours / Days above the complaint duration's unit, and every anatomic location (abbreviated) above Anatomic
+  Protocol Provided Care Level, Psych / Neuro / GI / Immune / Reproductive / Pulmonary / Renal above
+  Chief Complaint System (ESO shows the other three itself), Minutes / Hours / Days above the complaint duration's unit, and every anatomic location (abbreviated) above Anatomic
   Location. Every row ends with "Other…", which simply opens ESO's own list (a row that already
   holds every choice has no need of one). Every pick takes its row straight from the open list;
   only a list too long to show it all gets the name typed into its search box first, and the
@@ -86,6 +87,9 @@ to bad signal or a hung page.
 - **Crew roles.** On the Incident tab every role (Lead Scene, Lead Trans, Drv Resp, Drv Trans,
   Other Scene, Other Trans, Other) sits above each crew member. A tap does what a finger would:
   opens the member, opens Roles, ticks the role, OK, OK. A second tap takes the role back out.
+- **Before a lock.** ESO's Lock Record press is caught and a question shown first: "Have you
+  attached the proper paperwork for this run, or acknowledge it's not required?" Yes lets the
+  same press through to ESO; No leaves the run open.
 - **Loaded mileage.** Once the scene and the destination both have an address (a predefined
   place, or a typed street, city, state and zip), ESO's own Calculate Mileage button is pressed
   once for the crew, and again only if an address changes. A complaint ESO raises about it is

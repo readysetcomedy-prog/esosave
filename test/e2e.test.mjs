@@ -424,6 +424,25 @@ const sh = (sel) => T.page.evaluate((s) => { const el = document.getElementById(
 const shClick = (sel) => T.page.evaluate((s) => { const el = document.getElementById('esosave-host').shadowRoot.querySelector(s); if (!el) throw new Error('no ' + s); el.click(); }, sel);
 function dialogs() { const seen = []; const on = (d) => { seen.push({ type: d.type(), message: d.message() }); d.accept().catch(() => {}); }; T.page.on('dialog', on); return { seen, off: () => T.page.off('dialog', on) }; }
 
+test('before a lock: the paperwork question; No leaves the run open, Yes lets the same press through', async () => {
+  const id = await freshRun();
+  const ask = () => T.page.evaluate(() => { const v = document.getElementById('esosave-host').shadowRoot.querySelector('.veil .lockask'); return v ? v.textContent : null; });
+  await app(() => document.getElementById('lockrecord').click());
+  await waitFor(async () => /attached the proper paperwork/.test((await ask()) || ''), { label: 'the question' });
+  assert.equal(await app(() => window.app.lockClicks), 0, 'ESO never saw the press');
+  await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('[data-act=lock-no]').click());
+  await waitFor(async () => (await ask()) === null, { label: 'question gone' });
+  await sleep(500);
+  assert.equal((await T.record(id)).state, 'draft', 'No: still open');
+  assert.equal(await app(() => window.app.lockClicks), 0);
+  await app(() => document.getElementById('lockrecord').click());
+  await waitFor(async () => /paperwork/.test((await ask()) || ''), { label: 'asked again' });
+  await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('[data-act=lock-yes]').click());
+  await waitFor(async () => (await T.record(id)).state === 'locked', { label: 'Yes: locked through ESO', timeout: 15000 });
+  assert.equal(await app(() => window.app.lockClicks), 1, 'one press reached ESO');
+  await waitFor(async () => (await T.run(id)).locked, { label: 'the extension sees the lock' });
+});
+
 test('lock: offers to fax the run to its destination, sends through ESO, and does not ask again once it is in the fax history', async () => {
   const id = await freshRun();
   await T.shape(id, { destination: { name: 'HSHS St. John\'s', fax: '2175551234', email: null } });
@@ -903,10 +922,10 @@ test('mechanism of injury: all four as chips, more than one allowed', async () =
 });
 
 test('Narrative rows: impressions, care level, duration units and every anatomic location', async () => {
-  const id = await app(() => window.app.recordId);
+  const id = await freshRun();
   await app(() => window.app.openTab('Narrative'));
   const row = (g) => T.page.evaluate((gg) => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll(`.quick [data-group=${gg}]`)).map(b => ({ text: b.textContent, cls: b.className })), g);
-  await waitFor(async () => (await row('sr-primary')).length === 11 && (await row('sr-secondary')).length === 11 && (await row('sr-care')).length === 3 && (await row('sr-units')).length === 4 && (await row('sr-anatomic')).length === 9, { label: 'rows drawn' });
+  await waitFor(async () => (await row('sr-primary')).length === 11 && (await row('sr-secondary')).length === 11 && (await row('sr-care')).length === 3 && (await row('sr-units')).length === 4 && (await row('sr-anatomic')).length === 9 && (await row('sr-system')).length === 7, { label: 'rows drawn' });
   assert.deepEqual((await row('sr-anatomic')).map(b => b.text), ['Head', 'Neck', 'Chest', 'Abd', 'Back', 'Upper Ext', 'Lower Ext', 'Genitalia', 'General'], 'every location, abbreviated, no Other…');
   assert.equal((await row('sr-primary')).at(-1).text, 'Other…');
   const tap = async (g, text) => { await waitFor(async () => (await row(g)).some(b => b.text === text && !/busy/.test(b.cls)), { label: text }); await T.page.evaluate(([gg, t]) => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll(`.quick [data-group=${gg}]`)).find(b => b.textContent === t).click(), [g, text]); };
@@ -915,6 +934,8 @@ test('Narrative rows: impressions, care level, duration units and every anatomic
   await waitFor(async () => (await nar()).clinicalImpression?.primaryImpressionId === 582, { label: 'primary impression', timeout: 15000 });
   await tap('sr-secondary', 'SOB');
   await waitFor(async () => (await nar()).clinicalImpression?.secondaryImpressionId === 630, { label: 'secondary impression', timeout: 15000 });
+  await tap('sr-system', 'Neuro'); // ESO shows its own quick-picks here: through its Other button (ESO's name carries a trailing space)
+  await waitFor(async () => (await nar()).clinicalImpression?.chiefComplaintOrganSystemId === 7104, { label: 'organ system', timeout: 15000 });
   await tap('sr-anatomic', 'Chest');
   await waitFor(async () => (await nar()).patientComplaint?.chiefComplaintAnatomicLocationId === 7096, { label: 'anatomic location', timeout: 15000 });
   await tap('sr-units', 'Hours');

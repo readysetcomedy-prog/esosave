@@ -207,6 +207,7 @@
     SECONDARYIMPRESSIONID: { scope: 'narrative', host: 'narrative-ss', label: 'Secondary Impression', addr: 'narrative.clinicalImpression.secondaryImpressionId', list: [[610, 'Abdominal Pain'], [630, 'Acute Respiratory Distress (Dyspnea)'], [613, 'Altered Mental Status'], [617, 'Chest Pain / Discomfort'], [620, 'Generalized Weakness'], [637, 'Injury'], [1338786, 'Near Syncope'], [639, 'Syncope / Fainting']] },
     PROVIDEDCARELEVELID: { scope: 'narrative', host: 'narrative-ss', label: 'Local Protocol Provided Care Level', addr: 'narrative.clinicalImpression.providedCareLevelId', list: [[14195, 'ALS - AEMT/Intermediate'], [14196, 'ALS - Paramedic'], [14194, 'BLS - All Levels'], [14200, 'No Care Provided']] },
     CHIEFTIMEUNITSOFCOMPLAINTDURATION: { scope: 'narrative', host: 'narrative-ss', label: 'Unit', addr: 'narrative.patientComplaint.chiefTimeUnitsOfComplaintDuration', list: [[7080, 'Seconds'], [7081, 'Minutes'], [7082, 'Hours'], [7083, 'Days'], [7084, 'Weeks'], [7085, 'Months'], [7086, 'Years']] },
+    CHIEFCOMPLAINTORGANSYSTEMID: { scope: 'narrative', host: 'narrative-ss', label: 'Chief Complaint System', addr: 'narrative.clinicalImpression.chiefComplaintOrganSystemId', list: [[7110, 'Behavioral/Psychiatric'], [7103, 'Cardiovascular'], [7104, 'CNS/Neuro '], [7105, 'Endocrine/Metabolic'], [7106, 'GI '], [7107, 'Global/General'], [10559, 'Lymphatic/Immune'], [7108, 'Musculoskeletal/Skin'], [7109, 'Reproductive'], [7111, 'Pulmonary'], [7112, 'Renal ']], quick: { 7107: 'Global/General', 7108: 'Musculoskeletal/Skin', 7103: 'Cardiovascular' } },
     CHIEFCOMPLAINTANATOMICLOCATIONID: { scope: 'narrative', host: 'narrative-ss', label: 'Anatomic Location', addr: 'narrative.patientComplaint.chiefComplaintAnatomicLocationId', list: [[7094, 'Abdomen'], [7095, 'Back'], [7096, 'Chest'], [7097, 'Extremity-Lower'], [7098, 'Extremity-Upper'], [7099, 'General/Global'], [7100, 'Genitalia'], [7101, 'Head'], [7102, 'Neck']] },
     // Patient tab
     PATIENTRACEIDS: { scope: 'patient', host: 'patient-ss', label: 'Race', addr: 'patient.demographics.raceIds', multi: true, list: [[315, 'American Indian or Alaska Native'], [316, 'Asian'], [317, 'Black or African American'], [10317, 'Hispanic or Latino'], [1338789, 'Middle Eastern or North African'], [318, 'Native Hawaiian or Other Pacific Islander'], [319, 'White']], quick: { 319: 'White', 317: 'Black' } },
@@ -406,6 +407,8 @@
   });
   // ---- loaded mileage, the way ESO does it: only with both addresses; a Calculating dialog, then
   // the three mileage fields are saved and the button goes; otherwise an alert dialog
+  app.lockClicks = 0;
+  document.getElementById('lockrecord').addEventListener('click', () => { app.lockClicks++; app.lock(); });
   app.calcClicks = 0; app.mileage = null;
   document.getElementById('calcMileage').addEventListener('click', () => {
     app.calcClicks++;

@@ -418,7 +418,7 @@
         `<label class="s"><input type="checkbox" id="qdisposition" ${settings.quickDisposition === false ? '' : 'checked'}> Disposition: Transported ALS/BLS, Refusal, Canceled (Prior/Scene) buttons under Unit Disposition; Transport Mode and Reason for Refusal outlined in red until answered (Incident tab)</label>` +
         `<label class="s"><input type="checkbox" id="qautoresp" ${settings.autoResponse === false ? '' : 'checked'}> Auto-fill: choosing Emergent or Non-Emergent (response or transport mode) fills the lights/sirens, intersection, scheduled, speed and method fields that are still empty, and sets EMD Performed to No</label>` +
         `<label class="s"><input type="checkbox" id="qassess" ${settings.quickAssess === false ? '' : 'checked'}> Assessment: "All normal" (presses No Abnormalities on every category in ESO's Quick Ax) and "A&amp;Ox4" on each assessment (Assessments tab)</label>` +
-        `<label class="s"><input type="checkbox" id="qnarrative" ${settings.quickNarrative === false ? '' : 'checked'}> Narrative: rows for Primary and Secondary Impression, Provided Care Level, Anatomic Location and the complaint duration units (Narrative tab)</label>` +
+        `<label class="s"><input type="checkbox" id="qnarrative" ${settings.quickNarrative === false ? '' : 'checked'}> Narrative: rows for Primary and Secondary Impression, Provided Care Level, Chief Complaint System, Anatomic Location and the complaint duration units (Narrative tab)</label>` +
         `<label class="s"><input type="checkbox" id="qpatient" ${settings.quickPatient === false ? '' : 'checked'}> Patient: Race row (every race, shortened) (Patient tab)</label>` +
         `<label class="s"><input type="checkbox" id="qrefusal" ${settings.quickRefusal === false ? '' : 'checked'}> Refusal form: chips for Legal, Decision-Making, Medical, Check All notifications and the four Patient Refusals inside ESO's Patient Refusal Form (Signatures tab)</label>` +
         `<label class="s"><input type="checkbox" id="qmileage" ${settings.autoMileage === false ? '' : 'checked'}> Loaded mileage: press ESO's Calculate Mileage once the scene and destination both have an address (Incident tab)</label>` +
@@ -1669,6 +1669,8 @@
     secondary: { setting: 'quickNarrative', tab: 'Narrative', ref: 'SECONDARYIMPRESSIONID', what: 'Secondary Impression', items: IMPRESSIONS },
     care: { setting: 'quickNarrative', tab: 'Narrative', ref: 'PROVIDEDCARELEVELID', what: 'Provided Care Level', items: [['ALS Paramedic', 'ALS - Paramedic'], ['BLS', 'BLS - All Levels']] },
     units: { setting: 'quickNarrative', tab: 'Narrative', ref: 'CHIEFTIMEUNITSOFCOMPLAINTDURATION', what: 'Duration Unit', items: [['Minutes', 'Minutes'], ['Hours', 'Hours'], ['Days', 'Days']] },
+    // Chief Complaint System: ESO shows Global/General, Musculoskeletal/Skin, Cardiovascular and Other itself
+    system: { setting: 'quickNarrative', tab: 'Narrative', ref: 'CHIEFCOMPLAINTORGANSYSTEMID', what: 'Chief Complaint System', noOther: true, items: [['Psych', 'Behavioral/Psychiatric'], ['Neuro', 'CNS/Neuro'], ['GI', 'GI'], ['Immune', 'Lymphatic/Immune'], ['Reproductive', 'Reproductive'], ['Pulmonary', 'Pulmonary'], ['Renal', 'Renal']] },
     anatomic: { setting: 'quickNarrative', tab: 'Narrative', ref: 'CHIEFCOMPLAINTANATOMICLOCATIONID', what: 'Anatomic Location', noOther: true, items: [['Head', 'Head'], ['Neck', 'Neck'], ['Chest', 'Chest'], ['Abd', 'Abdomen'], ['Back', 'Back'], ['Upper Ext', 'Extremity-Upper'], ['Lower Ext', 'Extremity-Lower'], ['Genitalia', 'Genitalia'], ['General', 'General/Global']] },
     // Patient tab
     race: { setting: 'quickPatient', tab: 'Patient', ref: 'PATIENTRACEIDS', what: 'Race', noOther: true, items: [['White', 'White', 'White'], ['Black', 'Black or African American', 'Black'], ['Asian', 'Asian'], ['Latino', 'Hispanic or Latino'], ['Am Indian', 'American Indian or Alaska Native'], ['Mid East', 'Middle Eastern or North African'], ['Pac Islander', 'Native Hawaiian or Other Pacific Islander']] },
@@ -2058,6 +2060,27 @@
     lateVeilTimer = setTimeout(() => showVeilMessage(title, text), after);
   }
   function endVeil() { clearTimeout(lateVeilTimer); lateVeilTimer = null; hideVeil(); }
+  // ---- before a lock: the paperwork question. ESO's "Lock Record" button (in its validation
+  // dialog) is caught on the way down; Yes lets the same press through, No leaves the run open.
+  let lockApproved = false;
+  document.addEventListener('click', (e) => {
+    const btn = e.target && e.target.closest ? e.target.closest('button, a') : null;
+    if (!btn || (host && host.contains(btn)) || !/^Lock Record$/i.test(norm(btn.textContent))) return;
+    if (lockApproved) { lockApproved = false; return; }
+    e.preventDefault(); e.stopImmediatePropagation(); e.stopPropagation();
+    askBeforeLock(btn);
+  }, true);
+  function askBeforeLock(btn) {
+    hideVeil();
+    if (!shadow) return;
+    veil = document.createElement('div');
+    veil.className = 'veil';
+    veil.innerHTML = `<div class="box lockask"><h2>Before you lock</h2><div class="why" style="font-size:15px;margin:10px 0 16px">Have you attached the proper paperwork for this run, or acknowledge it's not required?</div>
+      <div class="actions"><button class="a" data-act="lock-yes">Yes, lock it</button><button class="a sec" data-act="lock-no">No, not yet</button></div></div>`;
+    veil.querySelector('[data-act=lock-no]').addEventListener('click', () => hideVeil());
+    veil.querySelector('[data-act=lock-yes]').addEventListener('click', () => { hideVeil(); lockApproved = true; btn.click(); lockApproved = false; });
+    shadow.appendChild(veil);
+  }
   function showVeilMessage(title, text) {
     hideVeil();
     if (!shadow) return;
