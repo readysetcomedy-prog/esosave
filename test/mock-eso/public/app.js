@@ -371,6 +371,26 @@
       } });
     });
   });
+  // ---- loaded mileage, the way ESO does it: only with both addresses; a Calculating dialog, then
+  // the three mileage fields are saved and the button goes; otherwise an alert dialog
+  app.calcClicks = 0; app.mileage = null;
+  document.getElementById('calcMileage').addEventListener('click', () => {
+    app.calcClicks++;
+    const ready = ['scene', 'destination'].every(k => app.locations[k].name);
+    const dlg = document.createElement('eso-modal-dialog');
+    if (!ready) {
+      dlg.innerHTML = '<h1>Missing address information</h1><p>Scene and destination addresses must have a valid address or GPS coordinates defined to calculate mileage.</p><div class="button-set"><button class="btn">OK</button></div>';
+      dlg.querySelector('button').addEventListener('click', () => dlg.remove());
+      document.body.appendChild(dlg); return;
+    }
+    dlg.innerHTML = '<h1>Calculating loaded mileage...</h1>';
+    document.body.appendChild(dlg);
+    setTimeout(() => {
+      dlg.remove();
+      app.edit('incident', 'incident.mileage.sceneMileage', 0, 'number'); app.edit('incident', 'incident.mileage.destinationMileage', 12.3, 'number'); app.edit('incident', 'incident.mileage.geocodedLoadedMiles', 12.3, 'number');
+      app.mileage = 12.3; document.getElementById('loadedmiles').textContent = '12.3'; document.getElementById('calcMileage').style.display = 'none';
+    }, 400);
+  });
   // ---- assessments, the way ESO's app keeps them: every location starts Not_Assessed; Quick Ax sets a
   // whole category; the Mental Status section has Alert and Oriented x4
   const AX_CATS = { MentalStatus: ['MentalStatus'], Skin: ['Skin'], HEENT: ['Head', 'Face', 'Eyes', 'Neck'],

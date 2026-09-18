@@ -1850,8 +1850,60 @@
     const clip = b > 0 ? `inset(${b}px 0 0 0)` : '';
     for (const l of [quickLayer, copyLayer]) if (l && l.style.clipPath !== clip) l.style.clipPath = clip;
   }
+  // ---- loaded mileage: once the scene and the destination both have an address, ESO's own
+  // "Calculate Mileage" button is pressed for the crew, once per pair of addresses
+  const mileageTried = {}; // recordId -> the pair of addresses last tried
+  let mileageBusy = false;
+  function addressReady(loc) {
+    // what ESO itself needs before it will geocode: a predefined place, or a typed address with
+    // street, city, state and zip
+    const val = (f) => { const v = f.querySelector('.display-value'); return f && visible(f) ? norm(v ? v.textContent : '') : ''; };
+    const fields = Array.from(loc.querySelectorAll('eso-field[data-field-ref]')).filter(visible);
+    const by = (re) => fields.filter(f => re.test(f.dataset.fieldRef)).map(val).find(Boolean) || '';
+    const predefined = by(/PREDEFINEDLOCATIONID$/);
+    if (predefined) return 'P:' + predefined;
+    const street = by(/(ADDRESS1|MANUALADDRESS1|STREET)$/), city = by(/CITY$/), state = by(/STATEID$/), zip = by(/(ZIP|POSTALCODE)$/);
+    return street && city && state && zip ? `M:${street}|${city}|${state}|${zip}` : '';
+  }
+  function watchMileage() {
+    const run = currentRun(); const s = lastStatus;
+    if (!run || run.locked || !s || !s.online || !onTab('Incident') || shelfOpen() || quickBusy || autoBusy || mileageBusy || warming) return;
+    const btn = document.getElementById('calcMileage');
+    if (!btn || !visible(btn) || (host && host.contains(btn))) return; // no button: the mileage is already there
+    if (document.querySelector('eso-modal-dialog')) return;
+    const locs = ['vm.scene', 'vm.destination'].map(m => Array.from(document.querySelectorAll('eso-location')).find(l => (l.getAttribute('view-model') || '') === m && visible(l)));
+    if (!locs[0] || !locs[1]) return;
+    const sig = locs.map(addressReady);
+    if (!sig[0] || !sig[1]) return;
+    const key = sig.join(' -> ');
+    if (mileageTried[run.recordId] === key) return; // this pair was tried already; a change of address tries again
+    mileageTried[run.recordId] = key;
+    calculateMileage(btn);
+  }
+  async function calculateMileage(btn) {
+    mileageBusy = true;
+    try {
+      btn.click();
+      // ESO shows a "Calculating…" dialog, then either fills the miles in or says why not; a
+      // complaint we caused is closed for the crew (nothing else is touched)
+      const t0 = Date.now();
+      while (Date.now() - t0 < 30000) {
+        await wait(150);
+        const dlg = Array.from(document.querySelectorAll('eso-modal-dialog')).find(visible);
+        if (!dlg) { if (Date.now() - t0 > 1500) break; continue; }
+        const title = norm((dlg.querySelector('h1, h2, .title, [data-title]') || dlg).textContent);
+        if (/missing address|could not determine|problem calculating/i.test(title)) {
+          const ok = Array.from(dlg.querySelectorAll('button')).find(b => /^(OK|Close|Dismiss)$/i.test(norm(b.textContent)));
+          if (ok) ok.click();
+          break;
+        }
+      }
+    } catch (e) { /* the crew can press the button themselves */ }
+    mileageBusy = false;
+  }
   function layoutQuick() {
     try { clipLayers(); } catch (e) { /* keep going */ }
+    try { watchMileage(); } catch (e) { /* keep going */ }
     try { layoutAssess(); } catch (e) { /* keep going */ }
     try { layoutDisposition(); } catch (e) { /* keep going */ }
     try { layoutSingleRows(); } catch (e) { /* keep going */ }

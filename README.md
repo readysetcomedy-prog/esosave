@@ -85,6 +85,10 @@ to bad signal or a hung page.
   sees it too and nobody else does; held changes still push whoever is signed in. Only those
   settings go to the table (`supabase/esosave_users.sql`), never a run nor which runs were
   worked; with no signal the tablet's copy stands and the row is written when signal returns.
+- **Loaded mileage.** Once the scene and the destination both have an address (a predefined
+  place, or a typed street, city, state and zip), ESO's own Calculate Mileage button is pressed
+  once for the crew, and again only if an address changes. A complaint ESO raises about it is
+  closed; nothing else is touched.
 - **Copy a vital.** A small copy button floats just left of each saved vital's time in the Vitals
   tab; tapping it re-enters that vital as a new one with the current time, every other value the
   same. Only fields the app itself has been seen saving are copied, and the run log names any that

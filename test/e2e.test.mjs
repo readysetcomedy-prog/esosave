@@ -696,10 +696,16 @@ test('facility chips: chosen in Settings from ESO\'s saved facilities, one tap s
   assert.equal(await app(() => document.querySelector('eso-location[view-model="vm.scene"]').dataset.mode), 'predefined');
   assert.equal((await T.record(id)).tree.incident.scene.predefinedAddress.locationTypeID, 6540, 'scene Location Type = Hospital');
   assert.equal(await app(() => document.querySelectorAll('shelf-panel').length), 0);
+  // both addresses set: ESO's own Calculate Mileage is pressed once for the crew
+  await waitFor(async () => (await T.record(id)).tree.incident?.mileage?.geocodedLoadedMiles === 12.3, { label: 'loaded mileage calculated', timeout: 15000 });
+  assert.equal(await app(() => window.app.calcClicks), 1, 'pressed once, when the second address landed');
+  assert.equal(await app(() => document.querySelectorAll('eso-modal-dialog').length), 0, 'no dialog left behind');
   // a second destination tap changes type and name again
   await tap('fac-destination', 'Anderson Hospital');
   await waitFor(async () => (await T.record(id)).tree.incident?.destination?.predefinedAddress?.predefinedLocationID === 'loc-anderson', { label: 'destination changed', timeout: 15000 });
   assert.equal((await T.record(id)).tree.incident.destination.predefinedAddress.locationTypeID, 6575);
+  await sleep(1500);
+  assert.equal(await app(() => window.app.calcClicks), 1, 'not pressed again once the mileage is there');
   // a chip whose type id ESO's tables no longer know still maps by the name kept with it: never Hospital by default
   const custom = { facilitySending: [{ id: 'loc-rehab', name: 'Riverside Rehab', typeId: 424242, type: 'Rehabilitation Center', destType: 'Rehabilitation Center' }], facilityDestination: [{ id: 'loc-breese', name: 'Breese Nursing Home', typeId: 424242, type: 'Nursing home', destType: 'Nursing Home' }] };
   await T.setStorage({ settings: { ...(await T.storage()).settings, ...custom } });

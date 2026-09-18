@@ -67,6 +67,11 @@
     <div class="manual" style="display:none"></div>
   </eso-location>
   <div style="height:20px"></div>
+  <!-- mileage, as ESO draws it: Calculate Mileage shows until loaded mileage has been geocoded -->
+  <div class="mileage-calculations"><div class="calculate-mileage">
+    <summary class="mileage-description">Scene and destination addresses set?<br>We'll calculate loaded mileage for you.</summary>
+    <button id="calcMileage" class="btn green-btn" tabindex="-1">Calculate Mileage</button>
+  </div><div class="totals"><div class="loaded"><div class="diff" id="loadedmiles">- -</div><div class="mileage-label"><h1>Loaded Mileage</h1></div></div></div></div>
   <eso-field class="field" data-field-ref="DISPATCHDELAYS" data-list="6430"><div class="label-container"><label>Dispatch Delays</label></div><div class="line field-area"><div class="display-value"></div><div class="shelf-click-indicator">&#9776;</div><button class="btn none-or-pn-btn">None/No Delay</button></div></eso-field>
   <eso-field class="field" data-field-ref="RESPONSEDELAYS" data-list="357"><div class="label-container"><label>Response Delays</label></div><div class="line field-area"><div class="display-value"></div><div class="shelf-click-indicator">&#9776;</div><button class="btn none-or-pn-btn">None/No Delay</button></div></eso-field>
   <eso-field class="field" data-field-ref="SCENEDELAYS" data-list="372"><div class="label-container"><label>Scene Delays</label></div><div class="line field-area"><div class="display-value"></div><div class="shelf-click-indicator">&#9776;</div><button class="btn none-or-pn-btn">None/No Delay</button></div></eso-field>
