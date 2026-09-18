@@ -60,6 +60,9 @@
     slu: { id: '946f8531-fec6-f011-ad8f-6045bdb72f5d', name: 'SSM Health Saint Louis University', typeId: 6540, label: 'SLU' },
     seo: { id: '6dac3b3f-f8c6-f011-ad8f-6045bdb72f5d', name: "HSHS St. Elizabeth's Hospital", typeId: 6540, label: 'SEO' },
   };
+  // every standard chip is a hospital: its type on the Scene side (ESO's location types) and on
+  // the Destination side (ESO's destination types) is Hospital
+  for (const f of Object.values(FAC)) { f.type = 'Hospital'; f.destType = 'Hospital'; }
   DEFAULT_SETTINGS.facilitySending = ['sbl', 'stA', 'fch', 'holy', 'highland', 'breese', 'anderson'].map(k => ({ ...FAC[k] }));
   DEFAULT_SETTINGS.facilityDestination = ['sbl', 'stA', 'fch', 'holy', 'highland', 'anderson', 'carle', 'stJ', 'barnes', 'slu', 'seo'].map(k => ({ ...FAC[k] }));
 
@@ -98,6 +101,7 @@
   (async () => {
     const data = await loadAll();
     settings = data.settings;
+    facilityTypes = data.all.facilityTypes || null;
     renderBar();
     await purgeLocked(settings);
     await sremove(['fieldDefs', 'knownViews']).catch(() => {}); // superseded keys from earlier versions
@@ -117,7 +121,10 @@
     } else if (type === 'event' && payload && payload.name === 'vitalCopied') {
       onVitalCopied(payload);
     } else if (type === 'facilities' && payload && Array.isArray(payload.items)) {
-      facilities = payload; if (panelOpen && settingsOpen) renderPanel(); layoutQuick();
+      facilities = payload;
+      facilityTypes = { locationTypes: payload.locationTypes || [], destinationTypes: payload.destinationTypes || [] };
+      await sset({ facilityTypes });
+      if (panelOpen && settingsOpen) renderPanel(); layoutQuick();
     } else if (type === 'event' && payload && payload.name === 'sendPrompt') {
       showSendPrompt(payload);
     } else if (type === 'event' && payload && payload.name === 'sent') {
@@ -154,6 +161,7 @@
   // ---------------------------------------------------------------- UI
   let lastStatus = null;
   let facilities = null; // ESO's saved facilities, from its configuration bundle
+  let facilityTypes = null; // ESO's location and destination type tables, kept from the last bundle seen
   let panelOpen = false;
   let host, shadow, bar, panel;
   const fmtTime = (t) => t ? new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' }) : '';
@@ -433,9 +441,9 @@
     const cat = facilities ? facilities.items : [];
     const matches = q ? cat.filter(f => f.name.toLowerCase().includes(q) && !chosen.some(c => c.id === f.id)).slice(0, 8) : [];
     return `<div class="s fac" data-key="${key}"><b>${esc(title)}</b>` +
-      `<div class="chosen">${chosen.map(c => `<span class="pill gray">${esc(c.label && c.label !== c.name ? `${c.label} (${c.name})` : c.name)} <a data-act="fac-remove" data-id="${esc(c.id)}" title="Remove">×</a></span>`).join('') || '<span class="muted">none yet</span>'}</div>` +
+      `<div class="chosen">${chosen.map(c => { const t = facilityTypeName(FACILITY_GROUPS[key === 'facilitySending' ? 'sending' : 'destination'], c); return `<span class="pill gray">${esc(c.label && c.label !== c.name ? `${c.label} (${c.name})` : c.name)}${t ? ` <span class="muted">· ${esc(t)}</span>` : ' <span class="muted">· type unknown</span>'} <a data-act="fac-remove" data-id="${esc(c.id)}" title="Remove">×</a></span>`; }).join('') || '<span class="muted">none yet</span>'}</div>` +
       (facilities ? `<input type="text" class="facq" placeholder="Type part of a facility name…" value="${esc(facSearch[key] || '')}">` +
-        `<div class="facm">${matches.map(f => `<a data-act="fac-add" data-id="${esc(f.id)}">${esc(f.name)}${f.city ? ` <span class="muted">${esc(f.city)}</span>` : ''}</a>`).join('')}${q && !matches.length ? '<span class="muted">no saved facility matches</span>' : ''}</div>`
+        `<div class="facm">${matches.map(f => { const t = typeNameFor(key === 'facilitySending' ? 'locationTypes' : 'destinationTypes', f.typeId); return `<a data-act="fac-add" data-id="${esc(f.id)}">${esc(f.name)}${f.city || t ? ` <span class="muted">${esc([f.city, t].filter(Boolean).join(' · '))}</span>` : ''}</a>`; }).join('')}${q && !matches.length ? '<span class="muted">no saved facility matches</span>' : ''}</div>`
         : '<span class="muted">Open a run first so ESO\'s facility list is loaded.</span>') + '</div>';
   }
   async function onPanelAction(e) {
@@ -477,7 +485,14 @@
     else if (act === 'fac-add' || act === 'fac-remove') {
       const key = el.closest('.fac').dataset.key; const fid = el.dataset.id;
       const list = (settings[key] || []).filter(c => c.id !== fid);
-      if (act === 'fac-add') { const f = facilities && facilities.items.find(x => x.id === fid); if (f) { const std = Object.values(FAC).find(x => x.id === f.id); list.push({ id: f.id, name: f.name, typeId: f.typeId, ...(std ? { label: std.label } : {}) }); } facSearch[key] = ''; }
+      if (act === 'fac-add') {
+        const f = facilities && facilities.items.find(x => x.id === fid);
+        if (f) {
+          const std = Object.values(FAC).find(x => x.id === f.id);
+          list.push({ id: f.id, name: f.name, typeId: f.typeId, type: typeNameFor('locationTypes', f.typeId), destType: typeNameFor('destinationTypes', f.typeId), ...(std ? { label: std.label } : {}) });
+        }
+        facSearch[key] = '';
+      }
       settings[key] = list;
       await sset({ settings }); toPage('settings', settings); renderPanel(); layoutQuick();
     }
@@ -1249,10 +1264,18 @@
     const pill = pills ? Array.from(pills.querySelectorAll('button')).find(b => /^Predefined$/i.test(norm(b.textContent))) : null;
     return { loc, pills, pill };
   }
+  // What ESO calls this kind of place: on the Scene side its location type, on the Destination
+  // side the destination type that maps to it. From the type tables of the last bundle seen.
+  function typeNameFor(list, typeId) {
+    const t = facilityTypes || facilities;
+    if (!t || !typeId) return null;
+    if (list === 'locationTypes') { const x = (t.locationTypes || []).find(x => x.id === typeId); return x ? x.name : null; }
+    const x = (t.destinationTypes || []).find(x => x.locationTypeId === typeId); return x ? x.name : null;
+  }
   function facilityTypeName(g, fac) {
-    if (!facilities || !fac.typeId) return null;
-    if (g.typeList === 'locationTypes') { const t = facilities.locationTypes.find(x => x.id === fac.typeId); return t ? t.name : null; }
-    const t = facilities.destinationTypes.find(x => x.locationTypeId === fac.typeId); return t ? t.name : null;
+    // the name kept with the chip when it was chosen, else ESO's tables, else the one id every
+    // standard chip shares (Hospital)
+    return (g.typeList === 'locationTypes' ? fac.type : fac.destType) || typeNameFor(g.typeList, fac.typeId) || (fac.typeId === 6540 ? 'Hospital' : null);
   }
   function layoutFacilities(gk) {
     const g = FACILITY_GROUPS[gk];
@@ -1344,9 +1367,8 @@
       if (blk.pill && !blk.pill.classList.contains('selected')) { blk.pill.click(); }
       const typeField = await until(() => fieldEl(g.typeRef), 3000);
       if (!typeField) throw new Error('the Predefined fields did not appear');
-      // the type from ESO's list when it has been learned this session; the standard chips are all
-      // hospitals, so Hospital otherwise
-      const typeName = facilityTypeName(g, fac) || 'Hospital';
+      const typeName = facilityTypeName(g, fac);
+      if (!typeName) throw new Error(`ESO's list does not say what kind of place ${fac.name} is. Remove it in Settings and add it again with a run open.`);
       const curType = norm((typeField.querySelector('.display-value') || typeField).textContent);
       if (curType.toUpperCase() !== typeName.toUpperCase()) {
         const qp = Array.from(typeField.querySelectorAll('.quick-picks button')).find(b => visible(b) && norm(b.textContent).toUpperCase() === typeName.toUpperCase());

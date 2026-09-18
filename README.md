@@ -48,7 +48,10 @@ to bad signal or a hung page.
   Scene and Destination locations start as the agency's standard set (short labels, ids from ESO's
   saved facilities) and can be added to or trimmed per device in Settings, which searches the
   facilities ESO's configuration bundle carries; a tap selects Predefined, sets the type to match
-  (Hospital for the standard set, through ESO's own quick-pick) and picks the name. On the Assessments tab, "All normal" on each assessment opens ESO's own Quick Ax,
+  and picks the name. Each chip keeps the kind of place ESO says it is, on the Scene side (location
+  type) and on the Destination side (destination type), so a nursing home sets Nursing Home and a
+  rehab sets Rehabilitation Center, never Hospital by default; ESO's type tables are kept on the
+  device from the last bundle seen, and Settings shows the type beside each chip. On the Assessments tab, "All normal" on each assessment opens ESO's own Quick Ax,
   presses No Abnormalities on every category still unset and presses OK; "A&Ox4" opens Mental Status
   and presses Alert and Oriented x4. On the Incident tab, Transported ALS / BLS, Refusal, Canceled
   (Prior) and Canceled (Scene) set the whole disposition set through ESO's pickers, then outline

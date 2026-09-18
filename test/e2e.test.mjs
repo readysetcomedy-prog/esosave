@@ -666,6 +666,9 @@ test('facility chips: chosen in Settings from ESO\'s saved facilities, one tap s
   const st = (await T.storage()).settings;
   assert.deepEqual(st.facilityDestination.map(f => f.name), ['Anderson Hospital', 'Breese Nursing Home']);
   assert.equal(st.facilitySending[0].typeId, 6540, 'the facility remembers its type from ESO\'s list');
+  assert.equal(st.facilityDestination[1].destType, 'Nursing Home', 'and the name ESO gives that kind of place on the Destination side');
+  assert.equal(st.facilityDestination[1].type, 'Nursing home', 'and on the Scene side');
+  assert.deepEqual(((await T.storage()).facilityTypes || {}).destinationTypes.find(t => t.id === 6577), { id: 6577, name: 'Nursing Home', locationTypeId: 6542 }, 'ESO\'s type tables are kept on the device');
   await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.panel [data-act=close]').click());
   // chips sit under each location's Predefined/Address pills
   const chips = (g) => T.page.evaluate((gg) => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll(`.quick .chip[data-group=${gg}]:not(.other)`)).map(c => ({ name: c.title, cls: c.className, rect: c.getBoundingClientRect().toJSON() })), g);
@@ -692,6 +695,15 @@ test('facility chips: chosen in Settings from ESO\'s saved facilities, one tap s
   await tap('fac-destination', 'Anderson Hospital');
   await waitFor(async () => (await T.record(id)).tree.incident?.destination?.predefinedAddress?.predefinedLocationID === 'loc-anderson', { label: 'destination changed', timeout: 15000 });
   assert.equal((await T.record(id)).tree.incident.destination.predefinedAddress.locationTypeID, 6575);
+  // a chip whose type id ESO's tables no longer know still maps by the name kept with it: never Hospital by default
+  await T.setStorage({ settings: { ...(await T.storage()).settings, facilitySending: [{ id: 'loc-rehab', name: 'Riverside Rehab', typeId: 424242, type: 'Rehabilitation Center', destType: 'Rehabilitation Center' }], facilityDestination: [{ id: 'loc-breese', name: 'Breese Nursing Home', typeId: 424242, type: 'Nursing home', destType: 'Nursing Home' }] } });
+  await T.page.goto(T.url);
+  await waitFor(() => T.page.evaluate(() => !!window.__esosave), { label: 'interceptor' });
+  await app((rid) => window.app.use(rid), id);
+  await waitFor(async () => (await chips('fac-destination')).length === 1, { label: 'chip back' });
+  await tap('fac-destination', 'Breese Nursing Home');
+  await waitFor(async () => (await T.record(id)).tree.incident?.destination?.predefinedAddress?.predefinedLocationID === 'loc-breese', { label: 'destination by kept type', timeout: 15000 });
+  assert.equal((await T.record(id)).tree.incident.destination.predefinedAddress.locationTypeID, 6577, 'Nursing Home, not Hospital');
   await T.setStorage({ settings: { ...(await T.storage()).settings, facilitySending: [], facilityDestination: [] } });
 });
 
