@@ -35,7 +35,8 @@ to bad signal or a hung page.
 - **Quick buttons.** One-tap chips for the common history items and home medications (each list
   ends with None Reported) and NKDA for allergies sit beside Add History, Add Medications and Add
   Allergies on the Patient tab; each tap opens ESO's own list, ticks the row and presses OK, the way
-  a finger would (taps that land while a list is being worked ride the next open). They hide while
+  a finger would (taps that land while a list is being worked ride the next open). A second tap on
+  a chip that is in opens the same list, unticks it and presses OK, so it comes back out. They hide while
   any ESO picker is open, and every button scrolls under
   ESO's top bar and tab strip with the page. A Race row (Asian, Latino: the rest are ESO's own
   quick-picks) sits under the Race label, and 0-9 pads above Weight and Height (feet and inches): digits gather for a moment, then

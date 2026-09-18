@@ -550,11 +550,13 @@ test('quick history chips: tap several, one open of ESO\'s Add History list tick
   await app(() => document.querySelector('shelf-panel header button').click());
   await waitFor(async () => (await app(() => document.querySelectorAll('shelf-panel').length)) === 0, { label: 'closed' });
   await waitFor(async () => (await chips()).length >= 20, { label: 'chips back' });
-  // an added chip is inert; the app's own list is left alone
+  // a second tap on a chip that is in takes it back out: open, untick, OK
   await tap('Hypertension (HTN)');
-  await sleep(1500);
-  assert.equal(await app(() => window.app.shelfOpens), opens + 1);
-  assert.equal((await T.record(id)).tree.patient.patientMedicalHistories.length, 2);
+  await waitFor(async () => (await T.record(id)).tree.patient.patientMedicalHistories.length === 1, { label: 'HTN taken out', timeout: 15000 });
+  assert.equal(Number((await T.record(id)).tree.patient.patientMedicalHistories[0].itemId), 545, 'Diabetes stays');
+  assert.equal(await app(() => window.app.shelfOpens), opens + 2);
+  await waitFor(async () => (await chips()).filter(c => /added/.test(c.cls)).map(c => c.short).join() === 'Diabetes', { label: 'HTN chip no longer shown as added' });
+  assert.equal(await app(() => document.querySelectorAll('shelf-panel').length), 0);
   // the search matched the exact name, not a lookalike ("Pulmonary Hypertension", "Type 1 Diabetes")
   const ops = rec.ops.filter(o => /patientMedicalHistories/.test(o.address));
   assert.deepEqual(ops.map(o => o.verb), ['ADD', 'ADD']);
@@ -621,6 +623,9 @@ test('quick transport: chips after each transport field pick in ESO\'s list; a f
   const rec = await waitFor(async () => { const r = await T.record(id); return (r.tree.narrative?.patientTransport?.howPatientWasMovedToStretcherIds || []).length ? r : null; }, { label: 'to-stretcher saved by the app', timeout: 15000 });
   assert.deepEqual(rec.tree.narrative.patientTransport.howPatientWasMovedToStretcherIds.map(Number), [15113]);
   await waitFor(async () => (await chips('toStretcher')).some(c => /added/.test(c.cls) && c.name === 'Lifted to stretcher via draw-sheet'), { label: 'chip shows added' });
+  await tap('Lifted to stretcher via draw-sheet'); // tapped again: taken back out through the same list
+  await waitFor(async () => !((await T.record(id)).tree.narrative?.patientTransport?.howPatientWasMovedToStretcherIds || []).map(Number).includes(15113), { label: 'draw-sheet removed', timeout: 15000 });
+  await waitFor(async () => !(await chips('toStretcher')).some(c => /added/.test(c.cls) && c.name === 'Lifted to stretcher via draw-sheet'), { label: 'chip shows it is out' });
   // to ambulance: Stretcher; from ambulance: Stretcher (two fields, one after the other)
   await tap('Stretcher');
   await waitFor(async () => ((await T.record(id)).tree.narrative?.patientTransport?.patientMovedFromSceneToAmbulanceMethodIds || []).map(Number).includes(7183), { label: 'to ambulance', timeout: 15000 });

@@ -174,6 +174,7 @@
     .quick .chip.on { background: #15803d; border-color: #15803d; color: #fff; }
     .quick .chip.added { background: #dcfce7; border-color: #86efac; color: #166534; cursor: default; }
     .quick .chip.added::before { content: '✓ '; }
+    .quick .chip.added.off { background: #fee2e2; border-color: #fca5a5; color: #991b1b; text-decoration: line-through; }
     .quick .chip.busy { opacity: .6; cursor: wait; }
     .quick .chip.padval { line-height: 26px; cursor: default; min-width: 44px; text-align: center; color: #475569; }
     .quick .chip.padval.on { color: #fff; }
@@ -900,6 +901,8 @@
   const quickEls = new Map();   // key -> element in our layer
   const pending = {}; // group -> names tapped, not yet committed
   const pend = (gk) => (pending[gk] = pending[gk] || new Set());
+  const pendingOff = {}; // group -> names tapped to take back out
+  const pendOff = (gk) => (pendingOff[gk] = pendingOff[gk] || new Set());
   const chipBusy = {}; // group -> its list is open and being ticked
   let quickBusy = false;
   const norm = (t) => (t || '').replace(/\s+/g, ' ').trim();
@@ -1011,6 +1014,7 @@
       });
       chip.classList.toggle('added', id === 'all' ? g.all.every(n => isOn(n)) : id !== 'other' && isOn(name, id));
       chip.classList.toggle('on', id === 'all' ? g.all.some(n => pend(gk).has(n)) : id !== 'other' && pend(gk).has(name));
+      chip.classList.toggle('off', id !== 'other' && id !== 'all' && pendOff(gk).has(name));
       chip.classList.toggle('busy', quickBusy);
       chip.style.display = 'block';
       chip.style.visibility = 'hidden';
@@ -1044,9 +1048,9 @@
     if (id === 'all') { // every name of the group not yet set
       for (const n of g.all) if (!shown.includes(n.toUpperCase())) pend(gk).add(n);
     } else {
-      if (run && run.lists && (run.lists[g.listKey] || []).map(Number).includes(id)) return; // already on the run
-      if (shown.includes(name.toUpperCase())) return; // already shown in the field
-      pend(gk).add(name);
+      const on = (run && run.lists && (run.lists[g.listKey] || []).map(Number).includes(id)) || shown.includes(name.toUpperCase());
+      if (on) { pend(gk).delete(name); pendOff(gk).add(name); } // in already: the tap takes it out
+      else { pendOff(gk).delete(name); pend(gk).add(name); }
     }
     layoutChips(gk);
     commitChips(gk);
@@ -1055,16 +1059,16 @@
   // while the list is being worked ride the next open, so a quick run of taps merges.
   async function commitChips(gk) {
     const g = CHIP_GROUPS[gk];
-    if (quickBusy || !pend(gk).size) return;
+    if (quickBusy || !(pend(gk).size || pendOff(gk).size)) return;
     quickBusy = true; chipBusy[gk] = true; layoutChips(gk);
     const what = g.what || (gk === 'history' ? 'history' : gk === 'meds' ? 'medications' : gk === 'allergies' ? 'allergies' : 'transport');
     const missed = [];
     try {
-      while (pend(gk).size) {
-        const names = [...pend(gk)];
+      while (pend(gk).size || pendOff(gk).size) {
+        const names = [...pend(gk)], offs = [...pendOff(gk)];
         const btn = g.field ? fieldEl(g.field) : anchorButton(g);
         if (!btn) throw new Error(g.field ? 'the field was not found' : 'the Add button was not found');
-        lateVeil(g.field ? 'Setting it in ESO…' : `Adding ${what}…`, names.join(', '));
+        lateVeil(g.field ? 'Setting it in ESO…' : `${names.length ? 'Adding' : 'Removing'} ${what}…`, [...names, ...offs].join(', '));
         (g.field ? (btn.querySelector('.shelf-click-indicator') || btn.querySelector('.field-area') || btn) : btn).click();
         const shelf = await until(() => Array.from(document.querySelectorAll('shelf-panel')).find(p => visible(p) && Array.from(p.querySelectorAll('h1, header')).some(h => g.title.test(norm(h.textContent)))), 5000);
         if (!shelf) throw new Error(`the ${what} list did not open`);
@@ -1077,6 +1081,15 @@
           (li.querySelector('.label-content') || li).click();
           if (!await until(() => { const m = li.querySelector('check-mark'); return m && m.classList.contains('selected'); }, 1500)) missed.push(name);
         }
+        for (const name of offs) { // untick what was tapped a second time
+          const li = await pickRow(shelf, name);
+          pendOff(gk).delete(name);
+          if (!li) { missed.push(name); continue; }
+          const mark = li.querySelector('check-mark');
+          if (!mark || !mark.classList.contains('selected')) continue; // not ticked after all
+          (li.querySelector('.label-content') || li).click();
+          if (!await until(() => { const m = li.querySelector('check-mark'); return !m || !m.classList.contains('selected'); }, 1500)) missed.push(name);
+        }
         await clearSearch(shelf);
         const okBtn = Array.from(shelf.querySelectorAll('header button, button')).find(b => /^OK$/i.test(norm(b.textContent)));
         if (!okBtn) throw new Error('no OK button');
@@ -1084,7 +1097,7 @@
         await until(() => closed(shelf), 4000);
       }
     } catch (e) {
-      endVeil(); quickBusy = false; chipBusy[gk] = false; pend(gk).clear(); layoutChips(gk);
+      endVeil(); quickBusy = false; chipBusy[gk] = false; pend(gk).clear(); pendOff(gk).clear(); layoutChips(gk);
       alert(`ESO Save: could not add the ${what}. ` + (e && e.message ? e.message : '') + ' The list is left as ESO shows it; finish it by hand.');
       drainChips();
       return;
@@ -1095,7 +1108,7 @@
     drainChips();
   }
   // taps on another group that landed during a commit go in next
-  function drainChips() { for (const k of Object.keys(pending)) if (pend(k).size) { commitChips(k); return; } }
+  function drainChips() { for (const k of new Set([...Object.keys(pending), ...Object.keys(pendingOff)])) if (pend(k).size || pendOff(k).size) { commitChips(k); return; } }
 
   // ---- acuity: red / yellow / green next to the label, opens ESO's picker and picks the colour
   const ACUITY_REF = { 'Initial Patient Acuity': 'INITIALPATIENTACUITYID', 'Final Patient Acuity': 'FINALPATIENTACUITYID' };
