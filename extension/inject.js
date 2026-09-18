@@ -707,7 +707,11 @@
   async function pipeline(kind, req) {
     // req: { method, url, headers, body }
     if (req.headers) {
-      for (const [k, v] of Object.entries(req.headers)) if (k.toLowerCase() === 'x-custom-xsrf-token' && v) S.xsrf = v;
+      for (const [k, v] of Object.entries(req.headers)) if (k.toLowerCase() === 'x-custom-xsrf-token' && v) {
+        const first = !S.xsrf;
+        S.xsrf = v;
+        if (first && anyHeld()) kick(300); // held changes were waiting on the app's token: push now
+      }
     }
     if (kind.type !== 'view' && kind.type !== 'autosave' && kind.type !== 'create') maybeLearnCompanion(req);
     switch (kind.type) {
