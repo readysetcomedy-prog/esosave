@@ -72,7 +72,7 @@
       if (!(settings.facilitySending || []).length) settings.facilitySending = DEFAULT_SETTINGS.facilitySending.map(f => ({ ...f }));
       if (!(settings.facilityDestination || []).length) settings.facilityDestination = DEFAULT_SETTINGS.facilityDestination.map(f => ({ ...f }));
       settings.facilityDefaults = 1;
-      if (all.settings) await sset({ settings });
+      await sset({ settings });
     }
     return { runs, templates: all.templates || null, settings, all };
   }
@@ -900,7 +900,7 @@
   const quickEls = new Map();   // key -> element in our layer
   const pending = {}; // group -> names tapped, not yet committed
   const pend = (gk) => (pending[gk] = pending[gk] || new Set());
-  const commitTimers = {};
+  const chipBusy = {}; // group -> its list is open and being ticked
   let quickBusy = false;
   const norm = (t) => (t || '').replace(/\s+/g, ' ').trim();
   const visible = (el) => {
@@ -928,7 +928,7 @@
   const wait = (ms) => new Promise(r => setTimeout(r, ms));
   async function until(fn, timeout, step) {
     const t0 = Date.now();
-    for (;;) { const v = fn(); if (v) return v; if (Date.now() - t0 > timeout) return null; await wait(step || 80); }
+    for (;;) { const v = fn(); if (v) return v; if (Date.now() - t0 > timeout) return null; await wait(step || 30); }
   }
   function ensureQuickLayer() {
     if (quickLayer || !shadow) return quickLayer;
@@ -1036,65 +1036,66 @@
     (g.field ? (el.querySelector('.shelf-click-indicator') || el.querySelector('.field-area') || el) : el).click();
   }
   function tapChip(gk, name, id) {
-    if (quickBusy) return;
     const g = CHIP_GROUPS[gk];
+    if (quickBusy && !Object.values(chipBusy).some(Boolean)) return; // something else is driving ESO; a tap during a chip commit queues
+
     const run = currentRun();
     const shown = g.field ? shownParts(g.field) : [];
     if (id === 'all') { // every name of the group not yet set
-      const want = g.all.filter(n => !shown.includes(n.toUpperCase()));
-      if (want.some(n => pend(gk).has(n))) for (const n of want) pend(gk).delete(n); else for (const n of want) pend(gk).add(n);
+      for (const n of g.all) if (!shown.includes(n.toUpperCase())) pend(gk).add(n);
     } else {
       if (run && run.lists && (run.lists[g.listKey] || []).map(Number).includes(id)) return; // already on the run
       if (shown.includes(name.toUpperCase())) return; // already shown in the field
-      if (pend(gk).has(name)) pend(gk).delete(name); else pend(gk).add(name);
+      pend(gk).add(name);
     }
     layoutChips(gk);
-    clearTimeout(commitTimers[gk]);
-    if (pend(gk).size) commitTimers[gk] = setTimeout(() => commitChips(gk), 1500);
+    commitChips(gk);
   }
+  // Each tap opens ESO's list, ticks the row and presses OK, like a finger would. Taps that land
+  // while the list is being worked ride the next open, so a quick run of taps merges.
   async function commitChips(gk) {
     const g = CHIP_GROUPS[gk];
     if (quickBusy || !pend(gk).size) return;
-    const names = [...pend(gk)];
-    quickBusy = true; layoutChips(gk);
-    const missed = [];
+    quickBusy = true; chipBusy[gk] = true; layoutChips(gk);
     const what = g.what || (gk === 'history' ? 'history' : gk === 'meds' ? 'medications' : gk === 'allergies' ? 'allergies' : 'transport');
+    const missed = [];
     try {
-      const btn = g.field ? fieldEl(g.field) : anchorButton(g);
-      if (!btn) throw new Error(g.field ? 'the field was not found' : 'the Add button was not found');
-      showVeilMessage(g.field ? 'Setting it in ESO…' : `Adding ${what}…`, names.join(', '));
-      (g.field ? (btn.querySelector('.shelf-click-indicator') || btn.querySelector('.field-area') || btn) : btn).click();
-      const shelf = await until(() => Array.from(document.querySelectorAll('shelf-panel')).find(p => visible(p) && Array.from(p.querySelectorAll('h1, header')).some(h => g.title.test(norm(h.textContent)))), 5000);
-      if (!shelf) throw new Error(`the ${what} list did not open`);
-      const input = await until(() => shelf.querySelector('eso-search-input input, input[type=text]'), 3000);
-      if (!input) throw new Error('no search box in the list');
-      const setSearch = async (t) => { input.focus(); input.value = t; input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event('change', { bubbles: true })); await wait(120); };
-      const labelOf = (l) => { const d = l.querySelector('.label-container > div, .label-container div'); return norm((d || l).textContent).toUpperCase(); };
-      for (const name of names) {
-        await setSearch(name);
-        const li = await until(() => Array.from(shelf.querySelectorAll('li')).find(l => visible(l) && labelOf(l) === name.toUpperCase()), 3000);
-        if (!li) { missed.push(name); continue; }
-        const mark = li.querySelector('check-mark');
-        if (mark && mark.classList.contains('selected')) { pend(gk).delete(name); continue; } // already ticked
-        (li.querySelector('.label-content') || li).click();
-        const ok = await until(() => { const m = li.querySelector('check-mark'); return m && m.classList.contains('selected'); }, 1500);
-        if (!ok) missed.push(name); else pend(gk).delete(name);
+      while (pend(gk).size) {
+        const names = [...pend(gk)];
+        const btn = g.field ? fieldEl(g.field) : anchorButton(g);
+        if (!btn) throw new Error(g.field ? 'the field was not found' : 'the Add button was not found');
+        lateVeil(g.field ? 'Setting it in ESO…' : `Adding ${what}…`, names.join(', '));
+        (g.field ? (btn.querySelector('.shelf-click-indicator') || btn.querySelector('.field-area') || btn) : btn).click();
+        const shelf = await until(() => Array.from(document.querySelectorAll('shelf-panel')).find(p => visible(p) && Array.from(p.querySelectorAll('h1, header')).some(h => g.title.test(norm(h.textContent)))), 5000);
+        if (!shelf) throw new Error(`the ${what} list did not open`);
+        for (const name of names) {
+          const li = await pickRow(shelf, name);
+          pend(gk).delete(name);
+          if (!li) { missed.push(name); continue; }
+          const mark = li.querySelector('check-mark');
+          if (mark && mark.classList.contains('selected')) continue; // already ticked
+          (li.querySelector('.label-content') || li).click();
+          if (!await until(() => { const m = li.querySelector('check-mark'); return m && m.classList.contains('selected'); }, 1500)) missed.push(name);
+        }
+        await clearSearch(shelf);
+        const okBtn = Array.from(shelf.querySelectorAll('header button, button')).find(b => /^OK$/i.test(norm(b.textContent)));
+        if (!okBtn) throw new Error('no OK button');
+        okBtn.click();
+        await until(() => closed(shelf), 4000);
       }
-      await setSearch('');
-      const okBtn = Array.from(shelf.querySelectorAll('header button, button')).find(b => /^OK$/i.test(norm(b.textContent)));
-      if (!okBtn) throw new Error('no OK button');
-      okBtn.click();
-      await until(() => !document.body.contains(shelf) || !visible(shelf), 4000);
     } catch (e) {
-      hideVeil(); quickBusy = false; layoutChips(gk);
+      endVeil(); quickBusy = false; chipBusy[gk] = false; pend(gk).clear(); layoutChips(gk);
       alert(`ESO Save: could not add the ${what}. ` + (e && e.message ? e.message : '') + ' The list is left as ESO shows it; finish it by hand.');
+      drainChips();
       return;
     }
-    hideVeil(); quickBusy = false;
-    for (const n of names) if (!missed.includes(n)) pend(gk).delete(n);
+    endVeil(); quickBusy = false; chipBusy[gk] = false;
     layoutChips(gk);
     if (missed.length) alert('ESO Save: not found in ESO\'s list, add by hand: ' + missed.join(', '));
+    drainChips();
   }
+  // taps on another group that landed during a commit go in next
+  function drainChips() { for (const k of Object.keys(pending)) if (pend(k).size) { commitChips(k); return; } }
 
   // ---- acuity: red / yellow / green next to the label, opens ESO's picker and picks the colour
   const ACUITY_REF = { 'Initial Patient Acuity': 'INITIALPATIENTACUITYID', 'Final Patient Acuity': 'FINALPATIENTACUITYID' };
@@ -1275,24 +1276,40 @@
     const need = (row + 1) * rowH + 6;
     if (blk.pills.style.marginBottom !== need + 'px') blk.pills.style.marginBottom = need + 'px';
   }
-  async function pickSingle(field, name, search) {
+  const rowLabel = (l) => norm((l.querySelector('.label-container > div, .label-container div') || l).textContent).toUpperCase();
+  const findRow = (shelf, name) => Array.from(shelf.querySelectorAll('li')).find(l => visible(l) && rowLabel(l) === name.toUpperCase());
+  // The row named exactly this, in an open list. The row is taken straight from the list when
+  // it is there (the usual case: a tap, a click, done); only a list too long to show it all gets
+  // the name typed into its search box first.
+  async function pickRow(shelf, name) {
+    let li = findRow(shelf, name) || await until(() => findRow(shelf, name), 250);
+    if (li) return li;
+    const input = shelf.querySelector('eso-search-input input, input[type=text]');
+    if (!input) return null;
+    input.focus(); input.value = name; input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event('change', { bubbles: true }));
+    li = await until(() => findRow(shelf, name), 3000);
+    return li;
+  }
+  async function clearSearch(shelf) {
+    const input = shelf.querySelector('eso-search-input input, input[type=text]');
+    if (input && input.value) { input.value = ''; input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event('change', { bubbles: true })); await wait(30); }
+  }
+  const closed = (shelf) => !document.body.contains(shelf) || !visible(shelf);
+  async function pickSingle(field, name) {
     // open a single-select field's picker and choose the item named exactly this
     (field.querySelector('.shelf-click-indicator') || field.querySelector('.field-area') || field).click();
     const shelf = await until(() => Array.from(document.querySelectorAll('shelf-panel')).find(visible), 4000);
     if (!shelf) throw new Error('the list did not open');
-    if (search) {
-      const input = shelf.querySelector('eso-search-input input, input[type=text]');
-      if (input) { input.focus(); input.value = name; input.dispatchEvent(new Event('input', { bubbles: true })); await wait(150); }
-    }
-    const li = await until(() => Array.from(shelf.querySelectorAll('li')).find(l => visible(l) && norm((l.querySelector('.label-container > div') || l).textContent).toUpperCase() === name.toUpperCase()), 3000);
+    const li = await pickRow(shelf, name);
     if (!li) throw new Error(`"${name}" is not in the list`);
     (li.querySelector('.label-content') || li).click();
-    await wait(120);
-    if (document.body.contains(shelf) && visible(shelf)) {
+    // a single-select list closes itself; a multi-select one waits for OK
+    if (!await until(() => closed(shelf), 300)) {
+      await clearSearch(shelf);
       const okBtn = Array.from(shelf.querySelectorAll('header button, button')).find(b => /^OK$/i.test(norm(b.textContent)));
       if (okBtn) okBtn.click();
+      await until(() => closed(shelf), 3000);
     }
-    await until(() => !document.body.contains(shelf) || !visible(shelf), 3000);
   }
   async function openFacilityList(gk) {
     if (quickBusy) return;
@@ -1310,7 +1327,7 @@
     try {
       const blk = locationBlock(g);
       if (!blk) throw new Error('the location section was not found');
-      showVeilMessage('Setting the facility…', fac.name);
+      lateVeil('Setting the facility…', fac.name);
       if (blk.pill && !blk.pill.classList.contains('selected')) { blk.pill.click(); }
       const typeField = await until(() => fieldEl(g.typeRef), 3000);
       if (!typeField) throw new Error('the Predefined fields did not appear');
@@ -1322,18 +1339,17 @@
         const qp = Array.from(typeField.querySelectorAll('.quick-picks button')).find(b => visible(b) && norm(b.textContent).toUpperCase() === typeName.toUpperCase());
         if (qp) qp.click();
         const ok = qp && await until(() => norm((typeField.querySelector('.display-value') || typeField).textContent).toUpperCase() === typeName.toUpperCase(), 1500, 60);
-        if (!ok) await pickSingle(typeField, typeName, false);
-        await wait(250);
+        if (!ok) await pickSingle(typeField, typeName);
       }
       const nameField = await until(() => { const f = fieldEl(g.nameRef); return f && !f.hasAttribute('disabled') ? f : null; }, 4000);
       if (!nameField) throw new Error('the name field is not ready');
-      await pickSingle(nameField, fac.name, true);
+      await pickSingle(nameField, fac.name);
     } catch (e) {
-      hideVeil(); quickBusy = false; layoutFacilities(gk);
+      endVeil(); quickBusy = false; layoutFacilities(gk);
       alert('ESO Save: could not set the facility. ' + (e && e.message ? e.message : ''));
       return;
     }
-    hideVeil(); quickBusy = false; layoutFacilities(gk);
+    endVeil(); quickBusy = false; layoutFacilities(gk);
   }
   // ---- assessments: "All normal" opens ESO's own Quick Ax for that assessment and presses
   // No Abnormalities on every category still unset, then OK; "A&Ox4" opens Mental Status and
@@ -1450,7 +1466,7 @@
       qp.click();
       if (await until(() => norm(fieldValue(ref)).toUpperCase() === fullName.toUpperCase() || (fieldValue(ref) || '').toUpperCase().includes(quickLabel.toUpperCase()), 1200, 60)) return true;
     }
-    await pickSingle(f, fullName, true);
+    await pickSingle(f, fullName);
     return true;
   }
   const DISPO = {
@@ -1486,15 +1502,15 @@
     const d = DISPO[k];
     quickBusy = true; layoutDisposition();
     try {
-      showVeilMessage(d.text, d.steps.map(s => s[1]).join(', '));
-      for (const [ref, name, quick] of d.steps) { await setSingle(ref, name, quick); await wait(200); }
+      lateVeil(d.text, d.steps.map(s => s[1]).join(', '));
+      for (const [ref, name, quick] of d.steps) { await setSingle(ref, name, quick); await wait(60); }
       for (const ref of d.needs) needs.set(ref, ref === 'TRANSPORTMODEID' ? 'Transport Mode needed' : 'Reason needed');
     } catch (e) {
-      hideVeil(); quickBusy = false; layoutDisposition();
+      endVeil(); quickBusy = false; layoutDisposition();
       alert('ESO Save: could not finish the disposition. ' + (e && e.message ? e.message : '') + ' Check the fields and finish by hand.');
       return;
     }
-    hideVeil(); quickBusy = false; layoutDisposition(); layoutNeeds();
+    endVeil(); quickBusy = false; layoutDisposition(); layoutNeeds();
   }
   // ---- response mode to scene: Emergent / Non-Emergent / Other… above the field, one tap even
   // once the field is set (ESO's own quick-picks only show while it is empty)
@@ -1539,8 +1555,9 @@
             const f2 = fieldEl(row.ref); if (!f2) return;
             if (k === 'other') { (f2.querySelector('.shelf-click-indicator') || f2).click(); return; }
             quickBusy = true; layoutSingleRows();
+            lateVeil('Setting it in ESO…', `${row.what}: ${full}`);
             try { await setSingle(row.ref, full, quick); } catch (err) { alert(`ESO Save: could not set ${row.what}. ` + (err && err.message ? err.message : '')); }
-            quickBusy = false; layoutSingleRows();
+            endVeil(); quickBusy = false; layoutSingleRows();
           });
           return el;
         });
@@ -1606,7 +1623,7 @@
     try {
       const f = fieldReady(pad.ref);
       if (!f) throw new Error('the field was not found');
-      showVeilMessage('Entering it in ESO…', `${pad.what}: ${v}`);
+      lateVeil('Entering it in ESO…', `${pad.what}: ${v}`);
       (f.querySelector('.shelf-click-indicator') || f.querySelector('.field-area') || f).click();
       const shelf = await until(() => Array.from(document.querySelectorAll('shelf-panel')).find(p => visible(p) && p.querySelector('eso-masked-input input, numpad, eso-numpad')), 4000);
       if (!shelf) throw new Error('the number pad did not open');
@@ -1622,11 +1639,11 @@
       if (!closed) throw new Error('ESO did not accept ' + v);
       await until(() => norm(fieldValue(pad.ref)).startsWith(v), 2000);
     } catch (e) {
-      hideVeil(); quickBusy = false; padValue[pk] = ''; layoutPads();
+      endVeil(); quickBusy = false; padValue[pk] = ''; layoutPads();
       alert(`ESO Save: could not enter ${pad.what}. ` + (e && e.message ? e.message : '') + ' Enter it by hand.');
       return;
     }
-    hideVeil(); quickBusy = false; padValue[pk] = ''; layoutPads();
+    endVeil(); quickBusy = false; padValue[pk] = ''; layoutPads();
   }
   function layoutNeeds() {
     const run = currentRun();
@@ -1725,7 +1742,7 @@
         const f = await until(() => fieldReady(ref), 2500);
         if (!f || norm(fieldValue(ref))) continue; // only fields still empty
         await setSingle(ref, name, quick);
-        await wait(150);
+        await wait(60);
       }
     } catch (e) { /* leave the rest to the crew */ }
     autoBusy = false;
@@ -1874,6 +1891,13 @@
     }
     for (const [el, btn] of copyButtons) { if (!keep.has(el)) { btn.remove(); copyButtons.delete(el); } }
   }
+  // Most picks are over in a blink; the overlay only appears if one takes longer than that.
+  let lateVeilTimer = null;
+  function lateVeil(title, text, after = 500) {
+    clearTimeout(lateVeilTimer);
+    lateVeilTimer = setTimeout(() => showVeilMessage(title, text), after);
+  }
+  function endVeil() { clearTimeout(lateVeilTimer); lateVeilTimer = null; hideVeil(); }
   function showVeilMessage(title, text) {
     hideVeil();
     if (!shadow) return;

@@ -534,28 +534,26 @@ test('quick history chips: tap several, one open of ESO\'s Add History list tick
   assert.ok(all.some(c => c.rect.top > btn.bottom), 'later chips wrap under the button');
   assert.ok(all.every(c => c.rect.bottom < next.top), 'no chip sits on the next field: the button made room');
   const tap = async (name) => { await waitFor(() => T.page.evaluate((n) => !!Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .chip')).find(x => x.title === n), name), { label: 'chip ' + name }); await T.page.evaluate((n) => { Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .chip')).find(x => x.title === n).click(); }, name); };
+  // each tap goes straight into ESO's list: open, tick, OK. Two quick taps may share one open.
   await tap('Hypertension (HTN)');
   await tap('Diabetes');
-  await tap('Chronic Obstructive Pulmonary Disease (COPD)');
-  await tap('Chronic Obstructive Pulmonary Disease (COPD)'); // tapped twice = off again
-  assert.deepEqual((await chips()).filter(c => /\bon\b/.test(c.cls)).map(c => c.short), ['HTN', 'Diabetes']);
-  // "Other…" opens ESO's own Add History list and nothing else
-  await T.page.evaluate(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .chip[data-group=history]')).find(c => /other/.test(c.className)).click());
-  await waitFor(async () => (await app(() => window.app.shelfOpens)) === 1, { label: 'Add History opened by Other…' });
-  await app(() => document.querySelector('shelf-panel header button').click());
-  await waitFor(async () => (await app(() => document.querySelectorAll('shelf-panel').length)) === 0, { label: 'closed' });
-  // the pending chips still commit once the list is closed
-  await waitFor(async () => (await chips()).length >= 20, { label: 'chips back' });
   const rec = await waitFor(async () => { const r = await T.record(id); const h = (r.tree.patient && r.tree.patient.patientMedicalHistories) || []; return h.length === 2 ? r : null; }, { label: 'both on ESO', timeout: 15000 });
   assert.deepEqual(rec.tree.patient.patientMedicalHistories.map(h => Number(h.itemId)).sort(), [545, 547]);
-  assert.equal(await app(() => window.app.shelfOpens), 2, 'one open for Other…, one for the two chips');
-  assert.equal(await app(() => document.querySelectorAll('shelf-panel').length), 0, 'list closed with OK');
+  await waitFor(async () => (await app(() => document.querySelectorAll('shelf-panel').length)) === 0, { label: 'list closed with OK' });
+  const opens = await app(() => window.app.shelfOpens);
+  assert.ok(opens >= 1 && opens <= 2, 'one open per tap, or one for both: ' + opens);
   assert.match(await app(() => document.getElementById('histlist').textContent), /Hypertension \(HTN\)Diabetes/);
   await waitFor(async () => (await chips()).filter(c => /added/.test(c.cls)).length === 2, { label: 'chips show added' });
+  // "Other…" opens ESO's own Add History list and nothing else
+  await T.page.evaluate(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .chip[data-group=history]')).find(c => /other/.test(c.className)).click());
+  await waitFor(async () => (await app(() => window.app.shelfOpens)) === opens + 1, { label: 'Add History opened by Other…' });
+  await app(() => document.querySelector('shelf-panel header button').click());
+  await waitFor(async () => (await app(() => document.querySelectorAll('shelf-panel').length)) === 0, { label: 'closed' });
+  await waitFor(async () => (await chips()).length >= 20, { label: 'chips back' });
   // an added chip is inert; the app's own list is left alone
   await tap('Hypertension (HTN)');
-  await sleep(2000);
-  assert.equal(await app(() => window.app.shelfOpens), 2);
+  await sleep(1500);
+  assert.equal(await app(() => window.app.shelfOpens), opens + 1);
   assert.equal((await T.record(id)).tree.patient.patientMedicalHistories.length, 2);
   // the search matched the exact name, not a lookalike ("Pulmonary Hypertension", "Type 1 Diabetes")
   const ops = rec.ops.filter(o => /patientMedicalHistories/.test(o.address));
