@@ -215,8 +215,8 @@
   app.ssSetForTest = (ref, id) => ssSet(ref, id);
   function ssHtml(ref) {
     const d = SS[ref];
-    const qp = d.quick ? `<div class="quick-picks">${Object.entries(d.quick).map(([id, l]) => `<button class="btn" data-id="${id}">${l}</button>`).join('')}</div>` : '';
-    return `<eso-field class="field" data-field-ref="${ref}"><div class="label-container"><label>${d.label}</label></div><div class="line field-area"><div class="display-value"></div><div class="shelf-click-indicator">&#9776;</div></div>${qp}</eso-field>`;
+    const qp = d.quick ? `<div class="quick-picks">${Object.entries(d.quick).map(([id, l]) => `<button class="btn" data-id="${id}">${l}</button>`).join('')}<button class="btn other standard-select-icon">Other &#9776;</button></div>` : '';
+    return `<eso-field class="field" data-field-ref="${ref}"><div class="label-container"><label>${d.label}</label></div><eso-control><div class="area-wrap"><div class="line field-area"><div class="display-value"></div><div class="shelf-click-indicator">&#9776;</div></div></div>${qp}</eso-control></eso-field>`;
   }
   const nameOf = (ref, id) => (SS[ref].list.find(x => x[0] === Number(id)) || [0, ''])[1];
   function ssRender(ref) {
@@ -225,6 +225,8 @@
     const names = Array.isArray(v) ? v.map(id => nameOf(ref, id)).join(', ') : (v ? nameOf(ref, v) : '');
     f.querySelector('.display-value').textContent = names;
     const qp = f.querySelector('.quick-picks'); if (qp) qp.style.display = names ? 'none' : '';
+    // like ESO: while the quick-picks show, the value line and its list icon are folded away
+    if (qp) f.querySelector('.area-wrap').setAttribute('style', names ? '' : 'overflow:hidden;width:0;visibility:hidden;position:absolute');
     // like ESO: patient/transport dispositions only apply once contact was made; transport mode only when transporting
     if (ref === 'UNITDISPOSITIONITEMID') for (const dep of ['PATIENTEVALUATIONCAREDISPOSITIONITEMID', 'TRANSPORTDISPOSITIONITEMID']) document.querySelector(`eso-field[data-field-ref="${dep}"]`).toggleAttribute('disabled', v !== 14402);
     if (ref === 'RUNTYPEID') { // ESO only shows Mutual Aid for that run type: folded away in a hidden wrapper, disabled
@@ -316,7 +318,8 @@
   for (const [ref, d] of Object.entries(SS)) if (d.host) document.getElementById(d.host).insertAdjacentHTML('beforeend', ssHtml(ref));
   for (const ref of Object.keys(SS)) {
     const f = document.querySelector(`eso-field[data-field-ref="${ref}"]`); if (!f) continue;
-    f.querySelectorAll('.quick-picks button').forEach(b => b.addEventListener('click', () => { if (f.hasAttribute('disabled')) return; ssSet(ref, Number(b.dataset.id)); }));
+    f.querySelectorAll('.quick-picks button[data-id]').forEach(b => b.addEventListener('click', () => { if (f.hasAttribute('disabled')) return; ssSet(ref, Number(b.dataset.id)); }));
+    const otherBtn = f.querySelector('.quick-picks button.other'); if (otherBtn) otherBtn.addEventListener('click', () => f.querySelector('.shelf-click-indicator').click());
     f.querySelector('.shelf-click-indicator').addEventListener('click', () => {
       if (f.hasAttribute('disabled')) return;
       const d = SS[ref];

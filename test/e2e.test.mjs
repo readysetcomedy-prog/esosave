@@ -762,7 +762,7 @@ test('disposition buttons set the whole set through ESO\'s pickers and quick-pic
   await waitFor(async () => (await btns()).length === 6, { label: 'buttons back' });
   // no row of ours over Response Mode to Scene: ESO shows Emergent / Non-Emergent / Other itself
   assert.equal(await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick [data-group=sr-resp]').length), 0);
-  const unit = await T.page.evaluate(() => { const f = document.querySelector('eso-field[data-field-ref=UNITDISPOSITIONITEMID]'); return { f: f.getBoundingClientRect().toJSON(), lab: f.querySelector('label').getBoundingClientRect().toJSON(), area: f.querySelector('.field-area').getBoundingClientRect().toJSON() }; });
+  const unit = await T.page.evaluate(() => { const f = document.querySelector('eso-field[data-field-ref=UNITDISPOSITIONITEMID]'); return { f: f.getBoundingClientRect().toJSON(), lab: f.querySelector('label').getBoundingClientRect().toJSON(), area: (f.querySelector('eso-control') || f.querySelector('.field-area')).getBoundingClientRect().toJSON() }; });
   const first = (await btns())[0];
   assert.ok(first.rect.top >= unit.lab.bottom && first.rect.bottom <= unit.area.top && Math.abs(first.rect.left - unit.f.left) < 4, 'row sits under the Unit Disposition label, above its value');
   const press = async (g) => { await waitFor(async () => { const b = (await btns()).find(x => x.g === g); return b && !/busy/.test(b.cls); }, { label: g }); await T.page.evaluate((gg) => document.getElementById('esosave-host').shadowRoot.querySelector(`.quick [data-group=${gg}]`).click(), g); };
@@ -853,7 +853,7 @@ test('Run Type, Mutual Aid, EMD Complaint and Requested By rows; Mutual Aid only
   assert.deepEqual((await row('sr-reqby')).map(b => b.text), ['Physician', 'Law Enforcement', 'Fire Dept', 'Other Healthcare']);
   assert.ok(!(await row('sr-emd')).some(b => /Breathing|Sick Person|Traffic|Other/.test(b.text)));
   assert.equal((await row('sr-mutual')).length, 0, 'Mutual Aid row hidden while ESO keeps the field folded away (its box still measures)');
-  const fld = await T.page.evaluate(() => { const f = document.querySelector('eso-field[data-field-ref=EMDCOMPLAINTID]'); return { f: f.getBoundingClientRect().toJSON(), lab: f.querySelector('label').getBoundingClientRect().toJSON(), area: f.querySelector('.field-area').getBoundingClientRect().toJSON() }; });
+  const fld = await T.page.evaluate(() => { const f = document.querySelector('eso-field[data-field-ref=EMDCOMPLAINTID]'); return { f: f.getBoundingClientRect().toJSON(), lab: f.querySelector('label').getBoundingClientRect().toJSON(), area: (f.querySelector('eso-control') || f.querySelector('.field-area')).getBoundingClientRect().toJSON() }; });
   const emd = await row('sr-emd');
   assert.ok(emd.every(c => c.rect.top >= fld.lab.bottom && c.rect.bottom <= fld.area.top + 2 && c.rect.right <= fld.f.right + 2), 'EMD chips wrap into rows under the label, above the value, within the field width');
   assert.ok(new Set(emd.map(c => Math.round(c.rect.top))).size >= 2, 'more than one row');

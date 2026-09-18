@@ -1075,6 +1075,16 @@
     return el ? (el.closest('button, a') || el) : null;
   }
   const fieldEl = (ref) => { const f = document.querySelector(`eso-field[data-field-ref="${ref}"]`); return f && visible(f) ? f : null; };
+  // Open a field's list the way a finger would. While ESO shows a field's quick-picks it hides
+  // the list icon and puts the list behind the quick-picks' own "Other" button.
+  function openPicker(f) {
+    if (!f) return false;
+    const other = Array.from(f.querySelectorAll('.quick-picks button')).find(b => visible(b) && (b.classList.contains('other') || /^Other$/i.test(norm(b.textContent))));
+    const icon = Array.from(f.querySelectorAll('.shelf-click-indicator')).find(visible);
+    const area = Array.from(f.querySelectorAll('.field-area')).find(visible);
+    (other || icon || area || f.querySelector('.shelf-click-indicator') || f).click();
+    return true;
+  }
   function layoutChips(gk) {
     const g = CHIP_GROUPS[gk];
     const run = currentRun();
@@ -1128,7 +1138,7 @@
     const g = CHIP_GROUPS[gk];
     const el = g.field ? fieldEl(g.field) : anchorButton(g);
     if (!el) return;
-    (g.field ? (el.querySelector('.shelf-click-indicator') || el.querySelector('.field-area') || el) : el).click();
+    if (g.field) openPicker(el); else el.click();
   }
   function tapChip(gk, name, id) {
     const g = CHIP_GROUPS[gk];
@@ -1160,7 +1170,7 @@
         const btn = g.field ? fieldEl(g.field) : anchorButton(g);
         if (!btn) throw new Error(g.field ? 'the field was not found' : 'the Add button was not found');
         lateVeil(g.field ? 'Setting it in ESO…' : `${names.length ? 'Adding' : 'Removing'} ${what}…`, [...names, ...offs].join(', '));
-        (g.field ? (btn.querySelector('.shelf-click-indicator') || btn.querySelector('.field-area') || btn) : btn).click();
+        if (g.field) openPicker(btn); else btn.click();
         const shelf = await until(() => Array.from(document.querySelectorAll('shelf-panel')).find(p => visible(p) && Array.from(p.querySelectorAll('h1, header')).some(h => g.title.test(norm(h.textContent)))), 5000);
         if (!shelf) throw new Error(`the ${what} list did not open`);
         for (const name of names) {
@@ -1409,7 +1419,7 @@
   const closed = (shelf) => !document.body.contains(shelf) || !visible(shelf);
   async function pickSingle(field, name) {
     // open a single-select field's picker and choose the item named exactly this
-    (field.querySelector('.shelf-click-indicator') || field.querySelector('.field-area') || field).click();
+    openPicker(field);
     const shelf = await until(() => Array.from(document.querySelectorAll('shelf-panel')).find(visible), 4000);
     if (!shelf) throw new Error('the list did not open');
     const li = await pickRow(shelf, name);
@@ -1430,7 +1440,7 @@
     if (blk.pill && !blk.pill.classList.contains('selected')) blk.pill.click();
     const name = await until(() => fieldEl(g.nameRef), 2000);
     const f = name && !name.hasAttribute('disabled') ? name : fieldEl(g.typeRef);
-    if (f) (f.querySelector('.shelf-click-indicator') || f.querySelector('.field-area') || f).click();
+    openPicker(f);
   }
   async function pickFacility(gk, fac) {
     if (quickBusy) return;
@@ -1588,6 +1598,7 @@
     scene: { text: 'Canceled (Scene)', steps: [['UNITDISPOSITIONITEMID', 'Canceled on Scene'], ['CREWDISPOSITIONITEMID', 'Back in Service, No Care or Support Services Required']], needs: [] },
   };
   const needs = new Map(); // ref -> message, outlined until the field has a value
+  let needsRun = null;
   function layoutDisposition() {
     const run = currentRun();
     const first = settings.quickDisposition === false || !run || run.locked || !onTab('Incident') || shelfOpen() ? null : fieldEl('UNITDISPOSITIONITEMID');
@@ -1599,7 +1610,7 @@
       const b = quickEl('dp:' + k, () => {
         const el = document.createElement('button'); el.type = 'button'; el.className = 'allnone' + (d.other ? ' other' : ''); el.dataset.group = 'dispo-' + k; el.textContent = d.text; el.title = d.other ? 'Open ESO\'s Unit Disposition list' : d.steps.map(s => s[1]).join(' · ');
         el.addEventListener('pointerdown', (e) => e.stopPropagation());
-        el.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); if (d.other) { if (!quickBusy) { const f = fieldEl('UNITDISPOSITIONITEMID'); if (f) (f.querySelector('.shelf-click-indicator') || f).click(); } } else runDisposition(k); });
+        el.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); if (d.other) { if (!quickBusy) openPicker(fieldEl('UNITDISPOSITIONITEMID')); } else runDisposition(k); });
         return el;
       });
       b.classList.toggle('busy', quickBusy);
@@ -1664,7 +1675,7 @@
             e.preventDefault(); e.stopPropagation();
             if (quickBusy) return;
             const f2 = fieldEl(row.ref); if (!f2) return;
-            if (k === 'other') { (f2.querySelector('.shelf-click-indicator') || f2).click(); return; }
+            if (k === 'other') { openPicker(f2); return; }
             quickBusy = true; layoutSingleRows();
             lateVeil('Setting it in ESO…', `${row.what}: ${full}`);
             try { await setSingle(row.ref, full, quick); } catch (err) { alert(`ESO Save: could not set ${row.what}. ` + (err && err.message ? err.message : '')); }
@@ -1735,7 +1746,7 @@
       const f = fieldReady(pad.ref);
       if (!f) throw new Error('the field was not found');
       lateVeil('Entering it in ESO…', `${pad.what}: ${v}`);
-      (f.querySelector('.shelf-click-indicator') || f.querySelector('.field-area') || f).click();
+      openPicker(f);
       const shelf = await until(() => Array.from(document.querySelectorAll('shelf-panel')).find(p => visible(p) && p.querySelector('eso-masked-input input, numpad, eso-numpad')), 4000);
       if (!shelf) throw new Error('the number pad did not open');
       const input = await until(() => shelf.querySelector('eso-masked-input input, input[type=text], input:not([type])'), 2000);
@@ -1759,11 +1770,13 @@
   function layoutNeeds() {
     const run = currentRun();
     if (!run || !onTab('Incident') || shelfOpen()) { dropQuick('nd:'); return; }
+    if (needsRun !== run.recordId) { needs.clear(); needsRun = run.recordId; } // another run: its own answers
     for (const [ref, msg] of needs) {
       const f = fieldEl(ref);
       const v = f ? f.querySelector('.display-value') : null;
       const filled = v && norm(v.textContent);
-      if (!f || filled) { needs.delete(ref); dropQuick('nd:' + ref); continue; }
+      if (!f) { dropQuick('nd:' + ref); continue; } // off screen for the moment (a tab hop): still owed
+      if (filled) { needs.delete(ref); dropQuick('nd:' + ref); continue; }
       const r = f.getBoundingClientRect();
       const box = quickEl('nd:' + ref, () => { const el = document.createElement('div'); el.className = 'need'; return el; });
       box.dataset.msg = msg;
