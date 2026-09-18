@@ -38,8 +38,7 @@ to bad signal or a hung page.
   a finger would (taps that land while a list is being worked ride the next open). A second tap on
   a chip that is in opens the same list, unticks it and presses OK, so it comes back out. They hide while
   any ESO picker is open, and every button scrolls under
-  ESO's top bar and tab strip with the page. A Race row (Asian, Latino: the rest are ESO's own
-  quick-picks) sits under the Race label, and 0-9 pads under Weight and Height (feet and inches): digits gather beside the field with a
+  ESO's top bar and tab strip with the page. A Race row (every race, shortened) sits under the Race label, and 0-9 pads under Weight and Height (feet and inches): digits gather beside the field with a
   green OK; OK opens ESO's own number dial once, presses its keys for each digit the way a finger
   would (typing into its box only if the keys do not take), and presses its OK, so the dial does
   not open on every tap; ⌫ takes the last digit back first. On the Incident tab, one "All: None/No Delay" button above the delay fields

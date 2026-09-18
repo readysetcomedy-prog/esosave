@@ -380,7 +380,7 @@
     const m = body && body.data && body.data.model;
     app.crew = ((m && m.crew) || []).map(c => ({ itemId: c.itemId, personnelId: c.personnelId, name: `${c.lastName || 'TEST'}, ${c.firstName || 'MEDIC'}`, roleIds: (c.roleIds || []).map(Number) }));
     const el = document.getElementById('crew');
-    el.innerHTML = app.crew.map((c, i) => `<grid-row class="noselect" data-i="${i}"><grid-cell class="clickable"><div class="crew-info"><strong><div class="name">${c.name}</div></strong><aside>${roleNames(c.roleIds)}</aside><aside>EMT-P</aside></div></grid-cell></grid-row>`).join('');
+    el.innerHTML = app.crew.map((c, i) => `<grid-row class="noselect" data-i="${i}"><grid-cell class="clickable"><div class="crew-info"><strong><div class="name">${c.name}</div></strong><aside>Roles: ${roleNames(c.roleIds)}</aside><aside>EMT-P</aside></div></grid-cell></grid-row>`).join('');
     el.querySelectorAll('grid-cell.clickable').forEach(cell => cell.addEventListener('click', () => {
       const c = app.crew[Number(cell.closest('grid-row').dataset.i)];
       app.shelfOpens++;
@@ -392,7 +392,7 @@
       sh.querySelector('header button').addEventListener('click', () => {
         for (const id of ids) if (!c.roleIds.includes(id)) app.addScalar('incident', `incident.crew.['${c.itemId}'].roleIds.['${id}']`, id);
         for (const id of c.roleIds) if (!ids.includes(id)) app.del('incident', `incident.crew.['${c.itemId}'].roleIds.['${id}']`, 'multiselect');
-        c.roleIds = ids; cell.querySelector('aside').textContent = roleNames(ids); sh.remove();
+        c.roleIds = ids; cell.querySelector('aside').textContent = 'Roles: ' + roleNames(ids); sh.remove();
       });
       shelfHost.appendChild(sh);
     }));

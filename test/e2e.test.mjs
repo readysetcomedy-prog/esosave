@@ -933,10 +933,11 @@ test('Patient tab: Race row and 0-9 pads for Weight and Height (feet, inches); a
   const id = await app(() => window.app.recordId);
   await app(() => window.app.openTab('Patient'));
   const row = (g) => T.page.evaluate((gg) => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll(`.quick [data-group=${gg}]`)).map(b => ({ text: b.textContent, cls: b.className })), g);
-  await waitFor(async () => (await row('sr-race')).length === 2 && (await row('np-weight')).length === 12 && (await row('np-feet')).length === 12 && (await row('np-inches')).length === 12 && (await row('allergies')).length === 2, { label: 'rows drawn' });
+  await waitFor(async () => (await row('sr-race')).length === 7 && (await row('np-weight')).length === 12 && (await row('np-feet')).length === 12 && (await row('np-inches')).length === 12 && (await row('allergies')).length === 2, { label: 'rows drawn' });
   assert.deepEqual((await row('allergies')).map(b => b.text), ['NKDA', 'Other…']);
   const tap = async (g, text) => { await waitFor(async () => (await row(g)).some(b => b.text === text && !/busy/.test(b.cls)), { label: text }); await T.page.evaluate(([gg, t]) => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll(`.quick [data-group=${gg}]`)).find(b => b.textContent === t).click(), [g, text]); };
   const demo = async () => (await T.record(id)).tree.patient?.demographics || {};
+  assert.deepEqual((await row('sr-race')).map(b => b.text), ['White', 'Black', 'Asian', 'Latino', 'Am Indian', 'Mid East', 'Pac Islander']);
   await tap('sr-race', 'Latino'); // no ESO quick-pick for this one: through the picker (a multi-select, so OK is pressed)
   await waitFor(async () => ((await demo()).raceIds || []).map(Number).includes(10317), { label: 'race', timeout: 15000 });
   await waitFor(async () => (await row('sr-race')).some(b => b.text === 'Latino' && /added/.test(b.cls)), { label: 'shown as set' });
@@ -1010,8 +1011,12 @@ test('crew roles: every role, shortened, above each crew member; a tap opens the
   const roles = async () => { const c = ((await T.record(id)).tree.incident?.crew || [])[0]; return (c && c.roleIds || []).map(Number).sort(); };
   await tap('Lead Trans');
   await waitFor(async () => (await roles()).join() === '14108', { label: 'Lead - Transport saved through the app', timeout: 15000 });
-  await waitFor(async () => (await chips()).some(c => c.text === 'Lead Trans' && /added/.test(c.cls)), { label: 'shown as set' });
+  await waitFor(async () => (await chips()).some(c => c.text === 'Lead Trans' && /added/.test(c.cls)), { label: 'shown as set (ESO writes it as "Roles: Lead - Transport")' });
   assert.equal(await app(() => document.querySelectorAll('shelf-panel').length), 0, 'both shelves closed');
+  await tap('Lead Trans'); // the first and only role comes out again
+  await waitFor(async () => (await roles()).join() === '', { label: 'first role taken out', timeout: 15000 });
+  await tap('Lead Trans');
+  await waitFor(async () => (await roles()).join() === '14108', { label: 'and back in', timeout: 15000 });
   await tap('Drv Trans');
   await waitFor(async () => (await roles()).join() === '14103,14108', { label: 'a second role', timeout: 15000 });
   await tap('Lead Trans'); // out again

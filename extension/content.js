@@ -422,7 +422,7 @@
         `<label class="s"><input type="checkbox" id="qautoresp" ${settings.autoResponse === false ? '' : 'checked'}> Auto-fill: choosing Emergent or Non-Emergent (response or transport mode) fills the lights/sirens, intersection, scheduled, speed and method fields that are still empty, and sets EMD Performed to No</label>` +
         `<label class="s"><input type="checkbox" id="qassess" ${settings.quickAssess === false ? '' : 'checked'}> Assessment: "All normal" (presses No Abnormalities on every category in ESO's Quick Ax) and "A&amp;Ox4" on each assessment (Assessments tab)</label>` +
         `<label class="s"><input type="checkbox" id="qnarrative" ${settings.quickNarrative === false ? '' : 'checked'}> Narrative: rows for Primary and Secondary Impression, Provided Care Level, Anatomic Location and the complaint duration units, plus a 0-9 pad for the duration (Narrative tab)</label>` +
-        `<label class="s"><input type="checkbox" id="qpatient" ${settings.quickPatient === false ? '' : 'checked'}> Patient: Race row (Asian, Latino) and 0-9 pads for Weight and Height (Patient tab)</label>` +
+        `<label class="s"><input type="checkbox" id="qpatient" ${settings.quickPatient === false ? '' : 'checked'}> Patient: Race row (every race, shortened) and 0-9 pads for Weight and Height (Patient tab)</label>` +
         `<label class="s"><input type="checkbox" id="qrefusal" ${settings.quickRefusal === false ? '' : 'checked'}> Refusal form: chips for Legal, Decision-Making, Medical, Check All notifications and the four Patient Refusals inside ESO's Patient Refusal Form (Signatures tab)</label>` +
         `<label class="s"><input type="checkbox" id="qmileage" ${settings.autoMileage === false ? '' : 'checked'}> Loaded mileage: press ESO's Calculate Mileage once the scene and destination both have an address (Incident tab)</label>` +
         facilityPicker('facilitySending', 'Sending facility chips (Scene)') + facilityPicker('facilityDestination', 'Destination facility chips') +
@@ -1662,7 +1662,7 @@
     units: { setting: 'quickNarrative', tab: 'Narrative', ref: 'CHIEFTIMEUNITSOFCOMPLAINTDURATION', what: 'Duration Unit', items: [['Minutes', 'Minutes'], ['Hours', 'Hours'], ['Days', 'Days']] },
     anatomic: { setting: 'quickNarrative', tab: 'Narrative', ref: 'CHIEFCOMPLAINTANATOMICLOCATIONID', what: 'Anatomic Location', noOther: true, items: [['Head', 'Head'], ['Neck', 'Neck'], ['Chest', 'Chest'], ['Abd', 'Abdomen'], ['Back', 'Back'], ['Upper Ext', 'Extremity-Upper'], ['Lower Ext', 'Extremity-Lower'], ['Genitalia', 'Genitalia'], ['General', 'General/Global']] },
     // Patient tab
-    race: { setting: 'quickPatient', tab: 'Patient', ref: 'PATIENTRACEIDS', what: 'Race', noOther: true, items: [['Asian', 'Asian'], ['Latino', 'Hispanic or Latino']] },
+    race: { setting: 'quickPatient', tab: 'Patient', ref: 'PATIENTRACEIDS', what: 'Race', noOther: true, items: [['White', 'White', 'White'], ['Black', 'Black or African American', 'Black'], ['Asian', 'Asian'], ['Latino', 'Hispanic or Latino'], ['Am Indian', 'American Indian or Alaska Native'], ['Mid East', 'Middle Eastern or North African'], ['Pac Islander', 'Native Hawaiian or Other Pacific Islander']] },
   };
   function layoutSingleRows() {
     const run = currentRun();
@@ -1931,7 +1931,8 @@
     return Array.from(document.querySelectorAll('crew-list grid-row, crew-grid grid-row')).filter(r => visible(r) && r.querySelector('.crew-info .name') && !r.classList.contains('add'));
   }
   const crewName = (row) => norm(row.querySelector('.crew-info .name').textContent);
-  const crewRoles = (row) => Array.from(row.querySelectorAll('.crew-info aside')).map(a => norm(a.textContent)).join(', ').split(',').map(x => norm(x).toUpperCase()).filter(Boolean);
+  // ESO lists a member's roles in an aside as "Roles: Lead - Transport, Driver - Transport"
+  const crewRoles = (row) => Array.from(row.querySelectorAll('.crew-info aside')).map(a => norm(a.textContent).replace(/^Roles?\s*:\s*/i, '')).join(', ').split(',').map(x => norm(x).toUpperCase()).filter(Boolean);
   function layoutCrew() {
     const run = currentRun();
     const rows = settings.quickIncident === false || !run || run.locked || !onTab('Incident') || shelfOpen() ? [] : crewRows();
