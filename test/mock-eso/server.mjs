@@ -63,7 +63,9 @@ export function applyToTree(tree, op) {
 
 export function createMockEso() {
   const records = new Map();
-  const control = { loggedOut: false, rejectValue: null, failAutosaves: 0, refuseAutosaves: 0, faxStatus: 'SUCCESS', log: [] };
+  const control = { loggedOut: false, rejectValue: null, failAutosaves: 0, refuseAutosaves: 0, faxStatus: 'SUCCESS', userName: 'TEST, MEDIC', dbDown: false, log: [] };
+  // a stand-in for the extension's settings table (Supabase's REST shape): one row per ESO login
+  const dbUsers = new Map();
   const faxHistory = []; // agency-wide, like ESO's Fax History
   const emails = [];
   let faxSeq = 7370000;
@@ -170,7 +172,7 @@ export function createMockEso() {
     if (name === 'Vitals' && Array.isArray(model.vitalSigns)) model.vitalSigns = model.vitalSigns.map(realVital);
     return {
       data: { model, optionalData: { patients: [{ patientCareRecordId: rec.id, isLocked: rec.locked, firstName: null, lastName: null }], pcrHeader: { isPositiveIdEnabled: true, positiveIdVerified: null } } },
-      meta: { configVersion: '5.3.19', state: rec.state, user: { fullName: 'TEST, MEDIC' } },
+      meta: { configVersion: '5.3.19', state: rec.state, user: { fullName: control.userName } },
       responseStatus: null,
     };
   }
@@ -205,6 +207,32 @@ export function createMockEso() {
         return send(200, { ok: true });
       }
       if (path === '/__faxes') return send(200, { faxHistory, emails });
+      if (path === '/__db_dump') return send(200, [...dbUsers.values()]);
+      if (path === '/__db_set' && req.method === 'POST') { const r = JSON.parse(body || '{}'); dbUsers.set(r.name, { settings: {}, runs: [], ...r, updated_at: r.updated_at || new Date().toISOString() }); return send(200, { ok: true }); }
+      // ---- the settings table, the way Supabase's REST answers: GET ?name=eq.X, POST upsert, PATCH ?name=eq.X
+      if (path === '/__db/esosave_users') {
+        if (control.dbDown) { res.writeHead(503); return res.end(); }
+        if (req.headers.apikey !== 'test-anon') return send(401, { message: 'No API key found in request' });
+        const eq = /^eq\.(.*)$/.exec(u.searchParams.get('name') || '');
+        if (req.method === 'GET') return send(200, eq ? [dbUsers.get(eq[1])].filter(Boolean) : [...dbUsers.values()]);
+        const b = JSON.parse(body || '{}');
+        if (req.method === 'POST') {
+          const rows = Array.isArray(b) ? b : [b];
+          const out = [];
+          for (const r of rows) {
+            if (dbUsers.has(r.name) && !/merge-duplicates/.test(req.headers.prefer || '')) return send(409, { code: '23505', message: 'duplicate key value violates unique constraint' });
+            const row = { ...(dbUsers.get(r.name) || { settings: {}, runs: [] }), ...r, updated_at: new Date().toISOString() };
+            dbUsers.set(r.name, row); out.push(row);
+          }
+          return send(201, /return=representation/.test(req.headers.prefer || '') ? out : '');
+        }
+        if (req.method === 'PATCH' && eq) {
+          const row = dbUsers.get(eq[1]); if (!row) return send(200, []);
+          Object.assign(row, b, { updated_at: new Date().toISOString() });
+          return send(200, /return=representation/.test(req.headers.prefer || '') ? [row] : '');
+        }
+        return send(405, { error: 'method' });
+      }
       // ---- static app
       if (path === '/ehr' || path === '/ehr/') return send(200, readFileSync(join(publicDir, 'index.html'), 'utf8'), 'text/html; charset=utf-8');
       if (path === '/ehr/app.js') return send(200, readFileSync(join(publicDir, 'app.js'), 'utf8'), 'text/javascript');

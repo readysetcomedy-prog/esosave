@@ -77,6 +77,16 @@ to bad signal or a hung page.
   open and hide while one of its pickers is up. Red, yellow and green buttons next to Initial and Final Patient Acuity pick the
   colour in ESO's list. Nothing is written behind the app's back: the buttons do what a finger would
   in ESO's pickers, so the screen and the save are ESO's. Each group is a setting, on by default.
+- **Settings follow the ESO login.** The extension reads who is signed in to ESO from the app's own
+  responses and shows the name on the card. The crew's settings (the quick-button switches and the
+  facility chips) live in one agency table, one row per login, written when the login is first
+  seen and whenever they change something; a tablet they have never used gets their row, a login
+  the table has never seen starts from the agency defaults. The settings above the quick buttons
+  (retention, tab warm-up, call times, fax prompt, Not sent list) are set in the code and shown
+  locked. Each run recorded on a tablet belongs to the login that worked it, and the Runs panel
+  lists only the current login's runs; held changes still push whoever is signed in. Only those
+  settings and run ids go to the table (`supabase/esosave_users.sql`), never a run's contents; with
+  no signal the tablet's copy stands and the row is written when signal returns.
 - **Copy a vital.** A small copy button floats just left of each saved vital's time in the Vitals
   tab; tapping it re-enters that vital as a new one with the current time, every other value the
   same. Only fields the app itself has been seen saving are copied, and the run log names any that

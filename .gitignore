@@ -5,3 +5,4 @@ dist/
 recording*.json
 .DS_Store
 safari/build/
+.env*

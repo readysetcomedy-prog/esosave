@@ -66,6 +66,17 @@
   DEFAULT_SETTINGS.facilitySending = ['sbl', 'stA', 'fch', 'holy', 'highland', 'breese', 'anderson'].map(k => ({ ...FAC[k] }));
   DEFAULT_SETTINGS.facilityDestination = ['sbl', 'stA', 'fch', 'holy', 'highland', 'anderson', 'carle', 'stJ', 'barnes', 'slu', 'seo'].map(k => ({ ...FAC[k] }));
 
+  // Settings the crew may change; everything else in Settings is locked (set in the code).
+  // Ask the owner whether a new setting is locked or open before adding it (see CLAUDE.md).
+  const OPEN_SETTINGS = ['quickHistory', 'quickMeds', 'quickAllergies', 'quickAcuity', 'quickDelays', 'quickTransport', 'quickAssess', 'quickDisposition', 'autoResponse', 'quickIncident', 'quickMechanism', 'quickFacilities', 'quickNarrative', 'quickPatient', 'quickRefusal', 'syncCareLevel', 'facilitySending', 'facilityDestination'];
+  // The open settings follow the ESO login: one row per login in the agency's table, written when
+  // the login is first seen and whenever they change something. Only these settings and the ids of
+  // the runs they worked go there; never a run's contents. The key is the project's public one.
+  const ON_ESO = /(^|\.)esosuite\.net$/i.test(location.hostname);
+  const SYNC = ON_ESO
+    ? { url: 'https://qkprkwydxbtybaxylhln.supabase.co/rest/v1/esosave_users', key: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFrcHJrd3lkeGJ0eWJheHlsaGxuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzY2MTc2MjYsImV4cCI6MjA1MjE5MzYyNn0.DNjMTLqWtB7KJfZc3I03ufAPoIx69eA6wCkvhgdp7u4' }
+    : { url: location.origin + '/__db/esosave_users', key: 'test-anon' };
+  const openSettings = (src) => { const o = {}; for (const k of OPEN_SETTINGS) if (k in src) o[k] = src[k]; return o; };
   async function loadAll() {
     const all = await sget(null);
     const runs = {};
@@ -109,6 +120,8 @@
     toPage('init', { runs: fresh.runs, templates: fresh.templates, settings, tabRequests: fresh.all.tabRequests || null, fieldDefs: fresh.all.fieldDefs2 || null, emailed: fresh.all.emailed || null });
     setTimeout(() => toPage('action', { name: 'facilities' }), 1500);
     setInterval(() => purgeLocked(settings), 10 * 60 * 1000);
+    // a row that could not be written (no signal, table away) goes when signal is back
+    setInterval(() => { if (syncDirty && user && lastStatus && lastStatus.online && Date.now() - syncLastTry > 10000) { if (syncedUser !== user) syncUser(); else pushUser(); } }, 5000);
   })();
   // The page script may have been injected before our listener existed; ask for a status once ready.
   window.addEventListener('message', async (ev) => {
@@ -148,6 +161,7 @@
       if (panelOpen) renderPanel();
     } else if (type === 'status' && payload) {
       lastStatus = payload;
+      if (payload.user && payload.user !== user) { user = payload.user; sset({ user }); syncUser(); }
       maybeWarmTabs(payload);
       if (payload.runs.some(r => r.locked)) purgeLocked(settings);
       renderBar();
@@ -160,6 +174,10 @@
 
   // ---------------------------------------------------------------- UI
   let lastStatus = null;
+  let user = null;       // the ESO login shown by the app
+  let syncedUser = null; // the login whose row has been fetched and applied
+  let syncDirty = false; // a change of ours has not reached the table yet
+  let syncLastTry = 0;
   let facilities = null; // ESO's saved facilities, from its configuration bundle
   let facilityTypes = null; // ESO's location and destination type tables, kept from the last bundle seen
   let panelOpen = false;
@@ -209,6 +227,9 @@
     .bar .title { display: flex; align-items: center; gap: 6px; font-weight: 700; font-size: 13px; }
     .dot { width: 9px; height: 9px; border-radius: 50%; background: #fff; flex: none; }
     .bar .msg { margin-top: 3px; opacity: .95; word-break: break-word; }
+    .bar .who { margin-top: 2px; font-size: 11px; opacity: .85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .panel label.s.locked { opacity: .6; }
+    .panel .lock { font-size: 11px; color: #64748b; margin: 4px 0 6px; }
     .bar .num { font-weight: 700; }
     .bar .btns { display: flex; gap: 6px; margin-top: 7px; }
     .bar .title { justify-content: space-between; }
@@ -326,6 +347,7 @@
     bar.className = 'bar ' + st.cls;
     bar.title = '';
     bar.innerHTML = `<div class="title"><span class="dot"></span><span>${esc(st.title)}</span><span class="fold" data-act="collapse" title="Collapse to just the logo">–</span></div>` +
+      (user ? `<div class="who" title="Signed in to ESO as ${esc(user)}: the runs and settings shown are theirs">${esc(user)}</div>` : '') +
       `<div class="msg">${st.num ? `<span class="num">${esc(st.num)}</span> · ` : ''}${esc(st.msg)}</div>` +
       `<div class="btns">${st.btn ? `<span class="btn" data-act="${st.btn === 'Push now' ? 'push' : 'open'}">${esc(st.btn)}</span>` : ''}<span class="btn" data-act="open">Runs</span></div>`;
     bar.querySelectorAll('.btn, .fold').forEach(b => b.addEventListener('click', (e) => {
@@ -356,16 +378,21 @@
     const all = await sget(null);
     const parts = [];
     parts.push(`<h1><span>ESO Save <span class="muted" style="font-weight:400;font-size:11px">v${esc(api.runtime.getManifest().version)}</span></span><span class="x" data-act="close">×</span></h1>`);
-    parts.push(`<div class="muted">${s.online ? 'Signal OK' : 'NO SIGNAL'}${s.loggedOut ? ' · logged out' : ''}${s.pushing ? ' · pushing' : ''} · ${s.runs.filter(r => r.counts.total || r.pendingCreate).length} run${s.runs.filter(r => r.counts.total || r.pendingCreate).length === 1 ? '' : 's'} on this device` +
+    const mine = (r) => !user || !r.owner || r.owner === user; // runs of another login on this tablet stay out of sight
+    const nRuns = s.runs.filter(r => (r.counts.total || r.pendingCreate) && mine(r)).length;
+    parts.push(`<div class="muted">${s.online ? 'Signal OK' : 'NO SIGNAL'}${s.loggedOut ? ' · logged out' : ''}${s.pushing ? ' · pushing' : ''} · ${nRuns} run${nRuns === 1 ? '' : 's'} on this device` +
+      `${user ? ` · signed in as <b>${esc(user)}</b>` : ''}` +
       `${s.hasTemplates ? '' : ' · <span title="Start one run with signal so a blank-run template is saved">no offline new-run template yet</span>'}</div>`);
     parts.push(`<div class="actions"><button class="a" data-act="push">Push all held changes now</button><button class="a sec" data-act="export-all">Export everything</button><button class="a sec" data-act="settings">Settings</button></div>`);
     if (settingsOpen) {
-      parts.push(`<div class="run"><label class="s">Clear a run from this device <input type="number" min="0" max="720" id="purge" value="${esc(settings.purgeHoursAfterLock)}"> hours after it is locked (0 = as soon as the lock is seen)</label>` +
-        `<label class="s"><input type="checkbox" id="warm" ${settings.warmTabs === false ? '' : 'checked'}> Open every tab once, quietly, when a run opens (so tabs you have not touched still work with no signal)</label>` +
-        `<label class="s"><input type="checkbox" id="times" ${settings.showTimes === false ? '' : 'checked'}> Show the call times (dispatched, en route, on scene, at patient, depart, at destination, transfer) in the empty part of ESO's top bar</label>` +
-        `<label class="s"><input type="checkbox" id="sendprompt" ${settings.sendPrompt === false ? '' : 'checked'}> When a run is locked, offer to fax or email it to the destination if it has not been sent yet</label>` +
-        `<label class="s"><input type="checkbox" id="unsentlist" ${settings.unsentList === false ? '' : 'checked'}> Keep a list of locked runs from the last 15 days that have a fax or email destination but were never sent</label>` +
-        `<div class="s" style="margin-top:8px;font-weight:700">Quick buttons</div>` +
+      parts.push(`<div class="run">` +
+        `<div class="lock">🔒 Set by the agency. These cannot be changed here.</div>` +
+        `<label class="s locked">Clear a run from this device <input type="number" min="0" max="720" id="purge" value="${esc(settings.purgeHoursAfterLock)}" disabled> hours after it is locked (0 = as soon as the lock is seen)</label>` +
+        `<label class="s locked"><input type="checkbox" id="warm" ${settings.warmTabs === false ? '' : 'checked'} disabled> Open every tab once, quietly, when a run opens (so tabs you have not touched still work with no signal)</label>` +
+        `<label class="s locked"><input type="checkbox" id="times" ${settings.showTimes === false ? '' : 'checked'} disabled> Show the call times (dispatched, en route, on scene, at patient, depart, at destination, transfer) in the empty part of ESO's top bar</label>` +
+        `<label class="s locked"><input type="checkbox" id="sendprompt" ${settings.sendPrompt === false ? '' : 'checked'} disabled> When a run is locked, offer to fax or email it to the destination if it has not been sent yet</label>` +
+        `<label class="s locked"><input type="checkbox" id="unsentlist" ${settings.unsentList === false ? '' : 'checked'} disabled> Keep a list of locked runs from the last 15 days that have a fax or email destination but were never sent</label>` +
+        `<div class="s" style="margin-top:8px;font-weight:700">Quick buttons${user ? ` <span class="muted" style="font-weight:400">· yours, ${esc(user)}: they follow your ESO login to any tablet</span>` : ''}</div>` +
         `<label class="s"><input type="checkbox" id="qdelays" ${settings.quickDelays === false ? '' : 'checked'}> Delays: one "All: None/No Delay" button above the delay fields (Incident tab) that presses ESO's own None button on every delay still empty</label>` +
         `<label class="s"><input type="checkbox" id="qhistory" ${settings.quickHistory === false ? '' : 'checked'}> History: one-tap chips for common conditions under Add History (Patient tab)</label>` +
         `<label class="s"><input type="checkbox" id="qmeds" ${settings.quickMeds === false ? '' : 'checked'}> Medications: chips for common home meds under Add Medications (Patient tab)</label>` +
@@ -393,7 +420,7 @@
           : `<p class="muted">${u ? 'Every locked run with a fax or email destination has been sent.' : 'Looking at ESO\'s fax history and the locked runs…'}</p>`) +
         `<div class="actions"><button class="a sec" data-act="rescan">Check again</button></div></div>`);
     }
-    const listed = s.runs.filter(r => (r.counts.total || r.pendingCreate) && !(r.locked && !r.counts.held && !r.counts.rejected && !r.sends.some(x => x.status === 'held')));
+    const listed = s.runs.filter(r => mine(r) && (r.counts.total || r.pendingCreate) && !(r.locked && !r.counts.held && !r.counts.rejected && !r.sends.some(x => x.status === 'held')));
     if (!listed.length) parts.push(`<p class="muted">No runs recorded yet. Open a run in ESO and every save will be recorded here.</p>`);
     for (const r of listed) {
       const sigs = all['sigs:' + r.recordId] || [];
@@ -432,6 +459,45 @@
     }));
     panel.querySelectorAll('[data-act]').forEach(el => el.addEventListener('click', onPanelAction));
   }
+  // ---- the login's row: fetched when the login is seen, written when they change something
+  const dbHeaders = () => ({ apikey: SYNC.key, Authorization: 'Bearer ' + SYNC.key, 'Content-Type': 'application/json' });
+  async function dbGet(name) {
+    const r = await fetch(`${SYNC.url}?name=eq.${encodeURIComponent(name)}&select=name,settings,runs,updated_at`, { headers: dbHeaders() });
+    if (!r.ok) throw new Error('table ' + r.status);
+    const rows = await r.json();
+    return rows[0] || null;
+  }
+  async function dbPut(row) {
+    const r = await fetch(SYNC.url, { method: 'POST', headers: { ...dbHeaders(), Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify(row) });
+    if (!r.ok) throw new Error('table ' + r.status);
+  }
+  const myRunIds = () => (lastStatus ? lastStatus.runs : []).filter(r => r.owner === user && !r.tmp).map(r => r.realId || r.recordId);
+  // A login just seen on this tablet: take their settings from the table (a new tablet gets what
+  // they chose elsewhere); a login not yet in the table gets a row with what this tablet has.
+  async function syncUser() {
+    const who = user; if (!who) return;
+    syncLastTry = Date.now();
+    try {
+      const row = await dbGet(who);
+      // their row, or, for a login the table has never seen, the agency defaults: not whatever the
+      // last person on this tablet chose
+      Object.assign(settings, openSettings(row && row.settings && typeof row.settings === 'object' ? row.settings : DEFAULT_SETTINGS));
+      await sset({ settings }); toPage('settings', settings); layoutQuick();
+      await dbPut({ name: who, settings: openSettings(settings), runs: [...new Set([...(row && Array.isArray(row.runs) ? row.runs : []), ...myRunIds()])] });
+      syncedUser = who; syncDirty = false;
+    } catch (e) { syncDirty = true; } // no signal or the table is away: this tablet's settings stand, and the row is written later
+    renderBar(); if (panelOpen) renderPanel();
+  }
+  // Something of theirs changed here: write the row (merged with the runs their other tablets know).
+  async function pushUser() {
+    const who = user; if (!who) return;
+    syncLastTry = Date.now();
+    try {
+      const row = await dbGet(who);
+      await dbPut({ name: who, settings: openSettings(settings), runs: [...new Set([...(row && Array.isArray(row.runs) ? row.runs : []), ...myRunIds()])] });
+      syncedUser = who; syncDirty = false;
+    } catch (e) { syncDirty = true; }
+  }
   const openLogs = new Set();
   let settingsOpen = false;
   const facSearch = {};
@@ -455,12 +521,7 @@
     else if (act === 'push') toPage('action', { name: 'pushNow' });
     else if (act === 'settings') { settingsOpen = !settingsOpen; renderPanel(); }
     else if (act === 'save-settings') {
-      const v = Number(panel.querySelector('#purge').value);
-      settings.purgeHoursAfterLock = Number.isFinite(v) && v >= 0 ? v : 0;
-      settings.warmTabs = !!panel.querySelector('#warm').checked;
-      settings.showTimes = !!panel.querySelector('#times').checked;
-      settings.sendPrompt = !!panel.querySelector('#sendprompt').checked;
-      settings.unsentList = !!panel.querySelector('#unsentlist').checked;
+      // the locked block is display only: its values come from the code
       settings.quickDelays = !!panel.querySelector('#qdelays').checked;
       settings.quickHistory = !!panel.querySelector('#qhistory').checked;
       settings.quickMeds = !!panel.querySelector('#qmeds').checked;
@@ -479,6 +540,7 @@
       settings.syncCareLevel = !!panel.querySelector('#qsynccare').checked;
       layoutQuick();
       await sset({ settings }); toPage('settings', settings); settingsOpen = false; renderPanel(); renderTimes();
+      pushUser();
     }
     else if (act === 'toggle-log') { if (openLogs.has(id)) openLogs.delete(id); else openLogs.add(id); renderPanel(); }
     else if (act === 'rescan') { toPage('action', { name: 'scanUnsent' }); }
@@ -495,6 +557,7 @@
       }
       settings[key] = list;
       await sset({ settings }); toPage('settings', settings); renderPanel(); layoutQuick();
+      pushUser();
     }
     else if (act === 'send-fax' || act === 'send-email') {
       const row = el.closest('.urow'); const pcr = row && row.dataset.pcr; if (!pcr) return;

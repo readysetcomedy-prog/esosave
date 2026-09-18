@@ -27,7 +27,7 @@
   if (ext) return;
   if (window.__esosave) return;
 
-  const VERSION = '0.9.4';
+  const VERSION = '0.10.0';
   const API_PREFIX_RE = /^\/ehr\/api\/+/i;
   const FAKE_OK_TEXT = '{"result":"Success","data":[]}';
   const PROBE_PATH = '/ehr/api/thirdpartydata/partners';
@@ -94,6 +94,7 @@
     currentRecordId: null,
     lastEvent: null,
     lastView: null,              // { view, recordId, ts } of the most recent live tab load
+    user: null,                  // the ESO login's full name, from the metadata ESO's views carry
     lastProbeAt: 0,
     rejectedSeen: false,
   };
@@ -582,6 +583,13 @@
       run.state = meta.state;
       const locked = meta.state.toLowerCase() !== 'draft';
       setLocked(run, locked);
+    }
+    // who is signed in to ESO: every view carries the login's name. A run belongs to the login
+    // that first worked it on this device.
+    const who = meta && meta.user && typeof meta.user.fullName === 'string' ? meta.user.fullName.trim() : '';
+    if (who && !meta.esosaveOffline && !meta.esosaveSynthesized) {
+      if (S.user !== who) { S.user = who; emit(); }
+      if (!run.owner) { run.owner = who; persist(run); emit(); }
     }
     const model = j.data && j.data.model;
     const num = (model && (model.incidentNumber || (model.response && model.response.incidentNumber))) || null;
@@ -1275,7 +1283,7 @@
       createdAt: run.createdAt, lastSeenAt: run.lastSeenAt, lastSavedAt: run.lastSavedAt,
       restoredFrom: run.restoredFrom, counts, pages, log: run.log.slice(-60), times: run.times || null,
       sends: (run.sends || []).map(x => ({ kind: x.kind, status: x.status, destinationName: x.destinationName, ts: x.ts })), emailedAt: run.emailedAt || null,
-      lists: run.lists || null,
+      lists: run.lists || null, owner: run.owner || null,
       hasViews: Object.keys(run.views).length, hasCrew: !!(run.crew && run.crew.length),
     };
   }
@@ -1283,7 +1291,7 @@
     const runs = Object.values(S.runs).map(summary).sort((a, b) => b.lastSeenAt - a.lastSeenAt);
     return {
       version: VERSION, online: S.online, loggedOut: S.loggedOut, pushing: S.pushing, ready: S.ready, hasToken: !!S.xsrf,
-      currentRecordId: S.currentRecordId, runs, lastEvent: S.lastEvent, lastView: S.lastView,
+      currentRecordId: S.currentRecordId, runs, lastEvent: S.lastEvent, lastView: S.lastView, user: S.user,
       held: runs.reduce((n, r) => n + r.counts.held + (r.pendingCreate ? 1 : 0) + r.sends.filter(x => x.status === 'held').length, 0),
       unsent: S.unsent || null,
       rejected: runs.reduce((n, r) => n + r.counts.rejected, 0),
