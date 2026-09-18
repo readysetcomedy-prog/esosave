@@ -39,9 +39,9 @@ to bad signal or a hung page.
   a chip that is in opens the same list, unticks it and presses OK, so it comes back out. They hide while
   any ESO picker is open, and every button scrolls under
   ESO's top bar and tab strip with the page. A Race row (Asian, Latino: the rest are ESO's own
-  quick-picks) sits under the Race label, and 0-9 pads above Weight and Height (feet and inches): digits gather for a moment, then
-  ESO's own number pad is opened once, the value entered and OK pressed, so the pad does not open on
-  every tap; ⌫ takes the last digit back first. On the Incident tab, one "All: None/No Delay" button above the delay fields
+  quick-picks) sits under the Race label, and 0-9 pads under Weight and Height (feet and inches): digits gather beside the field with a
+  green OK; OK opens ESO's own number dial once, enters the value and presses its OK, so the dial
+  does not open on every tap; ⌫ takes the last digit back first. On the Incident tab, one "All: None/No Delay" button above the delay fields
   presses ESO's own None button on every delay still empty, leaving any already answered alone. On
   the Narrative tab, chips after each transport field (moved to stretcher, to and from the
   ambulance, position during transport) pick in ESO's list the same way. Facility chips under the
@@ -68,10 +68,7 @@ to bad signal or a hung page.
   Location. Every row ends with "Other…", which simply opens ESO's own list (a row that already
   holds every choice has no need of one). Every pick takes its row straight from the open list;
   only a list too long to show it all gets the name typed into its search box first, and the
-  overlay only appears when a pick takes longer than a blink. ALS / BLS is kept the same on both pages: choosing it in
-  Level of Service (Incident) or Provided Care Level (Narrative) sets the other page's field
-  through its own picker and returns to the page it was chosen on; a matching value is left alone.
-  Inside ESO's Patient Refusal Form (Signatures tab) chips sit by its own lists: 18+ / Guardian
+  overlay only appears when a pick takes longer than a blink.   Inside ESO's Patient Refusal Form (Signatures tab) chips sit by its own lists: 18+ / Guardian
   under Legal, Clear / Drug-Alcohol / Threat under Decision-Making, Cleared under Medical, Check
   All under the patient notifications and all four Patient Refusals; they show while the form is
   open and hide while one of its pickers is up. Red, yellow and green buttons next to Initial and Final Patient Acuity pick the

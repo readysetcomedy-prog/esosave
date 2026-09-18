@@ -43,7 +43,7 @@
   const sget = (keys) => new Promise(res => storage.get(keys, (v) => res(v || {})));
   const sset = (obj) => new Promise(res => storage.set(obj, () => res()));
   const sremove = (keys) => new Promise(res => storage.remove(keys, () => res()));
-  const DEFAULT_SETTINGS = { purgeHoursAfterLock: 0, probeSec: 20, heldProbeSec: 8, warmTabs: true, cardCollapsed: false, showTimes: true, sendPrompt: true, unsentList: true, quickHistory: true, quickMeds: true, quickAllergies: true, quickAcuity: true, quickDelays: true, quickTransport: true, quickAssess: true, quickDisposition: true, autoResponse: true, quickIncident: true, quickMechanism: true, quickFacilities: true, quickNarrative: true, quickPatient: true, quickRefusal: true, syncCareLevel: true, facilitySending: [], facilityDestination: [] };
+  const DEFAULT_SETTINGS = { purgeHoursAfterLock: 0, probeSec: 20, heldProbeSec: 8, warmTabs: true, cardCollapsed: false, showTimes: true, sendPrompt: true, unsentList: true, quickHistory: true, quickMeds: true, quickAllergies: true, quickAcuity: true, quickDelays: true, quickTransport: true, quickAssess: true, quickDisposition: true, autoResponse: true, quickIncident: true, quickMechanism: true, quickFacilities: true, quickNarrative: true, quickPatient: true, quickRefusal: true, facilitySending: [], facilityDestination: [] };
   // The agency's standard facility chips (ids and names from ESO's saved facilities). Every install
   // starts with these; Settings can add or remove per device.
   const FAC = {
@@ -68,7 +68,7 @@
 
   // Settings the crew may change; everything else in Settings is locked (set in the code).
   // Ask the owner whether a new setting is locked or open before adding it (see CLAUDE.md).
-  const OPEN_SETTINGS = ['quickHistory', 'quickMeds', 'quickAllergies', 'quickAcuity', 'quickDelays', 'quickTransport', 'quickAssess', 'quickDisposition', 'autoResponse', 'quickIncident', 'quickMechanism', 'quickFacilities', 'quickNarrative', 'quickPatient', 'quickRefusal', 'syncCareLevel', 'facilitySending', 'facilityDestination'];
+  const OPEN_SETTINGS = ['quickHistory', 'quickMeds', 'quickAllergies', 'quickAcuity', 'quickDelays', 'quickTransport', 'quickAssess', 'quickDisposition', 'autoResponse', 'quickIncident', 'quickMechanism', 'quickFacilities', 'quickNarrative', 'quickPatient', 'quickRefusal', 'facilitySending', 'facilityDestination'];
   // The open settings follow the ESO login: one row per login in the agency's table, written when
   // the login is first seen and whenever they change something. Only these settings go there;
   // never a run, nor which runs were worked. The key is the project's public one.
@@ -217,6 +217,7 @@
     .quick .chip.busy { opacity: .6; cursor: wait; }
     .quick .chip.padval { line-height: 26px; cursor: default; min-width: 44px; text-align: center; color: #475569; }
     .quick .chip.padval.on { color: #fff; }
+    .quick .allnone.padok { height: 28px; background: #15803d; color: #fff; border-color: #15803d; }
     .quick .chip.other, .quick .allnone.other { border-style: dashed; color: #475569; font-weight: 600; }
     .quick .sw { position: fixed; pointer-events: auto; width: 34px; height: 26px; border-radius: 7px; border: 2px solid transparent; cursor: pointer; box-shadow: 0 1px 2px rgba(0,0,0,.25); }
     .quick .sw.red { background: #dc2626; } .quick .sw.yellow { background: #facc15; } .quick .sw.green { background: #16a34a; }
@@ -423,7 +424,6 @@
         `<label class="s"><input type="checkbox" id="qnarrative" ${settings.quickNarrative === false ? '' : 'checked'}> Narrative: rows for Primary and Secondary Impression, Provided Care Level, Anatomic Location and the complaint duration units, plus a 0-9 pad for the duration (Narrative tab)</label>` +
         `<label class="s"><input type="checkbox" id="qpatient" ${settings.quickPatient === false ? '' : 'checked'}> Patient: Race row (Asian, Latino) and 0-9 pads for Weight and Height (Patient tab)</label>` +
         `<label class="s"><input type="checkbox" id="qrefusal" ${settings.quickRefusal === false ? '' : 'checked'}> Refusal form: chips for Legal, Decision-Making, Medical, Check All notifications and the four Patient Refusals inside ESO's Patient Refusal Form (Signatures tab)</label>` +
-        `<label class="s"><input type="checkbox" id="qsynccare" ${settings.syncCareLevel === false ? '' : 'checked'}> Match ALS / BLS between Level of Service (Incident) and Local Protocol Provided Care Level (Narrative): setting one sets the other, then returns to the page you were on</label>` +
         facilityPicker('facilitySending', 'Sending facility chips (Scene)') + facilityPicker('facilityDestination', 'Destination facility chips') +
         `<div class="actions"><button class="a" data-act="save-settings">Save</button></div></div>`);
     }
@@ -550,7 +550,6 @@
       settings.quickNarrative = !!panel.querySelector('#qnarrative').checked;
       settings.quickPatient = !!panel.querySelector('#qpatient').checked;
       settings.quickRefusal = !!panel.querySelector('#qrefusal').checked;
-      settings.syncCareLevel = !!panel.querySelector('#qsynccare').checked;
       layoutQuick();
       await sset({ settings }); toPage('settings', settings); settingsOpen = false; renderPanel(); renderTimes();
       pushUser();
@@ -1691,8 +1690,9 @@
       placeRows(f, els);
     }
   }
-  // ---- 0-9 pads above ESO's numeric fields: digits gather for a moment, then ESO's own number
-  // shelf is opened once, the value entered and OK pressed
+  // ---- 0-9 pads under ESO's numeric fields' labels: digits gather next to the field, a green OK
+  // appears beside them, and OK opens ESO's own number dial once, enters the value and presses
+  // its OK
   const NUM_PADS = {
     duration: { setting: 'quickNarrative', tab: 'Narrative', ref: 'CHIEFCOMPLAINTDURATION', what: 'Duration of Chief Complaint', max: 3 },
     weight: { setting: 'quickPatient', tab: 'Patient', ref: 'PATIENTWEIGHT', what: 'Weight', max: 3 },
@@ -1700,7 +1700,6 @@
     inches: { setting: 'quickPatient', tab: 'Patient', ref: 'HEIGHTINCOMPONENT', what: 'Height (inches)', max: 2 },
   };
   const padValue = {}; // pad -> digits tapped, not yet entered
-  const padTimers = {};
   function layoutPads() {
     const run = currentRun();
     for (const [pk, pad] of Object.entries(NUM_PADS)) {
@@ -1709,17 +1708,18 @@
       const r = f.getBoundingClientRect();
       if (!r.width) { dropQuick(`np:${pk}:`); continue; }
       const cur = norm(fieldValue(pad.ref));
-      const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', 'back', 'val'];
+      if (!padValue[pk]) dropQuick(`np:${pk}:ok`); // the OK is there only while digits wait
+      const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', 'back', 'val', ...(padValue[pk] ? ['ok'] : [])];
       const els = keys.map((k) => {
         const b = quickEl(`np:${pk}:${k}`, () => {
           const el = document.createElement(k === 'val' ? 'span' : 'button'); if (k !== 'val') el.type = 'button';
-          el.className = 'chip' + (k === 'val' ? ' padval' : k === 'back' ? ' other' : ''); el.dataset.group = 'np-' + pk;
-          el.textContent = k === 'back' ? '⌫' : k === 'val' ? '' : k; el.title = k === 'back' ? 'Remove the last digit' : k === 'val' ? pad.what : `${pad.what}: ${k}`;
+          el.className = k === 'ok' ? 'allnone padok' : 'chip' + (k === 'val' ? ' padval' : k === 'back' ? ' other' : ''); el.dataset.group = 'np-' + pk;
+          el.textContent = k === 'back' ? '⌫' : k === 'val' ? '' : k === 'ok' ? 'OK' : k; el.title = k === 'back' ? 'Remove the last digit' : k === 'val' ? pad.what : k === 'ok' ? `Enter it in ESO's ${pad.what} dial` : `${pad.what}: ${k}`;
           el.addEventListener('pointerdown', (e) => e.stopPropagation());
-          if (k !== 'val') el.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); tapPad(pk, k); });
+          if (k !== 'val') el.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); if (k === 'ok') enterNumber(pk); else tapPad(pk, k); });
           return el;
         });
-        if (k === 'val') { const v = padValue[pk]; b.textContent = v ? v + ' …' : (cur || '—'); b.classList.toggle('on', !!v); }
+        if (k === 'val') { const v = padValue[pk]; b.textContent = v ? v : (cur || '—'); b.classList.toggle('on', !!v); }
         b.classList.toggle('busy', quickBusy);
         b.style.display = 'block'; b.style.visibility = 'hidden';
         return b;
@@ -1734,8 +1734,6 @@
     if (k === 'back') v = v.slice(0, -1); else if (v.length < pad.max) v = v === '0' ? k : v + k;
     padValue[pk] = v;
     layoutPads();
-    clearTimeout(padTimers[pk]);
-    if (v) padTimers[pk] = setTimeout(() => enterNumber(pk), v.length >= pad.max ? 700 : 1500);
   }
   async function enterNumber(pk) {
     const pad = NUM_PADS[pk];
@@ -1787,18 +1785,6 @@
 
   // ---- auto-fill after a mode is chosen: response mode to scene, and transport mode
   const AUTO = {
-    // ALS / BLS kept the same on both pages: Level of Service (Incident) and Local Protocol
-    // Provided Care Level (Narrative). Setting one sets the other on its page, then comes back.
-    LEVELOFSERVICEID: {
-      tab: 'Incident', setting: 'syncCareLevel',
-      match: (v) => /^Advanced Life Support$/i.test(v) ? 'als' : /^Basic Life Support$/i.test(v) ? 'bls' : null,
-      cross: (kind) => ({ tab: 'Narrative', ref: 'PROVIDEDCARELEVELID', name: kind === 'als' ? 'ALS - Paramedic' : 'BLS - All Levels', same: kind === 'als' ? /^ALS - / : /^BLS - / }),
-    },
-    PROVIDEDCARELEVELID: {
-      tab: 'Narrative', setting: 'syncCareLevel',
-      match: (v) => /^ALS - /i.test(v) ? 'als' : /^BLS - /i.test(v) ? 'bls' : null,
-      cross: (kind) => ({ tab: 'Incident', ref: 'LEVELOFSERVICEID', name: kind === 'als' ? 'Advanced Life Support' : 'Basic Life Support', quick: kind === 'als' ? 'ALS' : 'BLS', same: kind === 'als' ? /^Advanced Life Support$/ : /^Basic Life Support$/ }),
-    },
     PRIORITYID: {
       match: (v) => /^Emergent$/i.test(v) ? 'e' : /^Non-Emergent$/i.test(v) ? 'n' : /Emergent/i.test(v) ? 'other' : null,
       fill: (kind) => [
@@ -1813,50 +1799,20 @@
     },
   };
   const seenMode = {};
-  const known = {}; // recordId -> ref -> value last seen on its page, so a hop is skipped when it already matches
   let autoBusy = false;
   function watchModes() {
     if (quickBusy || autoBusy || warming) return; // look again once the buttons and the warm-up are done
-    const run = currentRun();
     for (const [ref, rule] of Object.entries(AUTO)) {
-      if (settings[rule.setting || 'autoResponse'] === false || !onTab(rule.tab || 'Incident')) { delete seenMode[ref]; continue; }
+      if (settings.autoResponse === false || !onTab('Incident')) { delete seenMode[ref]; continue; }
       const v = fieldValue(ref);
       if (v === null) { delete seenMode[ref]; continue; }
-      if (run) (known[run.recordId] = known[run.recordId] || {})[ref] = v;
       const prev = seenMode[ref];
       seenMode[ref] = v;
       if (prev === undefined || prev === v || !v) continue; // first look, or unchanged, or cleared
       const kind = rule.match(v);
       if (!kind) continue;
-      if (rule.fill) autoFill(rule.fill(kind));
-      if (rule.cross) crossFill(rule.cross(kind), rule.tab);
+      autoFill(rule.fill(kind));
     }
-  }
-  // set a field on another page: hop there, set it if it does not already match, hop back
-  async function crossFill(c, backView) {
-    const s = lastStatus; const id = s && s.currentRecordId;
-    if (autoBusy || !id) return;
-    const k = known[id] || {};
-    if (k[c.ref] !== undefined && c.same.test(k[c.ref])) return; // already matching, no hop
-    autoBusy = true;
-    try {
-      const go = tabElement(TAB_LABELS[c.tab]), back = tabElement(TAB_LABELS[backView]);
-      if (!go || !back) throw new Error('tabs not found');
-      showVeilMessage('Matching ' + (c.tab === 'Incident' ? 'Level of Service' : 'Provided Care Level') + '…', c.name);
-      go.click();
-      await waitViewLoaded(c.tab, id, 8000);
-      const f = await until(() => fieldReady(c.ref), 4000);
-      if (f) {
-        const cur = norm(fieldValue(c.ref));
-        if (!c.same.test(cur)) await setSingle(c.ref, c.name, c.quick);
-        (known[id] = known[id] || {})[c.ref] = norm(fieldValue(c.ref));
-        await wait(400);
-      }
-      back.click();
-      await waitViewLoaded(backView, id, 8000);
-    } catch (e) { /* leave the rest to the crew */ }
-    hideVeil();
-    autoBusy = false;
   }
   async function autoFill(steps) {
     if (autoBusy) return;

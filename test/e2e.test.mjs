@@ -770,10 +770,6 @@ test('disposition buttons set the whole set through ESO\'s pickers and quick-pic
   // Transported ALS
   await press('dispo-als');
   await waitFor(async () => (await dispo()).levelOfServiceId === 8196, { label: 'ALS set', timeout: 20000 });
-  // ALS also goes to the Narrative page's care level and comes back; wait for that hop to finish
-  await waitFor(() => T.page.evaluate(() => !document.getElementById('esosave-host').shadowRoot.querySelector('.veil') && location.hash.endsWith('/incident')), { label: 'care-level hop done', timeout: 20000 });
-  await waitFor(async () => (await T.record(id)).tree.narrative?.clinicalImpression?.providedCareLevelId === 14196, { label: 'care level matched', timeout: 15000 });
-  await sleep(1200);
   const d1 = await dispo();
   assert.equal(d1.unitDispositionItemID, 14402); assert.equal(d1.patientEvaluationCareDispositionItemID, 14410); assert.equal(d1.crewDispositionItemID, 14415); assert.equal(d1.transportDispositionItemID, 14435);
   const need = () => T.page.evaluate(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .need')).map(n => n.dataset.msg));
@@ -906,37 +902,19 @@ test('Narrative rows: impressions, care level, duration units and every anatomic
   await waitFor(async () => (await nar()).patientComplaint?.chiefComplaintAnatomicLocationId === 7096, { label: 'anatomic location', timeout: 15000 });
   await tap('sr-units', 'Hours');
   await waitFor(async () => (await nar()).patientComplaint?.chiefTimeUnitsOfComplaintDuration === 7082, { label: 'units', timeout: 15000 });
-  // the pad: digits gather, then ESO's own number shelf is opened once, the value entered, OK pressed
+  // the pad: digits gather beside the field with a green OK; OK opens ESO's own number dial once, enters the value, presses its OK
   const opens = await app(() => window.app.shelfOpens);
+  assert.ok(!(await row('np-duration')).some(b => b.text === 'OK'), 'no OK until a digit is tapped');
   await tap('np-duration', '4');
-  await waitFor(async () => (await row('np-duration')).some(b => /padval/.test(b.cls) && b.text === '4 …'), { label: 'pending value shown', interval: 30, timeout: 1200 });
+  await waitFor(async () => (await row('np-duration')).some(b => /padval/.test(b.cls) && b.text === '4') && (await row('np-duration')).some(b => b.text === 'OK'), { label: 'pending value and OK shown' });
   await tap('np-duration', '5');
+  await sleep(2000);
+  assert.notEqual((await nar()).patientComplaint?.chiefComplaintDuration, 45, 'nothing goes in until OK');
+  await tap('np-duration', 'OK');
   await waitFor(async () => (await nar()).patientComplaint?.chiefComplaintDuration === 45, { label: 'duration entered', timeout: 15000 });
   assert.equal(await app(() => window.app.shelfOpens), opens + 1, 'one open of the number shelf');
   await waitFor(() => T.page.evaluate(() => document.querySelector('eso-field[data-field-ref=CHIEFCOMPLAINTDURATION] .display-value').textContent === '45'), { label: 'shown in the field' });
   await waitFor(async () => (await row('np-duration')).some(b => /padval/.test(b.cls) && b.text === '45'), { label: 'pad shows the value' });
-  assert.equal(await app(() => document.querySelectorAll('shelf-panel').length), 0);
-});
-
-test('ALS / BLS chosen on either page sets the other page too, then comes back to where it was chosen', async () => {
-  const id = await freshRun();
-  await app(() => window.app.openTab('Narrative'));
-  const row = (g) => T.page.evaluate((gg) => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll(`.quick [data-group=${gg}]`)).map(b => ({ text: b.textContent, cls: b.className })), g);
-  const tap = async (g, text) => { await waitFor(async () => (await row(g)).some(b => b.text === text && !/busy/.test(b.cls)), { label: text }); await T.page.evaluate(([gg, t]) => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll(`.quick [data-group=${gg}]`)).find(b => b.textContent === t).click(), [g, text]); };
-  await app(() => { window.app.clicks = []; });
-  await tap('sr-care', 'ALS Paramedic');
-  await waitFor(async () => (await T.record(id)).tree.narrative?.clinicalImpression?.providedCareLevelId === 14196, { label: 'care level', timeout: 15000 });
-  await waitFor(async () => (await T.record(id)).tree.incident?.disposition?.levelOfServiceId === 8196, { label: 'level of service matched on the Incident page', timeout: 20000 });
-  await waitFor(() => app(() => window.app.clicks.join(',') === 'Incident,Narrative'), { label: 'went to Incident and came back', timeout: 15000 });
-  await waitFor(() => app(() => location.hash.endsWith('/narrative')), { label: 'back on Narrative' });
-  await waitFor(() => T.page.evaluate(() => !document.getElementById('esosave-host').shadowRoot.querySelector('.veil')), { label: 'hop finished' });
-  // the other way: BLS through ESO's own quick-pick on the Incident page
-  await app(() => window.app.openTab('Incident'));
-  await waitFor(() => app(() => !!document.querySelector('eso-field[data-field-ref=LEVELOFSERVICEID] .display-value')?.textContent.includes('Advanced')), { label: 'Incident shows ALS' });
-  await sleep(1500); // the watcher takes its first look
-  await app(() => { window.app.clicks = []; window.app.ssSetForTest('LEVELOFSERVICEID', 8197); });
-  await waitFor(async () => (await T.record(id)).tree.narrative?.clinicalImpression?.providedCareLevelId === 14194, { label: 'care level matched to BLS', timeout: 20000 });
-  await waitFor(() => app(() => window.app.clicks.join(',') === 'Narrative,Incident'), { label: 'went to Narrative and came back', timeout: 15000 });
   assert.equal(await app(() => document.querySelectorAll('shelf-panel').length), 0);
 });
 
@@ -951,15 +929,15 @@ test('Patient tab: Race row and 0-9 pads for Weight and Height (feet, inches); a
   await tap('sr-race', 'Latino'); // no ESO quick-pick for this one: through the picker (a multi-select, so OK is pressed)
   await waitFor(async () => ((await demo()).raceIds || []).map(Number).includes(10317), { label: 'race', timeout: 15000 });
   await waitFor(async () => (await row('sr-race')).some(b => b.text === 'Latino' && /added/.test(b.cls)), { label: 'shown as set' });
-  await tap('np-weight', '1'); await tap('np-weight', '5'); await tap('np-weight', '0');
+  await tap('np-weight', '1'); await tap('np-weight', '5'); await tap('np-weight', '0'); await tap('np-weight', 'OK');
   await waitFor(async () => (await demo()).weight === 150, { label: 'weight', timeout: 15000 });
   await waitFor(() => T.page.evaluate(() => document.querySelector('eso-field[data-field-ref=PATIENTWEIGHT] .display-value').textContent === '150 lbs'), { label: 'shown with its unit' });
-  await tap('np-feet', '5'); // a one-digit field goes in after a shorter pause
+  await tap('np-feet', '5'); await tap('np-feet', 'OK');
   await waitFor(async () => (await demo()).heightFtComponent === 5, { label: 'feet', timeout: 15000 });
-  await tap('np-inches', '1'); await tap('np-inches', '0');
+  await tap('np-inches', '1'); await tap('np-inches', '0'); await tap('np-inches', 'OK');
   await waitFor(async () => (await demo()).heightInComponent === 10, { label: 'inches', timeout: 15000 });
-  // ⌫ takes the last digit back before it goes in
-  await tap('np-weight', '2'); await tap('np-weight', '9'); await tap('np-weight', '⌫');
+  // ⌫ takes the last digit back before OK
+  await tap('np-weight', '2'); await tap('np-weight', '9'); await tap('np-weight', '⌫'); await tap('np-weight', 'OK');
   await waitFor(async () => (await demo()).weight === 2, { label: 'weight re-entered', timeout: 15000 });
   assert.equal(await app(() => document.querySelectorAll('shelf-panel').length), 0);
 });
