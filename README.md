@@ -95,8 +95,9 @@ to bad signal or a hung page.
   through the agency's users, and only a run that lists the signed-in ESO login goes through;
   otherwise: "You are not associated with this run, please choose another or inform dispatch."
   A run the call log does not have yet asks before importing. After the import, Unit Capability
-  and Unit's Level of Care are set from the ambulance's level (RM-<unit>; a unit named NT… is
-  non-transport). A locked setting.
+  and Unit's Level of Care are set from the ambulance's level (RM-<unit>), or from the call's CMS
+  level when the truck has no row (the NT… units, QRV in the agency's tables); a unit named NT…
+  is non-transport. A locked setting.
 - **Agency settings.** The locked block (retention, tab warm-up, call times, fax prompt, Not sent
   list, the lock question, the CAD gate) is one agency row in the table, read by every tablet,
   and only the agency owner's ESO login can change it.

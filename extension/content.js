@@ -2168,10 +2168,12 @@
       const go = await new Promise(res => askBox('Not in the call log', `Run ${incident} is not in the call log yet, so the crew cannot be checked. Import it anyway?`, [['Import anyway', true], ['Cancel', false]], res));
       if (!go) return;
     }
-    // the unit's level: the ambulance (RM-<unit>), else the call's CMS level
+    // the unit's level: the ambulance (RM-<unit>; an NT unit is a QRV in the agency's tables,
+    // which usually has no ambulance row), else the call's CMS level (ALS-… / BLS-…)
     try {
       const nt = /^NT/i.test(unit);
-      const numbers = [`RM-${unit}`, unit, `RM-${unit.replace(/^NT/i, '')}`];
+      const n = unit.replace(/^NT/i, '').replace(/^0+(?=\d)/, '');
+      const numbers = nt ? [`QRV-${n}`, `QRV${n}`, `RM-QRV${n}`, `RM-${unit}`, unit] : [`RM-${unit}`, unit];
       const amb = await agencyGet(`ambulances?number=in.(${numbers.map(encodeURIComponent).join(',')})&select=number,level`);
       const hit = numbers.map(n => amb.find(a => a.number === n)).find(Boolean);
       level = hit && /^(ALS|BLS)/i.test(hit.level || '') ? hit.level.toUpperCase().slice(0, 3) : null;

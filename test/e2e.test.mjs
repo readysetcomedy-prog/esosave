@@ -1264,9 +1264,9 @@ test('CAD import: only a run the call log shows you on may be imported; then the
   await seed('call_log_entries', [
     { runnumber: '260918-024', callsign: 'RM-23', crewmemberone: 'thocq', crewmembertwo: 'efear', crewmemberthree: '', cmslevel: 'ALS-E', createdat: '2026-09-18T16:21:00Z' },
     { runnumber: '260918-017', callsign: 'RM-16', crewmemberone: 'tmedic', crewmembertwo: 'cberg', crewmemberthree: '', cmslevel: 'BLS-E', createdat: '2026-09-18T12:54:00Z' },
-    { runnumber: '260918-031', callsign: 'RM-NT02', crewmemberone: 'cberg', crewmembertwo: 'tmedic', crewmemberthree: '', cmslevel: 'ALS-NE', createdat: '2026-09-18T10:07:00Z' },
+    { runnumber: '260918-031', callsign: 'QRV-2', crewmemberone: 'cberg', crewmembertwo: 'tmedic', crewmemberthree: '', cmslevel: 'ALS-NE', createdat: '2026-09-18T10:07:00Z' },
   ]);
-  await seed('ambulances', [{ number: 'RM-23', level: 'ALS' }, { number: 'RM-16', level: 'BLS' }, { number: 'RM-NT02', level: 'ALS' }]);
+  await seed('ambulances', [{ number: 'RM-23', level: 'ALS' }, { number: 'RM-16', level: 'BLS' }]); // no row for the QRV: its level comes from the call
   const id = await freshRun();
   await app(() => window.app.openTab('Incident'));
   const box = () => T.page.evaluate(() => { const b = document.getElementById('esosave-host').shadowRoot.querySelector('.veil .askbox'); return b ? b.textContent : null; });
@@ -1287,7 +1287,7 @@ test('CAD import: only a run the call log shows you on may be imported; then the
   const resp = async () => (await T.record(id)).tree.incident?.response || {};
   await waitFor(async () => (await resp()).unitCapabilityID === 14136 && (await resp()).unitsLevelOfCareID === 9681, { label: 'Ground Transport (BLS Equipped) and BLS-Basic /EMT', timeout: 20000 });
   assert.equal(await app(() => document.querySelectorAll('shelf-panel, eso-modal').length), 0);
-  // a non-transport unit (NT02, ALS): Non-Transport-Medical Treatment (ALS Equipped), ALS-Paramedic
+  // a non-transport unit (NT02 in ESO, QRV-2 in the call log, no ambulance row): the call's CMS level ALS-NE gives Non-Transport-Medical Treatment (ALS Equipped), ALS-Paramedic
   const id2 = await freshRun();
   await app(() => window.app.openTab('Incident'));
   await app(() => document.getElementById('cadimport').click());
