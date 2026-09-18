@@ -364,13 +364,13 @@
         `<label class="s"><input type="checkbox" id="qacuity" ${settings.quickAcuity === false ? '' : 'checked'}> Acuity: red, yellow and green buttons next to Initial and Final Patient Acuity (Narrative tab)</label>` +
         `<label class="s"><input type="checkbox" id="qtransport" ${settings.quickTransport === false ? '' : 'checked'}> Transport: chips for how the patient was moved and positioned (Narrative tab)</label>` +
         `<label class="s"><input type="checkbox" id="qfacilities" ${settings.quickFacilities === false ? '' : 'checked'}> Facilities: chips for saved facilities above the Scene and Destination locations (Incident tab)</label>` +
-        `<label class="s"><input type="checkbox" id="qincident" ${settings.quickIncident === false ? '' : 'checked'}> Incident: Run Type, Mutual Aid, EMD Complaint and Requested By rows above their fields</label>` +
+        `<label class="s"><input type="checkbox" id="qincident" ${settings.quickIncident === false ? '' : 'checked'}> Incident: Run Type, Mutual Aid, EMD Complaint and Requested By rows under their labels (only what ESO's own quick-picks lack)</label>` +
         `<label class="s"><input type="checkbox" id="qmechanism" ${settings.quickMechanism === false ? '' : 'checked'}> Mechanism of injury: Blunt, Burn, Penetrating, Other chips (Narrative tab)</label>` +
-        `<label class="s"><input type="checkbox" id="qdisposition" ${settings.quickDisposition === false ? '' : 'checked'}> Disposition: Transported ALS/BLS, Refusal, Canceled (Prior/Scene) buttons above Unit Disposition; Transport Mode and Reason for Refusal outlined in red until answered (Incident tab)</label>` +
+        `<label class="s"><input type="checkbox" id="qdisposition" ${settings.quickDisposition === false ? '' : 'checked'}> Disposition: Transported ALS/BLS, Refusal, Canceled (Prior/Scene) buttons under Unit Disposition; Transport Mode and Reason for Refusal outlined in red until answered (Incident tab)</label>` +
         `<label class="s"><input type="checkbox" id="qautoresp" ${settings.autoResponse === false ? '' : 'checked'}> Auto-fill: choosing Emergent or Non-Emergent (response or transport mode) fills the lights/sirens, intersection, scheduled, speed and method fields that are still empty, and sets EMD Performed to No</label>` +
         `<label class="s"><input type="checkbox" id="qassess" ${settings.quickAssess === false ? '' : 'checked'}> Assessment: "All normal" (presses No Abnormalities on every category in ESO's Quick Ax) and "A&amp;Ox4" on each assessment (Assessments tab)</label>` +
         `<label class="s"><input type="checkbox" id="qnarrative" ${settings.quickNarrative === false ? '' : 'checked'}> Narrative: rows for Primary and Secondary Impression, Provided Care Level, Anatomic Location and the complaint duration units, plus a 0-9 pad for the duration (Narrative tab)</label>` +
-        `<label class="s"><input type="checkbox" id="qpatient" ${settings.quickPatient === false ? '' : 'checked'}> Patient: Race row and 0-9 pads for Weight and Height (Patient tab)</label>` +
+        `<label class="s"><input type="checkbox" id="qpatient" ${settings.quickPatient === false ? '' : 'checked'}> Patient: Race row (Asian, Latino) and 0-9 pads for Weight and Height (Patient tab)</label>` +
         `<label class="s"><input type="checkbox" id="qrefusal" ${settings.quickRefusal === false ? '' : 'checked'}> Refusal form: chips for Legal, Decision-Making, Medical, Check All notifications and the four Patient Refusals inside ESO's Patient Refusal Form (Signatures tab)</label>` +
         `<label class="s"><input type="checkbox" id="qsynccare" ${settings.syncCareLevel === false ? '' : 'checked'}> Match ALS / BLS between Level of Service (Incident) and Local Protocol Provided Care Level (Narrative): setting one sets the other, then returns to the page you were on</label>` +
         facilityPicker('facilitySending', 'Sending facility chips (Scene)') + facilityPicker('facilityDestination', 'Destination facility chips') +
@@ -903,7 +903,14 @@
   const commitTimers = {};
   let quickBusy = false;
   const norm = (t) => (t || '').replace(/\s+/g, ' ').trim();
-  const visible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+  const visible = (el) => {
+    const r = el.getBoundingClientRect();
+    if (!(r.width > 0 && r.height > 0)) return false;
+    // ESO folds a field away (Mutual Aid until the run type is mutual aid) in a wrapper that is
+    // visibility:hidden, height 0 and overflow hidden; the field's own box still measures
+    if (el.checkVisibility) return el.checkVisibility({ visibilityProperty: true, opacityProperty: true });
+    return getComputedStyle(el).visibility !== 'hidden';
+  };
   const inShelf = (el) => !!el.closest('shelf-panel, [class*="shelf" i]');
   function findByText(selector, text, opts) {
     // the innermost visible element whose whole text is exactly this (a string or a RegExp)
@@ -949,7 +956,26 @@
   // the names a multi-select field shows, upper-cased
   const shownParts = (ref) => { const v = fieldValue(ref); return v ? v.split(',').map(x => norm(x).toUpperCase()).filter(Boolean) : []; };
 
-  // ---- chips: to the right of the group's Add button and in rows under it
+  // Rows of buttons under a field's label, above its value: measured, wrapped within the field's
+  // width, and the room taken from the control so nothing of ESO's sits beneath them.
+  function placeRows(f, els, gap = 6) {
+    const r = f.getBoundingClientRect();
+    const lab = f.querySelector('.label-container label, label');
+    const ctl = f.querySelector('eso-control, .field-area, .field-container');
+    const lines = [[]]; let x = 0, rowH = 34;
+    for (const b of els) {
+      const br = b.getBoundingClientRect(); const w = br.width || 80; rowH = Math.max(rowH, Math.round(br.height) + 6);
+      if (x + w > r.width && lines[lines.length - 1].length) { lines.push([]); x = 0; }
+      lines[lines.length - 1].push([b, w]); x += w + gap;
+    }
+    const need = lines.length * rowH + 4;
+    let top0;
+    if (lab && visible(lab) && ctl) { top0 = lab.getBoundingClientRect().bottom + 6; if (ctl.style.marginTop !== need + 'px') ctl.style.marginTop = need + 'px'; }
+    else { top0 = r.top - need + 4; if (f.style.marginTop !== need + 'px') f.style.marginTop = need + 'px'; }
+    lines.forEach((line, li) => { let lx = r.left; for (const [b, w] of line) { b.style.left = Math.round(lx) + 'px'; b.style.top = Math.round(top0 + li * rowH) + 'px'; b.style.visibility = ''; lx += w + gap; } });
+  }
+  // ---- chips: to the right of the group's Add button and in rows under it; or, for a field,
+  // under the field's label
   function anchorButton(group) {
     const el = findByText('button, a', group.button, { notInShelf: true });
     return el ? (el.closest('button, a') || el) : null;
@@ -965,17 +991,17 @@
     if (!btn) { dropQuick(gk + ':'); return; }
     const fr = btn.getBoundingClientRect();
     if (!fr.width) { dropQuick(gk + ':'); return; }
-    const lab = g.field ? btn.querySelector('label') : null;
-    const r = lab ? lab.getBoundingClientRect() : fr;
-    const box = g.field ? fr : (btn.parentElement ? btn.parentElement.getBoundingClientRect() : r);
-    const right = g.field ? fr.right - 4 : Math.max(r.right + 200, box.right - 8);
+    const r = fr;
+    const box = btn.parentElement ? btn.parentElement.getBoundingClientRect() : r;
+    const right = Math.max(r.right + 200, box.right - 8);
     const have = new Set(((run.lists && run.lists[g.listKey]) || []).map(Number));
     const shown = g.field ? shownParts(g.field) : [];
     const isOn = (name, id) => have.has(id) || (!!name && shown.includes(name.toUpperCase()));
     const gap = 6, rowH = 34;
     let x = r.left + r.width + 12, y = r.top + (r.height - 28) / 2, row = 0;
-    const under = g.field ? fr.bottom : r.bottom;
+    const under = r.bottom;
     const layer = ensureQuickLayer();
+    const els = [];
     for (const [short, name, id] of [...g.chips, ...(g.noOther ? [] : [['Other…', null, 'other']])]) {
       const chip = quickEl(`${gk}:${id}`, () => {
         const c = document.createElement('button'); c.type = 'button'; c.className = 'chip' + (id === 'other' ? ' other' : ''); c.textContent = short; c.title = name || 'Open ESO\'s full list'; c.dataset.group = gk;
@@ -989,12 +1015,14 @@
       chip.style.display = 'block';
       chip.style.visibility = 'hidden';
       layer.appendChild(chip);
+      if (g.field) { els.push(chip); continue; }
       const w = chip.getBoundingClientRect().width || 60;
       if (x + w > right) { row++; x = r.left; y = under + 8 + (row - 1) * rowH; }
       chip.style.left = Math.round(x) + 'px'; chip.style.top = Math.round(y) + 'px';
       chip.style.visibility = '';
       x += w + gap;
     }
+    if (g.field) { placeRows(btn, els); return; }
     // reserve the rows under the button so nothing of ESO's sits beneath the chips
     const need = row ? row * rowH + 8 : 0;
     if (btn.style.marginBottom !== need + 'px') btn.style.marginBottom = need + 'px';
@@ -1223,9 +1251,11 @@
     const nameField = fieldEl(g.nameRef);
     const current = nameField ? norm((nameField.querySelector('.display-value') || nameField).textContent) : '';
     const gap = 6, rowH = 34;
+    const lr = blk.loc.getBoundingClientRect();
+    const right = Math.max(pr.right, lr.right - 8);
     let x = pr.left, y = pr.bottom + 8, row = 0;
     const layer = ensureQuickLayer();
-    for (const fac of [...chosen, { id: 'other', name: 'Open ESO\'s facility list', label: 'Other…' }]) {
+    for (const fac of chosen) {
       const chip = quickEl(`f:${gk}:${fac.id}`, () => {
         const c = document.createElement('button'); c.type = 'button'; c.className = 'chip' + (fac.id === 'other' ? ' other' : ''); c.textContent = fac.label || fac.name; c.title = fac.name; c.dataset.group = 'fac-' + gk;
         c.addEventListener('pointerdown', (e) => e.stopPropagation());
@@ -1237,7 +1267,7 @@
       chip.style.display = 'block'; chip.style.visibility = 'hidden';
       layer.appendChild(chip);
       const w = chip.getBoundingClientRect().width || 120;
-      if (x + w > pr.right && x > pr.left) { row++; x = pr.left; y = pr.bottom + 8 + row * rowH; }
+      if (x + w > right && x > pr.left) { row++; x = pr.left; y = pr.bottom + 8 + row * rowH; }
       chip.style.left = Math.round(x) + 'px'; chip.style.top = Math.round(y) + 'px';
       chip.style.visibility = '';
       x += w + gap;
@@ -1284,10 +1314,17 @@
       if (blk.pill && !blk.pill.classList.contains('selected')) { blk.pill.click(); }
       const typeField = await until(() => fieldEl(g.typeRef), 3000);
       if (!typeField) throw new Error('the Predefined fields did not appear');
-      const typeName = facilityTypeName(g, fac);
-      if (!typeName) throw new Error('ESO\'s list does not say what type of place this is');
+      // the type from ESO's list when it has been learned this session; the standard chips are all
+      // hospitals, so Hospital otherwise
+      const typeName = facilityTypeName(g, fac) || 'Hospital';
       const curType = norm((typeField.querySelector('.display-value') || typeField).textContent);
-      if (curType.toUpperCase() !== typeName.toUpperCase()) { await pickSingle(typeField, typeName, false); await wait(250); }
+      if (curType.toUpperCase() !== typeName.toUpperCase()) {
+        const qp = Array.from(typeField.querySelectorAll('.quick-picks button')).find(b => visible(b) && norm(b.textContent).toUpperCase() === typeName.toUpperCase());
+        if (qp) qp.click();
+        const ok = qp && await until(() => norm((typeField.querySelector('.display-value') || typeField).textContent).toUpperCase() === typeName.toUpperCase(), 1500, 60);
+        if (!ok) await pickSingle(typeField, typeName, false);
+        await wait(250);
+      }
       const nameField = await until(() => { const f = fieldEl(g.nameRef); return f && !f.hasAttribute('disabled') ? f : null; }, 4000);
       if (!nameField) throw new Error('the name field is not ready');
       await pickSingle(nameField, fac.name, true);
@@ -1430,8 +1467,7 @@
     if (!first) { dropQuick('dp:'); return; }
     const r = first.getBoundingClientRect();
     if (!r.width) { dropQuick('dp:'); return; }
-    if (first.style.marginTop !== '44px') first.style.marginTop = '44px';
-    let x = r.left;
+    const els = [];
     for (const [k, d] of [...Object.entries(DISPO), ['other', { text: 'Other…', steps: [], other: true }]]) {
       const b = quickEl('dp:' + k, () => {
         const el = document.createElement('button'); el.type = 'button'; el.className = 'allnone' + (d.other ? ' other' : ''); el.dataset.group = 'dispo-' + k; el.textContent = d.text; el.title = d.other ? 'Open ESO\'s Unit Disposition list' : d.steps.map(s => s[1]).join(' · ');
@@ -1441,11 +1477,9 @@
       });
       b.classList.toggle('busy', quickBusy);
       b.style.visibility = 'hidden'; b.style.display = 'block';
-      const w = b.getBoundingClientRect().width || 120;
-      b.style.left = Math.round(x) + 'px'; b.style.top = Math.round(r.top - 40) + 'px';
-      b.style.visibility = '';
-      x += w + 8;
+      els.push(b);
     }
+    placeRows(first, els, 8);
   }
   async function runDisposition(k) {
     if (quickBusy) return;
@@ -1469,11 +1503,12 @@
   const IMPRESSIONS = [['Chest Pain', 'Chest Pain / Discomfort'], ['SOB', 'Acute Respiratory Distress (Dyspnea)'], ['Abd Pain', 'Abdominal Pain'], ['AMS', 'Altered Mental Status'], ['Weakness', 'Generalized Weakness'],
     ['Syncope', 'Syncope / Fainting'], ['Seizure', 'Seizures without status epilepticus'], ['Injury', 'Injury'], ['Stroke', 'Stroke'], ['No Complaint', 'No Complaints or Injury/Illness Noted']];
   const SINGLE_ROWS = {
-    resp: { setting: 'quickDisposition', ref: 'PRIORITYID', what: 'Response Mode', items: [['Emergent', 'Emergent', 'Emergent'], ['Non-Emergent', 'Non-Emergent', 'Non-Emergent']] },
-    runtype: { setting: 'quickIncident', ref: 'RUNTYPEID', what: 'Run Type', items: [['911/PL', 'Emergency Response (Primary Response Area)', '911 Response'], ['Hosp-Hosp', 'Hospital-to-Hospital Transfer'], ['Intercept', 'Emergency Response (Intercept)', 'Emergency Response (Intercept)'], ['Mutual Aid', 'Emergency Response (Mutual Aid)'], ['Hosp-NonHosp', 'Hospital to Non-Hospital Facility Transfer'], ['NonHosp-Hosp', 'Non-Hospital Facility to Hospital Transfer']] },
-    mutual: { setting: 'quickIncident', ref: 'MUTUALAIDID', what: 'Mutual Aid', items: [['Given', 'Mutual Aid Given'], ['Received', 'Mutual Aid Received'], ['No Unit Available', 'No Unit Available']] },
-    emd: { setting: 'quickIncident', ref: 'EMDCOMPLAINTID', what: 'EMD Complaint', items: [['Breathing', 'Breathing Problem', 'Breathing Problem'], ['Sick Person', 'Sick Person', 'Sick Person'], ['Traffic Accident', 'Traffic Accident', 'Traffic Accident'], ['Abd Pain', 'Abdominal Pain/Problems'], ['AMS', 'Altered Mental Status'], ['Allergic', 'Allergic Reaction/Stings'], ['Assault', 'Assault'], ['Chest Pain', 'Chest Pain (Non-Traumatic)'], ['Cardiac Arrest', 'Cardiac Arrest/Death'], ['Diabetic', 'Diabetic Problem'], ['Falls', 'Falls'], ['Hemorrhage/Lac', 'Hemorrhage/Laceration'], ['Medical Alarm', 'Medical Alarm'], ['Overdose', 'Overdose/Poisoning/Ingestion'], ['Pregnancy', 'Pregnancy/Childbirth'], ['Psych', 'Psychiatric Problem/Abnormal Behavior/Suicide Attempt'], ['Seizure', 'Convulsions/Seizure'], ['Stroke', 'Stroke/CVA']] },
-    reqby: { setting: 'quickIncident', ref: 'REQUESTEDBYITEMID', what: 'Requested By', items: [['Patient', 'Patient', 'Patient'], ['Family', 'Family', 'Family'], ['Bystander', 'Bystander', 'Bystander'], ['Physician', 'Physician'], ['Law Enforcement', 'Law Enforcement'], ['Fire Dept', 'Fire Department'], ['Other Healthcare', 'Other Healthcare Provider']] },
+    // Where ESO shows its own quick-picks (and its own Other), the row carries only what ESO does
+    // not: no repeat of ESO's buttons and no Other… of its own.
+    runtype: { setting: 'quickIncident', ref: 'RUNTYPEID', what: 'Run Type', noOther: true, items: [['Hosp-Hosp', 'Hospital-to-Hospital Transfer'], ['Mutual Aid', 'Emergency Response (Mutual Aid)'], ['Hosp-NonHosp', 'Hospital to Non-Hospital Facility Transfer'], ['NonHosp-Hosp', 'Non-Hospital Facility to Hospital Transfer']] },
+    mutual: { setting: 'quickIncident', ref: 'MUTUALAIDID', what: 'Mutual Aid', noOther: true, items: [['Given', 'Mutual Aid Given'], ['Received', 'Mutual Aid Received'], ['No Unit Available', 'No Unit Available']] },
+    emd: { setting: 'quickIncident', ref: 'EMDCOMPLAINTID', what: 'EMD Complaint', noOther: true, items: [['Abd Pain', 'Abdominal Pain/Problems'], ['AMS', 'Altered Mental Status'], ['Allergic', 'Allergic Reaction/Stings'], ['Assault', 'Assault'], ['Chest Pain', 'Chest Pain (Non-Traumatic)'], ['Cardiac Arrest', 'Cardiac Arrest/Death'], ['Diabetic', 'Diabetic Problem'], ['Falls', 'Falls'], ['Hemorrhage/Lac', 'Hemorrhage/Laceration'], ['Medical Alarm', 'Medical Alarm'], ['Overdose', 'Overdose/Poisoning/Ingestion'], ['Pregnancy', 'Pregnancy/Childbirth'], ['Psych', 'Psychiatric Problem/Abnormal Behavior/Suicide Attempt'], ['Seizure', 'Convulsions/Seizure'], ['Stroke', 'Stroke/CVA']] },
+    reqby: { setting: 'quickIncident', ref: 'REQUESTEDBYITEMID', what: 'Requested By', noOther: true, items: [['Physician', 'Physician'], ['Law Enforcement', 'Law Enforcement'], ['Fire Dept', 'Fire Department'], ['Other Healthcare', 'Other Healthcare Provider']] },
     // Narrative tab. The ten impressions a rural service sees most; the secondary list carries the
     // same names.
     primary: { setting: 'quickNarrative', tab: 'Narrative', ref: 'PRIMARYIMPRESSIONID', what: 'Primary Impression', items: IMPRESSIONS },
@@ -1482,7 +1517,7 @@
     units: { setting: 'quickNarrative', tab: 'Narrative', ref: 'CHIEFTIMEUNITSOFCOMPLAINTDURATION', what: 'Duration Unit', items: [['Minutes', 'Minutes'], ['Hours', 'Hours'], ['Days', 'Days']] },
     anatomic: { setting: 'quickNarrative', tab: 'Narrative', ref: 'CHIEFCOMPLAINTANATOMICLOCATIONID', what: 'Anatomic Location', noOther: true, items: [['Head', 'Head'], ['Neck', 'Neck'], ['Chest', 'Chest'], ['Abd', 'Abdomen'], ['Back', 'Back'], ['Upper Ext', 'Extremity-Upper'], ['Lower Ext', 'Extremity-Lower'], ['Genitalia', 'Genitalia'], ['General', 'General/Global']] },
     // Patient tab
-    race: { setting: 'quickPatient', tab: 'Patient', ref: 'PATIENTRACEIDS', what: 'Race', items: [['White', 'White', 'White'], ['Asian', 'Asian'], ['Black', 'Black or African American', 'Black'], ['Latino', 'Hispanic or Latino']] },
+    race: { setting: 'quickPatient', tab: 'Patient', ref: 'PATIENTRACEIDS', what: 'Race', noOther: true, items: [['Asian', 'Asian'], ['Latino', 'Hispanic or Latino']] },
   };
   function layoutSingleRows() {
     const run = currentRun();
@@ -1514,13 +1549,7 @@
         b.style.display = 'block'; b.style.visibility = 'hidden';
         return b;
       });
-      const gap = 6, rowH = 34;
-      const lines = [[]]; let x = 0;
-      for (const b of els) { const w = b.getBoundingClientRect().width || 80; if (x + w > r.width && lines[lines.length - 1].length) { lines.push([]); x = 0; } lines[lines.length - 1].push([b, w]); x += w + gap; }
-      const need = lines.length * rowH + 10;
-      if (f.style.marginTop !== need + 'px') f.style.marginTop = need + 'px';
-      const top0 = r.top - lines.length * rowH - 6;
-      lines.forEach((line, li) => { let lx = r.left; for (const [b, w] of line) { b.style.left = Math.round(lx) + 'px'; b.style.top = Math.round(top0 + li * rowH) + 'px'; b.style.visibility = ''; lx += w + gap; } });
+      placeRows(f, els);
     }
   }
   // ---- 0-9 pads above ESO's numeric fields: digits gather for a moment, then ESO's own number
@@ -1556,13 +1585,7 @@
         b.style.display = 'block'; b.style.visibility = 'hidden';
         return b;
       });
-      const gap = 6, rowH = 34;
-      const lines = [[]]; let x = 0;
-      for (const b of els) { const w = b.getBoundingClientRect().width || 36; if (x + w > r.width && lines[lines.length - 1].length) { lines.push([]); x = 0; } lines[lines.length - 1].push([b, w]); x += w + gap; }
-      const need = lines.length * rowH + 10;
-      if (f.style.marginTop !== need + 'px') f.style.marginTop = need + 'px';
-      const top0 = r.top - lines.length * rowH - 6;
-      lines.forEach((line, li) => { let lx = r.left; for (const [b, w] of line) { b.style.left = Math.round(lx) + 'px'; b.style.top = Math.round(top0 + li * rowH) + 'px'; b.style.visibility = ''; lx += w + gap; } });
+      placeRows(f, els);
     }
   }
   function tapPad(pk, k) {
@@ -1707,7 +1730,31 @@
     } catch (e) { /* leave the rest to the crew */ }
     autoBusy = false;
   }
+  // Everything in the quick and copy layers scrolls under ESO's banner (the dark top bar and the
+  // tab strip) like the page does: the layers are clipped at the banner's bottom edge.
+  const tabStrip = {}; // label -> element, found once per view
+  function bannerBottom() {
+    let b = 0;
+    const bar = topBarRect(); if (bar) b = Math.max(b, bar.rect.bottom);
+    const s = lastStatus; const label = s ? currentTabLabel(s) : null;
+    if (label) {
+      if (!tabStrip[label] || !document.contains(tabStrip[label])) tabStrip[label] = tabElement(label);
+      let el = tabStrip[label];
+      for (let i = 0; el && i < 4; el = el.parentElement, i++) {
+        const r = el.getBoundingClientRect();
+        if (r.height > 110 || r.height <= 0) break;
+        if (r.top < b + 40 && r.bottom > 0) b = Math.max(b, r.bottom);
+      }
+    }
+    return Math.round(b);
+  }
+  function clipLayers() {
+    const b = bannerBottom();
+    const clip = b > 0 ? `inset(${b}px 0 0 0)` : '';
+    for (const l of [quickLayer, copyLayer]) if (l && l.style.clipPath !== clip) l.style.clipPath = clip;
+  }
   function layoutQuick() {
+    try { clipLayers(); } catch (e) { /* keep going */ }
     try { layoutAssess(); } catch (e) { /* keep going */ }
     try { layoutDisposition(); } catch (e) { /* keep going */ }
     try { layoutSingleRows(); } catch (e) { /* keep going */ }

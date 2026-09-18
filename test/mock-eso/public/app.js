@@ -227,7 +227,11 @@
     const qp = f.querySelector('.quick-picks'); if (qp) qp.style.display = names ? 'none' : '';
     // like ESO: patient/transport dispositions only apply once contact was made; transport mode only when transporting
     if (ref === 'UNITDISPOSITIONITEMID') for (const dep of ['PATIENTEVALUATIONCAREDISPOSITIONITEMID', 'TRANSPORTDISPOSITIONITEMID']) document.querySelector(`eso-field[data-field-ref="${dep}"]`).toggleAttribute('disabled', v !== 14402);
-    if (ref === 'RUNTYPEID') document.querySelector('eso-field[data-field-ref="MUTUALAIDID"]').style.display = v === 328 ? '' : 'none'; // ESO only shows Mutual Aid for that run type
+    if (ref === 'RUNTYPEID') { // ESO only shows Mutual Aid for that run type: folded away in a hidden wrapper, disabled
+      const mf = document.querySelector('eso-field[data-field-ref="MUTUALAIDID"]'); const wrap = mf.parentElement;
+      wrap.setAttribute('style', v === 328 ? 'margin:0;padding:0' : 'margin:0;padding:0;overflow:hidden;height:0px;visibility:hidden;position:absolute');
+      wrap.classList.toggle('eso-hide', v !== 328); mf.toggleAttribute('disabled', v !== 328);
+    }
     if (ref === 'TRANSPORTDISPOSITIONITEMID') for (const dep of ['TRANSPORTMODEID', 'TRANSPORTMODELIGHTSANDSIRENSUSE', 'TRANSPORTMETHODID']) document.querySelector(`eso-field[data-field-ref="${dep}"]`).toggleAttribute('disabled', !(v === 14435 || v === 14436));
   }
   function ssSet(ref, id) {
@@ -236,7 +240,7 @@
     else { app.ss[ref] = id; app.edit(d.scope || 'incident', d.addr, id, 'singleselect'); }
     ssRender(ref);
   }
-  document.getElementById('response').innerHTML = ['RUNTYPEID', 'MUTUALAIDID', 'PRIORITYID', 'RESPONSEMODELIGHTSANDSIRENSUSE', 'RESPONSEMODEINTERSECTIONNAVIGATION', 'RESPONSEMODESCHEDULED', 'RESPONSEMODESPEED', 'EMDCOMPLAINTID', 'EMDPERFORMEDID', 'REQUESTEDBYITEMID'].map(ssHtml).join('');
+  document.getElementById('response').innerHTML = ['RUNTYPEID', '__MUTUAL__', 'PRIORITYID', 'RESPONSEMODELIGHTSANDSIRENSUSE', 'RESPONSEMODEINTERSECTIONNAVIGATION', 'RESPONSEMODESCHEDULED', 'RESPONSEMODESPEED', 'EMDCOMPLAINTID', 'EMDPERFORMEDID', 'REQUESTEDBYITEMID'].map(r => r === '__MUTUAL__' ? `<div eso-show-hide-slide="" class="eso-hide" style="margin:0;padding:0;overflow:hidden;height:0px;visibility:hidden;position:absolute">${ssHtml('MUTUALAIDID')}</div>` : ssHtml(r)).join('');
   document.getElementById('disposition').innerHTML = ['UNITDISPOSITIONITEMID', 'PATIENTEVALUATIONCAREDISPOSITIONITEMID', 'CREWDISPOSITIONITEMID', 'TRANSPORTDISPOSITIONITEMID', 'REFUSALRELEASEITEMIDS', 'TRANSPORTMODEID', 'TRANSPORTMODELIGHTSANDSIRENSUSE', 'TRANSPORTMETHODID', 'LEVELOFSERVICEID'].map(ssHtml).join('');
   // ---- numeric fields, as ESO draws them: display value with a suffix, numpad indicator, and a
   // number shelf (masked input + numpad + OK) when tapped

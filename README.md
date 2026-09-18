@@ -35,8 +35,9 @@ to bad signal or a hung page.
 - **Quick buttons.** One-tap chips for the common history items and home medications (each list
   ends with None Reported) and NKDA for allergies sit beside Add History, Add Medications and Add
   Allergies on the Patient tab; tap several and, a moment later, ESO's own list is opened once, each
-  one ticked, and OK pressed. They hide while any ESO picker is open. A Race row sits above the Race
-  field, and 0-9 pads above Weight and Height (feet and inches): digits gather for a moment, then
+  one ticked, and OK pressed. They hide while any ESO picker is open, and every button scrolls under
+  ESO's top bar and tab strip with the page. A Race row (Asian, Latino: the rest are ESO's own
+  quick-picks) sits under the Race label, and 0-9 pads above Weight and Height (feet and inches): digits gather for a moment, then
   ESO's own number pad is opened once, the value entered and OK pressed, so the pad does not open on
   every tap; ⌫ takes the last digit back first. On the Incident tab, one "All: None/No Delay" button above the delay fields
   presses ESO's own None button on every delay still empty, leaving any already answered alone. On
@@ -44,16 +45,18 @@ to bad signal or a hung page.
   ambulance, position during transport) pick in ESO's list the same way. Facility chips under the
   Scene and Destination locations start as the agency's standard set (short labels, ids from ESO's
   saved facilities) and can be added to or trimmed per device in Settings, which searches the
-  facilities ESO's configuration bundle carries; a tap selects Predefined, sets the type to match and
-  picks the name. On the Assessments tab, "All normal" on each assessment opens ESO's own Quick Ax,
+  facilities ESO's configuration bundle carries; a tap selects Predefined, sets the type to match
+  (Hospital for the standard set, through ESO's own quick-pick) and picks the name. On the Assessments tab, "All normal" on each assessment opens ESO's own Quick Ax,
   presses No Abnormalities on every category still unset and presses OK; "A&Ox4" opens Mental Status
   and presses Alert and Oriented x4. On the Incident tab, Transported ALS / BLS, Refusal, Canceled
   (Prior) and Canceled (Scene) set the whole disposition set through ESO's pickers, then outline
   Transport Mode or Reason for Refusal in red until answered; choosing Emergent or Non-Emergent for
   the response or transport mode fills the lights/sirens, intersection, scheduled, speed and method
-  fields still empty and sets EMD Performed to No. Emergent / Non-Emergent buttons sit above
-  Response Mode to Scene, and rows for Run Type, Mutual Aid, EMD Complaint and Requested By above
-  their fields; Mechanism of Injury chips on the Narrative tab. Also on the Narrative tab: the ten
+  fields still empty and sets EMD Performed to No. Rows for Run Type, Mutual Aid, EMD Complaint
+  and Requested By sit under their labels; Mechanism of Injury chips on the Narrative tab. Every
+  row sits under the label of the field it fills, and carries only what ESO's own quick-picks do
+  not already offer (where ESO shows its own buttons and Other, the row has no Other… of its own).
+  Mutual Aid stays hidden until the run type is mutual aid, as in ESO. Also on the Narrative tab: the ten
   most common impressions above Primary and Secondary Impression, ALS Paramedic / BLS above Local
   Protocol Provided Care Level, Minutes / Hours / Days above the complaint duration's unit with a
   0-9 pad for the duration itself, and every anatomic location (abbreviated) above Anatomic
