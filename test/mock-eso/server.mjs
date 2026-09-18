@@ -209,6 +209,20 @@ export function createMockEso() {
       if (control.loggedOut) { res.writeHead(302, { location: '/login/?ReturnUrl=' + encodeURIComponent(path) }); return res.end(); }
       const rest = path.slice('/ehr/api/'.length);
       if (rest === 'thirdpartydata/partners') return send(200, { partners: [] });
+      // ESO's configuration bundle: every pick list, including the agency's saved facilities
+      if (rest.startsWith('configurationBundle/') && req.method === 'GET') return send(200, {
+        configVersion: '5.3.19', bundleVersion: '5.3.19.1', mdmVersion: '3.3', fieldConfigs: [], lists: {
+          'UDL.LOCATIONS': { values: [
+            { itemId: 'loc-anderson', itemName: 'Anderson Hospital', locationTypeId: 6540, city: 'Maryville' },
+            { itemId: 'loc-stjohns', itemName: "HSHS St. John's", locationTypeId: 6540, city: 'Springfield' },
+            { itemId: 'loc-sbl', itemName: 'Sarah Bush Lincoln', locationTypeId: 6540, city: 'Mattoon' },
+            { itemId: 'loc-breese', itemName: 'Breese Nursing Home', locationTypeId: 6542, city: 'Breese' },
+            { itemId: 'loc-lakeland', itemName: 'Lakeland Rehab & Healthcare', locationTypeId: 6545, city: 'Effingham' },
+          ] },
+          'SL.LOCATIONTYPE': { values: [{ itemId: 6535, itemName: 'Home/Residence' }, { itemId: 6540, itemName: 'Hospital' }, { itemId: 6542, itemName: 'Nursing home' }, { itemId: 6545, itemName: 'Rehabilitation Center' }] },
+          'SL.DESTINATIONTYPE': { values: [{ itemId: 6575, itemName: 'Hospital', parentItemId: 6540 }, { itemId: 6577, itemName: 'Nursing Home', parentItemId: 6542 }, { itemId: 6580, itemName: 'Rehabilitation Center', parentItemId: 6545 }, { itemId: 6582, itemName: 'Home', parentItemId: 6535 }] },
+        },
+      });
       if (rest.startsWith('WebApi') && req.method === 'POST') return send(200, { result: '', status: 204 });
       if (rest.startsWith('custom/lookup')) return send(200, { items: [1, 2, 3] });
       if (rest === 'PatientCareRecords' && req.method === 'POST') { const r = newRecord(); return send(200, { result: 'Success', data: r.id }); }

@@ -27,7 +27,7 @@
   if (ext) return;
   if (window.__esosave) return;
 
-  const VERSION = '0.5.3';
+  const VERSION = '0.6.0';
   const API_PREFIX_RE = /^\/ehr\/api\/+/i;
   const FAKE_OK_TEXT = '{"result":"Success","data":[]}';
   const PROBE_PATH = '/ehr/api/thirdpartydata/partners';
@@ -722,11 +722,32 @@
           // A GET here may have been answered by the browser's own cache while offline, so only a
           // POST (never cached) counts as proof that ESO is reachable.
           if (req.method.toUpperCase() === 'POST') setOnline(true);
-          if (o === 'auth') setLoggedOut(true); else { setLoggedOut(false); cachePut(req.method, req.url, req.body, res); }
+          if (o === 'auth') setLoggedOut(true); else { setLoggedOut(false); cachePut(req.method, req.url, req.body, res); if (o === 'ok' && /configurationBundle/i.test(kind.path)) learnBundle(res.text); }
         }
         return res;
       }
     }
+  }
+  // ------------------------------------------------------------------ ESO's configuration bundle
+  // Fetched by the app on every tab switch; it carries every pick list, including the agency's
+  // saved facilities (UDL.LOCATIONS, each with its location type). Parsed once per version.
+  let bundleSeen = null;
+  function learnBundle(text) {
+    const head = text.slice(0, 200);
+    const ver = /"bundleVersion"\s*:\s*"([^"]+)"/.exec(head);
+    if (ver && ver[1] === bundleSeen) return;
+    let j; try { j = JSON.parse(text); } catch (e) { return; }
+    const lists = j && j.lists;
+    if (!lists || !lists['UDL.LOCATIONS']) return;
+    bundleSeen = ver ? ver[1] : String(Date.now());
+    const vals = (k) => (lists[k] && Array.isArray(lists[k].values)) ? lists[k].values : [];
+    S.facilities = {
+      at: Date.now(),
+      items: vals('UDL.LOCATIONS').filter(x => x && x.itemId && x.itemName).map(x => ({ id: x.itemId, name: x.itemName, typeId: x.locationTypeId || null, city: x.city || null })),
+      locationTypes: vals('SL.LOCATIONTYPE').map(x => ({ id: x.itemId, name: x.itemName })),
+      destinationTypes: vals('SL.DESTINATIONTYPE').map(x => ({ id: x.itemId, name: x.itemName, locationTypeId: x.parentItemId || null })),
+    };
+    post('facilities', S.facilities);
   }
   // ------------------------------------------------------------------ fax / email after lock
   // ESO's own calls, recorded from the app: GET .../Fax/CanSend and .../Email/canSend answer
@@ -1318,6 +1339,7 @@
         else if (a.name === 'copyVital') { copyVital(a.recordId || S.currentRecordId, String(a.time || ''), Number(a.nth) || 0); }
         else if (a.name === 'send') { sendRecord(a.recordId, a.kind === 'email' ? 'email' : 'fax'); }
         else if (a.name === 'scanUnsent') { scheduleUnsentScan(0); }
+        else if (a.name === 'facilities') { if (S.facilities) post('facilities', S.facilities); }
       }
     } catch (e) { log(null, 'ESO Save internal error: ' + (e && e.message), 'error'); }
   });

@@ -626,6 +626,54 @@ test('quick transport: chips after each transport field pick in ESO\'s list; a f
   assert.match(await app(() => document.querySelector('eso-field[data-field-ref=PATIENTPOSITIONDURINGTRANSPORTIDS] .display-value').textContent), /Semi-Fowlers/);
 });
 
+test('facility chips: chosen in Settings from ESO\'s saved facilities, one tap sets Predefined, the type and the name', async () => {
+  const id = await freshRun();
+  const sh = (sel) => T.page.evaluate((s) => { const el = document.getElementById('esosave-host').shadowRoot.querySelector(s); return el ? el.textContent : null; }, sel);
+  // choose two destination facilities and one sending facility in Settings
+  await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.bar [data-act=open]').click());
+  await waitFor(() => sh('.panel [data-act=settings]'), { label: 'panel' });
+  await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('[data-act=settings]').click());
+  await waitFor(() => T.page.evaluate(() => !!document.getElementById('esosave-host').shadowRoot.querySelector('.fac[data-key=facilityDestination] .facq')), { label: 'facility search box (bundle learned)' });
+  const pickFac = async (key, text, name) => {
+    await T.page.evaluate(([k, t]) => { const r = document.getElementById('esosave-host').shadowRoot; const inp = r.querySelector(`.fac[data-key=${k}] .facq`); inp.value = t; inp.dispatchEvent(new Event('input', { bubbles: true })); }, [key, text]);
+    await waitFor(() => T.page.evaluate(([k, n]) => !!Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll(`.fac[data-key=${k}] .facm a`)).find(a => a.textContent.startsWith(n)), [key, name]), { label: 'match ' + name });
+    await T.page.evaluate(([k, n]) => { Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll(`.fac[data-key=${k}] .facm a`)).find(a => a.textContent.startsWith(n)).click(); }, [key, name]);
+    await waitFor(() => T.page.evaluate(([k, n]) => (document.getElementById('esosave-host').shadowRoot.querySelector(`.fac[data-key=${k}] .chosen`).textContent || '').includes(n), [key, name]), { label: 'chosen ' + name });
+  };
+  await pickFac('facilityDestination', 'anders', 'Anderson Hospital');
+  await pickFac('facilityDestination', 'breese', 'Breese Nursing Home');
+  await pickFac('facilitySending', 'sarah', 'Sarah Bush Lincoln');
+  const st = (await T.storage()).settings;
+  assert.deepEqual(st.facilityDestination.map(f => f.name), ['Anderson Hospital', 'Breese Nursing Home']);
+  assert.equal(st.facilitySending[0].typeId, 6540, 'the facility remembers its type from ESO\'s list');
+  await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.panel [data-act=close]').click());
+  // chips sit under each location's Predefined/Address pills
+  const chips = (g) => T.page.evaluate((gg) => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll(`.quick .chip[data-group=${gg}]`)).map(c => ({ name: c.title, cls: c.className, rect: c.getBoundingClientRect().toJSON() })), g);
+  await waitFor(async () => (await chips('fac-destination')).length === 2 && (await chips('fac-sending')).length === 1, { label: 'facility chips' });
+  const pills = await T.page.evaluate(() => document.querySelector('eso-location[view-model="vm.destination"] .button-group').getBoundingClientRect().toJSON());
+  const c0 = (await chips('fac-destination'))[0];
+  assert.ok(c0.rect.top >= pills.bottom && Math.abs(c0.rect.left - pills.left) < 4, 'under the pills, left-aligned with them');
+  const tap = async (g, name) => { await waitFor(async () => (await chips(g)).some(c => c.name === name && !/busy/.test(c.cls)), { label: 'chip free' }); await T.page.evaluate(([gg, n]) => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll(`.quick .chip[data-group=${gg}]`)).find(c => c.title === n).click(), [g, name]); };
+  // destination: already in Predefined mode; type then name
+  await tap('fac-destination', 'Breese Nursing Home');
+  const rec = await waitFor(async () => { const r = await T.record(id); const d = r.tree.incident?.destination?.predefinedAddress; return d && d.predefinedLocationID ? r : null; }, { label: 'destination saved by the app', timeout: 15000 });
+  assert.equal(rec.tree.incident.destination.predefinedAddress.locationTypeID, 6577, 'Nursing Home type chosen to match the facility');
+  assert.equal(rec.tree.incident.destination.predefinedAddress.predefinedLocationID, 'loc-breese');
+  assert.equal(await app(() => document.querySelector('eso-field[data-field-ref=DESTINATIONPREDEFINEDLOCATIONID] .display-value').textContent), 'Breese Nursing Home');
+  await waitFor(async () => (await chips('fac-destination')).some(c => c.name === 'Breese Nursing Home' && /added/.test(c.cls)), { label: 'chip shows as current' });
+  // sending: the scene is in Address mode; the chip switches it to Predefined first
+  await tap('fac-sending', 'Sarah Bush Lincoln');
+  await waitFor(async () => (await T.record(id)).tree.incident?.scene?.predefinedAddress?.predefinedLocationID === 'loc-sbl', { label: 'scene facility saved', timeout: 15000 });
+  assert.equal(await app(() => document.querySelector('eso-location[view-model="vm.scene"]').dataset.mode), 'predefined');
+  assert.equal((await T.record(id)).tree.incident.scene.predefinedAddress.locationTypeID, 6540, 'scene Location Type = Hospital');
+  assert.equal(await app(() => document.querySelectorAll('shelf-panel').length), 0);
+  // a second destination tap changes type and name again
+  await tap('fac-destination', 'Anderson Hospital');
+  await waitFor(async () => (await T.record(id)).tree.incident?.destination?.predefinedAddress?.predefinedLocationID === 'loc-anderson', { label: 'destination changed', timeout: 15000 });
+  assert.equal((await T.record(id)).tree.incident.destination.predefinedAddress.locationTypeID, 6575);
+  await T.setStorage({ settings: { ...(await T.storage()).settings, facilitySending: [], facilityDestination: [] } });
+});
+
 test('quick acuity: red, yellow, green next to each acuity field, one tap picks it in ESO\'s list', async () => {
   const id = await app(() => window.app.recordId);
   await app(() => window.app.openTab('Narrative'));

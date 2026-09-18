@@ -68,7 +68,7 @@
       if (view === 'Vitals') renderVitals(out.body);
       document.getElementById('patient').style.display = view === 'Patient' ? 'block' : 'none';
       document.getElementById('incident').style.display = view === 'Incident' ? 'block' : 'none';
-      if (view === 'Incident') renderDelays(out.body);
+      if (view === 'Incident') { renderDelays(out.body); loadBundle(); }
       document.getElementById('narrative').style.display = view === 'Narrative' ? 'block' : 'none';
       if (view === 'Patient') renderHistory(out.body);
       if (view === 'Narrative') { renderAcuity(out.body); renderTransport(out.body); }
@@ -135,7 +135,7 @@
   const DELAY_NAMES = { 6430: 'None/No Delay', 357: 'None/No Delay', 372: 'None/No Delay', 385: 'None/No Delay', 399: 'None/No Delay', 365: 'Crowd' };
   function renderDelays(body) {
     const m = body && body.data && body.data.model && body.data.model.additionalFactors;
-    for (const f of document.querySelectorAll('#incident eso-field')) {
+    for (const f of document.querySelectorAll('#incident eso-field[data-list]')) {
       const ids = (m && m[DELAY_ADDR[f.dataset.fieldRef]]) || [];
       f.querySelector('.display-value').textContent = ids.map(id => DELAY_NAMES[id] || id).join(', ');
       f.querySelector('.none-or-pn-btn').style.display = ids.length ? 'none' : '';
@@ -170,6 +170,41 @@
       f.querySelector('.display-value').textContent = ids.map(id => (TRANSPORT[k].find(t => t[0] === id) || [0, id])[1]).join(', ');
     } });
   }));
+  // locations: type + name pickers in Predefined mode; the bundle is what the extension learns facilities from
+  let bundle = null;
+  async function loadBundle() { if (bundle) return bundle; const r = await xhr('GET', '/ehr/api/configurationBundle/agency/5.3.19.1/root'); bundle = JSON.parse(r.text); return bundle; }
+  app.locations = { scene: { type: null, name: null }, destination: { type: null, name: null } };
+  document.querySelectorAll('eso-location').forEach(loc => {
+    const scope = loc.dataset.scope;
+    loc.querySelectorAll('.button-group button').forEach(b => b.addEventListener('click', () => {
+      loc.querySelectorAll('.button-group button').forEach(x => x.classList.toggle('selected', x === b));
+      loc.dataset.mode = b.dataset.mode;
+      loc.querySelector('.predef').style.display = b.dataset.mode === 'predefined' ? '' : 'none';
+      loc.querySelector('.manual').style.display = b.dataset.mode === 'manual' ? '' : 'none';
+    }));
+    const typeField = loc.querySelector('[data-kind=type]'), nameField = loc.querySelector('[data-kind=name]');
+    typeField.querySelector('.shelf-click-indicator').addEventListener('click', async () => {
+      const b = await loadBundle();
+      const list = scope === 'scene' ? b.lists['SL.LOCATIONTYPE'].values : b.lists['SL.DESTINATIONTYPE'].values;
+      openShelf({ title: typeField.querySelector('label').textContent, items: list.map(i => [i.itemId, i.itemName]), multi: false, checked: [], onPick: (id) => {
+        const it = list.find(i => i.itemId === id); app.locations[scope].type = it;
+        app.edit('incident', `incident.${scope}.predefinedAddress.locationTypeID`, id, 'singleselect');
+        typeField.querySelector('.display-value').textContent = it.itemName; nameField.removeAttribute('disabled');
+        app.locations[scope].name = null; nameField.querySelector('.display-value').textContent = '';
+      } });
+    });
+    nameField.querySelector('.shelf-click-indicator').addEventListener('click', async () => {
+      if (nameField.hasAttribute('disabled')) return;
+      const b = await loadBundle(); const t = app.locations[scope].type;
+      const locTypeId = scope === 'scene' ? t.itemId : t.parentItemId;
+      const list = b.lists['UDL.LOCATIONS'].values.filter(l => l.locationTypeId === locTypeId); // filterLocations: only this type
+      openShelf({ title: nameField.querySelector('label').textContent, items: list.map(i => [i.itemId, i.itemName]), multi: false, checked: [], onPick: (id) => {
+        const it = list.find(i => i.itemId === id); app.locations[scope].name = it;
+        app.edit('incident', `incident.${scope}.predefinedAddress.predefinedLocationID`, id, 'singleselect');
+        nameField.querySelector('.display-value').textContent = it.itemName;
+      } });
+    });
+  });
   const shelfHost = document.getElementById('shelfhost');
   function openShelf({ title, items, multi, checked, onOk, onPick }) {
     app.shelfOpens++;
@@ -188,7 +223,7 @@
     input.addEventListener('input', draw);
     ul.addEventListener('click', (e) => {
       const li = e.target.closest('li'); if (!li) return;
-      const id = Number(li.dataset.itemid);
+      const id = /^\d+$/.test(li.dataset.itemid) ? Number(li.dataset.itemid) : li.dataset.itemid;
       if (multi) { if (state.has(id)) state.delete(id); else state.add(id); draw(); }
       else { onPick(id); el.remove(); }
     });

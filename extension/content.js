@@ -43,7 +43,7 @@
   const sget = (keys) => new Promise(res => storage.get(keys, (v) => res(v || {})));
   const sset = (obj) => new Promise(res => storage.set(obj, () => res()));
   const sremove = (keys) => new Promise(res => storage.remove(keys, () => res()));
-  const DEFAULT_SETTINGS = { purgeHoursAfterLock: 0, probeSec: 20, heldProbeSec: 8, warmTabs: true, cardCollapsed: false, showTimes: true, sendPrompt: true, unsentList: true, quickHistory: true, quickMeds: true, quickAllergies: true, quickAcuity: true, quickDelays: true, quickTransport: true };
+  const DEFAULT_SETTINGS = { purgeHoursAfterLock: 0, probeSec: 20, heldProbeSec: 8, warmTabs: true, cardCollapsed: false, showTimes: true, sendPrompt: true, unsentList: true, quickHistory: true, quickMeds: true, quickAllergies: true, quickAcuity: true, quickDelays: true, quickTransport: true, quickFacilities: true, facilitySending: [], facilityDestination: [] };
 
   async function loadAll() {
     const all = await sget(null);
@@ -78,6 +78,7 @@
     await sremove(['fieldDefs', 'knownViews']).catch(() => {}); // superseded keys from earlier versions
     const fresh = await loadAll();
     toPage('init', { runs: fresh.runs, templates: fresh.templates, settings, tabRequests: fresh.all.tabRequests || null, fieldDefs: fresh.all.fieldDefs2 || null, emailed: fresh.all.emailed || null });
+    setTimeout(() => toPage('action', { name: 'facilities' }), 1500);
     setInterval(() => purgeLocked(settings), 10 * 60 * 1000);
   })();
   // The page script may have been injected before our listener existed; ask for a status once ready.
@@ -90,6 +91,8 @@
       await sset({ fieldDefs2: payload.fieldDefs });
     } else if (type === 'event' && payload && payload.name === 'vitalCopied') {
       onVitalCopied(payload);
+    } else if (type === 'facilities' && payload && Array.isArray(payload.items)) {
+      facilities = payload; if (panelOpen && settingsOpen) renderPanel(); layoutQuick();
     } else if (type === 'event' && payload && payload.name === 'sendPrompt') {
       showSendPrompt(payload);
     } else if (type === 'event' && payload && payload.name === 'sent') {
@@ -125,6 +128,7 @@
 
   // ---------------------------------------------------------------- UI
   let lastStatus = null;
+  let facilities = null; // ESO's saved facilities, from its configuration bundle
   let panelOpen = false;
   let host, shadow, bar, panel;
   const fmtTime = (t) => t ? new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' }) : '';
@@ -193,6 +197,9 @@
     .veil .row button.a { font-size: 15px; padding: 10px 16px; }
     .urow { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid #eee; font-size: 13px; }
     .urow .actions { margin: 0; }
+    .fac { margin-top: 8px; } .fac .chosen { margin: 4px 0; display: flex; flex-wrap: wrap; gap: 4px; } .fac .chosen a { cursor: pointer; font-weight: 700; margin-left: 2px; }
+    .fac .facq { width: 100%; box-sizing: border-box; padding: 6px 8px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 13px; }
+    .fac .facm { display: flex; flex-direction: column; } .fac .facm a { cursor: pointer; padding: 4px 6px; border-bottom: 1px solid #eee; } .fac .facm a:hover { background: #f1f5f9; }
     .pick { text-align: left; }
     .pick h2 { text-align: center; }
     .pick .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 0; border-bottom: 1px solid #eee; }
@@ -326,6 +333,8 @@
         `<label class="s"><input type="checkbox" id="qallergies" ${settings.quickAllergies === false ? '' : 'checked'}> Allergies: chips for common allergies under Add Allergies (Patient tab)</label>` +
         `<label class="s"><input type="checkbox" id="qacuity" ${settings.quickAcuity === false ? '' : 'checked'}> Acuity: red, yellow and green buttons next to Initial and Final Patient Acuity (Narrative tab)</label>` +
         `<label class="s"><input type="checkbox" id="qtransport" ${settings.quickTransport === false ? '' : 'checked'}> Transport: chips for how the patient was moved and positioned (Narrative tab)</label>` +
+        `<label class="s"><input type="checkbox" id="qfacilities" ${settings.quickFacilities === false ? '' : 'checked'}> Facilities: chips for saved facilities above the Scene and Destination locations (Incident tab)</label>` +
+        facilityPicker('facilitySending', 'Sending facility chips (Scene)') + facilityPicker('facilityDestination', 'Destination facility chips') +
         `<div class="actions"><button class="a" data-act="save-settings">Save</button></div></div>`);
     }
     if (settings.unsentList !== false) {
@@ -367,10 +376,28 @@
     }
     parts.push(`<p class="muted">Everything here stays on this device until ESO confirms it. Locked runs clear ${Number(settings.purgeHoursAfterLock) ? esc(settings.purgeHoursAfterLock) + ' hour(s) after locking' : 'as soon as the lock is seen'}. Runs untouched for 30 days clear too. Signature images are a backup in case a signature never reaches ESO.</p>`);
     panel.innerHTML = parts.join('');
+    panel.querySelectorAll('.fac .facq').forEach(inp => inp.addEventListener('input', () => {
+      const key = inp.closest('.fac').dataset.key; facSearch[key] = inp.value;
+      const box = inp.closest('.fac'); const fresh = document.createElement('div'); fresh.innerHTML = facilityPicker(key, box.querySelector('b').textContent);
+      box.querySelector('.facm').innerHTML = fresh.querySelector('.facm').innerHTML;
+      box.querySelectorAll('[data-act]').forEach(a => a.addEventListener('click', onPanelAction));
+    }));
     panel.querySelectorAll('[data-act]').forEach(el => el.addEventListener('click', onPanelAction));
   }
   const openLogs = new Set();
   let settingsOpen = false;
+  const facSearch = {};
+  function facilityPicker(key, title) {
+    const chosen = settings[key] || [];
+    const q = (facSearch[key] || '').trim().toLowerCase();
+    const cat = facilities ? facilities.items : [];
+    const matches = q ? cat.filter(f => f.name.toLowerCase().includes(q) && !chosen.some(c => c.id === f.id)).slice(0, 8) : [];
+    return `<div class="s fac" data-key="${key}"><b>${esc(title)}</b>` +
+      `<div class="chosen">${chosen.map(c => `<span class="pill gray">${esc(c.name)} <a data-act="fac-remove" data-id="${esc(c.id)}" title="Remove">×</a></span>`).join('') || '<span class="muted">none yet</span>'}</div>` +
+      (facilities ? `<input type="text" class="facq" placeholder="Type part of a facility name…" value="${esc(facSearch[key] || '')}">` +
+        `<div class="facm">${matches.map(f => `<a data-act="fac-add" data-id="${esc(f.id)}">${esc(f.name)}${f.city ? ` <span class="muted">${esc(f.city)}</span>` : ''}</a>`).join('')}${q && !matches.length ? '<span class="muted">no saved facility matches</span>' : ''}</div>`
+        : '<span class="muted">Open a run first so ESO\'s facility list is loaded.</span>') + '</div>';
+  }
   async function onPanelAction(e) {
     const el = e.currentTarget;
     const act = el.dataset.act;
@@ -392,11 +419,19 @@
       settings.quickAllergies = !!panel.querySelector('#qallergies').checked;
       settings.quickAcuity = !!panel.querySelector('#qacuity').checked;
       settings.quickTransport = !!panel.querySelector('#qtransport').checked;
+      settings.quickFacilities = !!panel.querySelector('#qfacilities').checked;
       layoutQuick();
       await sset({ settings }); toPage('settings', settings); settingsOpen = false; renderPanel(); renderTimes();
     }
     else if (act === 'toggle-log') { if (openLogs.has(id)) openLogs.delete(id); else openLogs.add(id); renderPanel(); }
     else if (act === 'rescan') { toPage('action', { name: 'scanUnsent' }); }
+    else if (act === 'fac-add' || act === 'fac-remove') {
+      const key = el.closest('.fac').dataset.key; const fid = el.dataset.id;
+      const list = (settings[key] || []).filter(c => c.id !== fid);
+      if (act === 'fac-add') { const f = facilities && facilities.items.find(x => x.id === fid); if (f) list.push({ id: f.id, name: f.name, typeId: f.typeId }); facSearch[key] = ''; }
+      settings[key] = list;
+      await sset({ settings }); toPage('settings', settings); renderPanel(); layoutQuick();
+    }
     else if (act === 'send-fax' || act === 'send-email') {
       const row = el.closest('.urow'); const pcr = row && row.dataset.pcr; if (!pcr) return;
       const kind = act === 'send-fax' ? 'fax' : 'email';
@@ -1057,8 +1092,104 @@
     } finally { quickBusy = false; delaysDoneAt = Date.now(); layoutDelays(); }
     if (!pressed) return;
   }
+  // ---- facilities: chips under the Predefined/Address pills of the Scene and Destination locations.
+  // A tap selects Predefined, sets the type to match the facility, then picks the name.
+  const FACILITY_GROUPS = {
+    sending: { setting: 'facilitySending', model: 'vm.scene', typeRef: 'DISPATCHPREDEFINEDLOCATIONTYPEID', nameRef: 'DISPATCHPREDEFINEDLOCATIONID', typeList: 'locationTypes' },
+    destination: { setting: 'facilityDestination', model: 'vm.destination', typeRef: 'DESTINATIONPREDEFINEDLOCATIONTYPEID', nameRef: 'DESTINATIONPREDEFINEDLOCATIONID', typeList: 'destinationTypes' },
+  };
+  function locationBlock(g) {
+    const loc = Array.from(document.querySelectorAll('eso-location')).find(l => (l.getAttribute('view-model') || '') === g.model && visible(l));
+    if (!loc) return null;
+    const pills = loc.querySelector('.button-group');
+    const pill = pills ? Array.from(pills.querySelectorAll('button')).find(b => /^Predefined$/i.test(norm(b.textContent))) : null;
+    return { loc, pills, pill };
+  }
+  function facilityTypeName(g, fac) {
+    if (!facilities || !fac.typeId) return null;
+    if (g.typeList === 'locationTypes') { const t = facilities.locationTypes.find(x => x.id === fac.typeId); return t ? t.name : null; }
+    const t = facilities.destinationTypes.find(x => x.locationTypeId === fac.typeId); return t ? t.name : null;
+  }
+  function layoutFacilities(gk) {
+    const g = FACILITY_GROUPS[gk];
+    const run = currentRun();
+    const chosen = settings[g.setting] || [];
+    const blk = settings.quickFacilities !== false && chosen.length && run && !run.locked && onTab('Incident') && !shelfOpen() ? locationBlock(g) : null;
+    if (!blk || !blk.pills) { dropQuick('f:' + gk + ':'); return; }
+    const pr = blk.pills.getBoundingClientRect();
+    if (!pr.width) { dropQuick('f:' + gk + ':'); return; }
+    const nameField = fieldEl(g.nameRef);
+    const current = nameField ? norm((nameField.querySelector('.display-value') || nameField).textContent) : '';
+    const gap = 6, rowH = 34;
+    let x = pr.left, y = pr.bottom + 8, row = 0;
+    const layer = ensureQuickLayer();
+    for (const fac of chosen) {
+      const chip = quickEl(`f:${gk}:${fac.id}`, () => {
+        const c = document.createElement('button'); c.type = 'button'; c.className = 'chip'; c.textContent = fac.name; c.title = fac.name; c.dataset.group = 'fac-' + gk;
+        c.addEventListener('pointerdown', (e) => e.stopPropagation());
+        c.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); pickFacility(gk, fac); });
+        return c;
+      });
+      chip.classList.toggle('added', current.toUpperCase() === fac.name.toUpperCase());
+      chip.classList.toggle('busy', quickBusy);
+      chip.style.display = 'block'; chip.style.visibility = 'hidden';
+      layer.appendChild(chip);
+      const w = chip.getBoundingClientRect().width || 120;
+      if (x + w > pr.right && x > pr.left) { row++; x = pr.left; y = pr.bottom + 8 + row * rowH; }
+      chip.style.left = Math.round(x) + 'px'; chip.style.top = Math.round(y) + 'px';
+      chip.style.visibility = '';
+      x += w + gap;
+    }
+    const need = (row + 1) * rowH + 6;
+    if (blk.pills.style.marginBottom !== need + 'px') blk.pills.style.marginBottom = need + 'px';
+  }
+  async function pickSingle(field, name, search) {
+    // open a single-select field's picker and choose the item named exactly this
+    (field.querySelector('.shelf-click-indicator') || field.querySelector('.field-area') || field).click();
+    const shelf = await until(() => Array.from(document.querySelectorAll('shelf-panel')).find(visible), 4000);
+    if (!shelf) throw new Error('the list did not open');
+    if (search) {
+      const input = shelf.querySelector('eso-search-input input, input[type=text]');
+      if (input) { input.focus(); input.value = name; input.dispatchEvent(new Event('input', { bubbles: true })); await wait(150); }
+    }
+    const li = await until(() => Array.from(shelf.querySelectorAll('li')).find(l => visible(l) && norm((l.querySelector('.label-container > div') || l).textContent).toUpperCase() === name.toUpperCase()), 3000);
+    if (!li) throw new Error(`"${name}" is not in the list`);
+    (li.querySelector('.label-content') || li).click();
+    await wait(120);
+    if (document.body.contains(shelf) && visible(shelf)) {
+      const okBtn = Array.from(shelf.querySelectorAll('header button, button')).find(b => /^OK$/i.test(norm(b.textContent)));
+      if (okBtn) okBtn.click();
+    }
+    await until(() => !document.body.contains(shelf) || !visible(shelf), 3000);
+  }
+  async function pickFacility(gk, fac) {
+    if (quickBusy) return;
+    const g = FACILITY_GROUPS[gk];
+    quickBusy = true; layoutFacilities(gk);
+    try {
+      const blk = locationBlock(g);
+      if (!blk) throw new Error('the location section was not found');
+      showVeilMessage('Setting the facility…', fac.name);
+      if (blk.pill && !blk.pill.classList.contains('selected')) { blk.pill.click(); }
+      const typeField = await until(() => fieldEl(g.typeRef), 3000);
+      if (!typeField) throw new Error('the Predefined fields did not appear');
+      const typeName = facilityTypeName(g, fac);
+      if (!typeName) throw new Error('ESO\'s list does not say what type of place this is');
+      const curType = norm((typeField.querySelector('.display-value') || typeField).textContent);
+      if (curType.toUpperCase() !== typeName.toUpperCase()) { await pickSingle(typeField, typeName, false); await wait(250); }
+      const nameField = await until(() => { const f = fieldEl(g.nameRef); return f && !f.hasAttribute('disabled') ? f : null; }, 4000);
+      if (!nameField) throw new Error('the name field is not ready');
+      await pickSingle(nameField, fac.name, true);
+    } catch (e) {
+      hideVeil(); quickBusy = false; layoutFacilities(gk);
+      alert('ESO Save: could not set the facility. ' + (e && e.message ? e.message : ''));
+      return;
+    }
+    hideVeil(); quickBusy = false; layoutFacilities(gk);
+  }
   function layoutQuick() {
     for (const gk of Object.keys(CHIP_GROUPS)) { try { layoutChips(gk); } catch (e) { /* keep going */ } }
+    for (const gk of Object.keys(FACILITY_GROUPS)) { try { layoutFacilities(gk); } catch (e) { /* keep going */ } }
     try { layoutDelays(); } catch (e) { /* keep going */ }
     try { layoutAcuity(); } catch (e) { /* keep going */ }
   }
