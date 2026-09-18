@@ -63,7 +63,7 @@ export function applyToTree(tree, op) {
 
 export function createMockEso() {
   const records = new Map();
-  const control = { loggedOut: false, rejectValue: null, failAutosaves: 0, refuseAutosaves: 0, faxStatus: 'SUCCESS', userName: 'TEST, MEDIC', dbDown: false, log: [] };
+  const control = { loggedOut: false, rejectValue: null, failAutosaves: 0, refuseAutosaves: 0, faxStatus: 'SUCCESS', userName: 'TEST, MEDIC', userId: 'person-1', dbDown: false, log: [] };
   // a stand-in for the extension's settings table (Supabase's REST shape): one row per ESO login
   const dbUsers = new Map();
   const faxHistory = []; // agency-wide, like ESO's Fax History
@@ -78,7 +78,7 @@ export function createMockEso() {
       id, incidentNumber: `TEST-${String(seq).padStart(4, '0')}`, state: 'draft', locked: false,
       tree: {}, ops: [], mappings: [], knownKeys: new Set(), autosaves: 0,
       incidentDateTime: new Date(), destination: null, // { name, fax, email }
-      crew: [{ personnelId: 'person-1', itemId: randomUUID(), firstName: 'TEST', lastName: 'MEDIC', rank: 0 }],
+      crew: [{ personnelId: control.userId, itemId: randomUUID(), firstName: null, lastName: null, rank: 0 }],
     };
     rec.knownKeys.add(rec.crew[0].itemId);
     records.set(id, rec);
@@ -172,7 +172,7 @@ export function createMockEso() {
     if (name === 'Vitals' && Array.isArray(model.vitalSigns)) model.vitalSigns = model.vitalSigns.map(realVital);
     return {
       data: { model, optionalData: { patients: [{ patientCareRecordId: rec.id, isLocked: rec.locked, firstName: null, lastName: null }], pcrHeader: { isPositiveIdEnabled: true, positiveIdVerified: null } } },
-      meta: { configVersion: '5.3.19', state: rec.state, user: { fullName: control.userName } },
+      meta: { configVersion: '5.3.19', state: rec.state, user: { agencyPersonId: control.userId, claims: ['CREW'], fullName: control.userName } },
       responseStatus: null,
     };
   }
@@ -204,11 +204,12 @@ export function createMockEso() {
         if ('destination' in b) r.destination = b.destination;
         if ('locked' in b) { r.locked = !!b.locked; r.state = r.locked ? 'locked' : 'draft'; }
         if (b.incidentDateTime) r.incidentDateTime = new Date(b.incidentDateTime);
+        if (Array.isArray(b.crew)) { r.crew = b.crew.map(c => ({ itemId: randomUUID(), firstName: null, lastName: null, rank: 0, ...c })); for (const c of r.crew) r.knownKeys.add(c.itemId); }
         return send(200, { ok: true });
       }
       if (path === '/__faxes') return send(200, { faxHistory, emails });
       if (path === '/__db_dump') return send(200, [...dbUsers.values()]);
-      if (path === '/__db_set' && req.method === 'POST') { const r = JSON.parse(body || '{}'); dbUsers.set(r.name, { settings: {}, runs: [], ...r, updated_at: r.updated_at || new Date().toISOString() }); return send(200, { ok: true }); }
+      if (path === '/__db_set' && req.method === 'POST') { const r = JSON.parse(body || '{}'); dbUsers.set(r.name, { settings: {}, ...r, updated_at: r.updated_at || new Date().toISOString() }); return send(200, { ok: true }); }
       // ---- the settings table, the way Supabase's REST answers: GET ?name=eq.X, POST upsert, PATCH ?name=eq.X
       if (path === '/__db/esosave_users') {
         if (control.dbDown) { res.writeHead(503); return res.end(); }
@@ -221,7 +222,7 @@ export function createMockEso() {
           const out = [];
           for (const r of rows) {
             if (dbUsers.has(r.name) && !/merge-duplicates/.test(req.headers.prefer || '')) return send(409, { code: '23505', message: 'duplicate key value violates unique constraint' });
-            const row = { ...(dbUsers.get(r.name) || { settings: {}, runs: [] }), ...r, updated_at: new Date().toISOString() };
+            const row = { ...(dbUsers.get(r.name) || { settings: {} }), ...r, updated_at: new Date().toISOString() };
             dbUsers.set(r.name, row); out.push(row);
           }
           return send(201, /return=representation/.test(req.headers.prefer || '') ? out : '');

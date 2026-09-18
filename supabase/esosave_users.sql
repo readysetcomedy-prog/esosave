@@ -1,10 +1,9 @@
--- ESO Save: one row per ESO login. Holds only the open settings (quick buttons, facility chips)
--- and the ids of the runs that login worked. Never a run's contents. Run once in the Supabase
--- SQL editor of the project the extension points at (Rmedems).
+-- ESO Save: one row per ESO login. Holds only the open settings (quick buttons, facility chips).
+-- Never a run, nor which runs were worked. Run once in the Supabase SQL editor of the project the
+-- extension points at (Rmedems).
 create table if not exists public.esosave_users (
   name text primary key,
   settings jsonb not null default '{}'::jsonb,
-  runs jsonb not null default '[]'::jsonb,
   updated_at timestamptz not null default now()
 );
 alter table public.esosave_users enable row level security;

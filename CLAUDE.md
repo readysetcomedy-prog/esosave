@@ -14,7 +14,7 @@ by the crew and follow the ESO login through the `esosave_users` table.
 
 ## Data that may leave the device
 
-Only the open settings and the ids of the runs a login worked go to the table
-(`supabase/esosave_users.sql`). Recorded runs, signature images, field definitions, the emailed
+Only the open settings go to the table (`supabase/esosave_users.sql`); which runs a login may see
+is decided on the tablet from each run's crew list. Recorded runs, signature images, field definitions, the emailed
 map and the Not sent list never do. The Supabase Management token lives in `.env.local`
 (gitignored) and is never committed; the anon key in `content.js` is public by design.

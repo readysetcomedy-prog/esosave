@@ -651,7 +651,7 @@ test('facility chips: chosen in Settings from ESO\'s saved facilities, one tap s
   assert.equal((std.facilityDestination || []).length, 11, 'eleven standard destination chips');
   assert.equal(std.facilityDestination.find(f => f.label === 'SEO').name, "HSHS St. Elizabeth's Hospital");
   await T.setStorage({ settings: { ...std, facilitySending: [], facilityDestination: [] } });
-  await fetch(T.base + '/__db_set', { method: 'POST', body: JSON.stringify({ name: 'TEST, MEDIC', settings: { facilitySending: [], facilityDestination: [] }, runs: [] }) });
+  await fetch(T.base + '/__db_set', { method: 'POST', body: JSON.stringify({ name: 'TEST, MEDIC', settings: { facilitySending: [], facilityDestination: [] } }) });
   const id = await freshRun();
   const sh = (sel) => T.page.evaluate((s) => { const el = document.getElementById('esosave-host').shadowRoot.querySelector(s); return el ? el.textContent : null; }, sel);
   // choose two destination facilities and one sending facility in Settings
@@ -703,7 +703,7 @@ test('facility chips: chosen in Settings from ESO\'s saved facilities, one tap s
   // a chip whose type id ESO's tables no longer know still maps by the name kept with it: never Hospital by default
   const custom = { facilitySending: [{ id: 'loc-rehab', name: 'Riverside Rehab', typeId: 424242, type: 'Rehabilitation Center', destType: 'Rehabilitation Center' }], facilityDestination: [{ id: 'loc-breese', name: 'Breese Nursing Home', typeId: 424242, type: 'Nursing home', destType: 'Nursing Home' }] };
   await T.setStorage({ settings: { ...(await T.storage()).settings, ...custom } });
-  await fetch(T.base + '/__db_set', { method: 'POST', body: JSON.stringify({ name: 'TEST, MEDIC', settings: custom, runs: [] }) });
+  await fetch(T.base + '/__db_set', { method: 'POST', body: JSON.stringify({ name: 'TEST, MEDIC', settings: custom }) });
   await T.page.goto(T.url);
   await waitFor(() => T.page.evaluate(() => !!window.__esosave), { label: 'interceptor' });
   await app((rid) => window.app.use(rid), id);
@@ -712,7 +712,7 @@ test('facility chips: chosen in Settings from ESO\'s saved facilities, one tap s
   await waitFor(async () => (await T.record(id)).tree.incident?.destination?.predefinedAddress?.predefinedLocationID === 'loc-breese', { label: 'destination by kept type', timeout: 15000 });
   assert.equal((await T.record(id)).tree.incident.destination.predefinedAddress.locationTypeID, 6577, 'Nursing Home, not Hospital');
   await T.setStorage({ settings: { ...(await T.storage()).settings, facilitySending: [], facilityDestination: [] } });
-  await fetch(T.base + '/__db_set', { method: 'POST', body: JSON.stringify({ name: 'TEST, MEDIC', settings: {}, runs: [] }) });
+  await fetch(T.base + '/__db_set', { method: 'POST', body: JSON.stringify({ name: 'TEST, MEDIC', settings: {} }) });
 });
 
 test('assessment: "All normal" presses No Abnormalities on every category in ESO\'s Quick Ax and OK; "A&Ox4" sets orientation', async () => {
@@ -1174,7 +1174,7 @@ test('the card collapses to the logo, stays collapsed on no signal, expands on t
 });
 
 test('settings follow the ESO login: a row per login in the agency table; locked settings stay locked; runs of another login stay out of sight', async () => {
-  await T.control({ userName: 'GASTON, MICHAEL' });
+  await T.control({ userName: 'GASTON, MICHAEL', userId: 'person-m' });
   const db = () => fetch(T.base + '/__db_dump').then(r => r.json());
   const id = await freshRun();
   await app(() => window.app.edit('incident', 'incident.scene.manualAddress.locationName', 'His St'));
@@ -1184,8 +1184,7 @@ test('settings follow the ESO login: a row per login in the agency table; locked
   const row = await waitFor(async () => (await db()).find(r => r.name === 'GASTON, MICHAEL'), { label: 'row written' });
   assert.equal(row.settings.quickHistory, true);
   assert.ok(!('purgeHoursAfterLock' in row.settings) && !('warmTabs' in row.settings), 'locked settings never go to the table');
-  assert.ok(row.runs.includes(id), 'the run they worked is theirs');
-  for (const k of Object.keys(row)) assert.ok(['name', 'settings', 'runs', 'updated_at'].includes(k), 'nothing else leaves the device: ' + k);
+  for (const k of Object.keys(row)) assert.ok(['name', 'settings', 'updated_at'].includes(k), 'nothing else leaves the device: ' + k);
   // Settings: the agency block is locked, the quick buttons are theirs; a change goes to the row
   await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.bar [data-act=open]').click());
   await waitFor(() => T.page.evaluate(() => !!document.getElementById('esosave-host').shadowRoot.querySelector('.panel [data-act=settings]')), { label: 'panel' });
@@ -1196,8 +1195,8 @@ test('settings follow the ESO login: a row per login in the agency table; locked
   assert.match(await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.panel').textContent), /signed in as GASTON, MICHAEL/);
   await T.page.evaluate(() => { const r = document.getElementById('esosave-host').shadowRoot; r.querySelector('#qhistory').checked = false; r.querySelector('[data-act=save-settings]').click(); });
   await waitFor(async () => (await db()).find(r => r.name === 'GASTON, MICHAEL').settings.quickHistory === false, { label: 'change reached the row' });
-  // another login on the same tablet: their own row, and the first login's run is not listed for them
-  await T.control({ userName: 'SMITH, JANE' });
+  // another login on the same tablet: their own row, and a run whose crew she is not on is not listed for her
+  await T.control({ userName: 'SMITH, JANE', userId: 'person-j' });
   const id2 = await freshRun();
   await app(() => window.app.edit('incident', 'incident.scene.manualAddress.locationName', 'Her St'));
   await waitFor(async () => (await app(() => window.app.responses.length)) >= 1, { label: 'a save of hers' });
@@ -1207,12 +1206,16 @@ test('settings follow the ESO login: a row per login in the agency table; locked
   await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.bar [data-act=open]').click());
   await waitFor(() => T.page.evaluate(() => !!document.getElementById('esosave-host').shadowRoot.querySelector('.panel .run[data-id]')), { label: 'runs listed' });
   const listed = await T.page.evaluate(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.panel .run[data-id]')).map(r => r.dataset.id));
-  assert.ok(listed.includes(id2) && !listed.includes(id), 'only her runs are listed');
+  assert.ok(listed.includes(id2) && !listed.includes(id), 'only runs she is on the crew of are listed');
+  // he adds her to his run's crew: it is hers to see as well, on the next look at the run
+  await T.shape(id, { crew: [{ personnelId: 'person-m' }, { personnelId: 'person-j' }] });
+  await app((rid) => window.app.use(rid), id);
+  await waitFor(async () => { await T.page.evaluate(() => { const p = document.getElementById('esosave-host').shadowRoot.querySelector('.panel'); if (!p || p.style.display === 'none') document.getElementById('esosave-host').shadowRoot.querySelector('.bar [data-act=open]').click(); }); return T.page.evaluate((rid) => !!document.getElementById('esosave-host').shadowRoot.querySelector(`.panel .run[data-id="${rid}"]`), id); }, { label: 'his run listed for her once she is on its crew', timeout: 15000 });
   const quick = await T.storage();
   assert.equal(quick.settings.quickHistory, true, 'the tablet now carries her settings');
   // a tablet she has never used: her row is what it gets
   await T.setStorage({ settings: { ...quick.settings, quickMeds: true } });
-  await fetch(T.base + '/__db_set', { method: 'POST', body: JSON.stringify({ name: 'SMITH, JANE', settings: { quickMeds: false, quickAcuity: false }, runs: [] }) });
+  await fetch(T.base + '/__db_set', { method: 'POST', body: JSON.stringify({ name: 'SMITH, JANE', settings: { quickMeds: false, quickAcuity: false } }) });
   await T.page.goto(T.url);
   await waitFor(() => T.page.evaluate(() => !!window.__esosave), { label: 'interceptor' });
   await app((rid) => window.app.use(rid), id2);
@@ -1229,5 +1232,5 @@ test('settings follow the ESO login: a row per login in the agency table; locked
   assert.equal((await T.storage()).settings.quickMeds, true, 'kept on the tablet');
   await T.control({ dbDown: false });
   await waitFor(async () => (await db()).find(r => r.name === 'SMITH, JANE').settings.quickMeds === true, { label: 'written once the table is back', timeout: 40000 });
-  await T.control({ userName: 'TEST, MEDIC' });
+  await T.control({ userName: 'TEST, MEDIC', userId: 'person-1' });
 });

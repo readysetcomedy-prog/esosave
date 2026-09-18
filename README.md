@@ -83,10 +83,11 @@ to bad signal or a hung page.
   seen and whenever they change something; a tablet they have never used gets their row, a login
   the table has never seen starts from the agency defaults. The settings above the quick buttons
   (retention, tab warm-up, call times, fax prompt, Not sent list) are set in the code and shown
-  locked. Each run recorded on a tablet belongs to the login that worked it, and the Runs panel
-  lists only the current login's runs; held changes still push whoever is signed in. Only those
-  settings and run ids go to the table (`supabase/esosave_users.sql`), never a run's contents; with
-  no signal the tablet's copy stands and the row is written when signal returns.
+  locked. A run recorded on a tablet is its crew's: the Runs panel lists a run for any login on its
+  personnel list (the login's agency person id against the crew's), so a partner added to the run
+  sees it too and nobody else does; held changes still push whoever is signed in. Only those
+  settings go to the table (`supabase/esosave_users.sql`), never a run nor which runs were
+  worked; with no signal the tablet's copy stands and the row is written when signal returns.
 - **Copy a vital.** A small copy button floats just left of each saved vital's time in the Vitals
   tab; tapping it re-enters that vital as a new one with the current time, every other value the
   same. Only fields the app itself has been seen saving are copied, and the run log names any that

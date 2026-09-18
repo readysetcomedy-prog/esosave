@@ -70,8 +70,8 @@
   // Ask the owner whether a new setting is locked or open before adding it (see CLAUDE.md).
   const OPEN_SETTINGS = ['quickHistory', 'quickMeds', 'quickAllergies', 'quickAcuity', 'quickDelays', 'quickTransport', 'quickAssess', 'quickDisposition', 'autoResponse', 'quickIncident', 'quickMechanism', 'quickFacilities', 'quickNarrative', 'quickPatient', 'quickRefusal', 'syncCareLevel', 'facilitySending', 'facilityDestination'];
   // The open settings follow the ESO login: one row per login in the agency's table, written when
-  // the login is first seen and whenever they change something. Only these settings and the ids of
-  // the runs they worked go there; never a run's contents. The key is the project's public one.
+  // the login is first seen and whenever they change something. Only these settings go there;
+  // never a run, nor which runs were worked. The key is the project's public one.
   const ON_ESO = /(^|\.)esosuite\.net$/i.test(location.hostname);
   const SYNC = ON_ESO
     ? { url: 'https://qkprkwydxbtybaxylhln.supabase.co/rest/v1/esosave_users', key: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFrcHJrd3lkeGJ0eWJheHlsaGxuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzY2MTc2MjYsImV4cCI6MjA1MjE5MzYyNn0.DNjMTLqWtB7KJfZc3I03ufAPoIx69eA6wCkvhgdp7u4' }
@@ -109,15 +109,25 @@
   }
 
   let settings = { ...DEFAULT_SETTINGS };
-  (async () => {
+  // The stored state goes to the page script once it is listening: when it is already there (the
+  // manifest's MAIN-world script), right away; otherwise when it says hello. The page script
+  // ignores a second copy.
+  const booted = (async () => {
     const data = await loadAll();
     settings = data.settings;
     facilityTypes = data.all.facilityTypes || null;
     renderBar();
     await purgeLocked(settings);
     await sremove(['fieldDefs', 'knownViews']).catch(() => {}); // superseded keys from earlier versions
+  })();
+  async function sendInit() {
+    await booted;
     const fresh = await loadAll();
     toPage('init', { runs: fresh.runs, templates: fresh.templates, settings, tabRequests: fresh.all.tabRequests || null, fieldDefs: fresh.all.fieldDefs2 || null, emailed: fresh.all.emailed || null });
+  }
+  (async () => {
+    await booted;
+    if (document.documentElement.hasAttribute('data-esosave')) await sendInit();
     setTimeout(() => toPage('action', { name: 'facilities' }), 1500);
     setInterval(() => purgeLocked(settings), 10 * 60 * 1000);
     // a row that could not be written (no signal, table away) goes when signal is back
@@ -127,7 +137,8 @@
   window.addEventListener('message', async (ev) => {
     if (ev.source !== window || !ev.data || ev.data.__esosave !== 'to-ext') return;
     const { type, payload } = ev.data;
-    if (type === 'persistRun' && payload && payload.run) {
+    if (type === 'hello') { sendInit(); }
+    else if (type === 'persistRun' && payload && payload.run) {
       await sset({ ['run:' + payload.run.recordId]: payload.run });
     } else if (type === 'persistFieldDefs' && payload && payload.fieldDefs) {
       await sset({ fieldDefs2: payload.fieldDefs });
@@ -161,6 +172,7 @@
       if (panelOpen) renderPanel();
     } else if (type === 'status' && payload) {
       lastStatus = payload;
+      if (payload.userId !== undefined) userId = payload.userId;
       if (payload.user && payload.user !== user) { user = payload.user; sset({ user }); syncUser(); }
       maybeWarmTabs(payload);
       if (payload.runs.some(r => r.locked)) purgeLocked(settings);
@@ -175,6 +187,7 @@
   // ---------------------------------------------------------------- UI
   let lastStatus = null;
   let user = null;       // the ESO login shown by the app
+  let userId = null;     // their agency person id: the crew list of a run carries the same ids
   let syncedUser = null; // the login whose row has been fetched and applied
   let syncDirty = false; // a change of ours has not reached the table yet
   let syncLastTry = 0;
@@ -378,7 +391,9 @@
     const all = await sget(null);
     const parts = [];
     parts.push(`<h1><span>ESO Save <span class="muted" style="font-weight:400;font-size:11px">v${esc(api.runtime.getManifest().version)}</span></span><span class="x" data-act="close">×</span></h1>`);
-    const mine = (r) => !user || !r.owner || r.owner === user; // runs of another login on this tablet stay out of sight
+    // a run is its crew's: listed for any login on its personnel list. A run whose crew is not
+    // known yet falls back to the login that first worked it on this tablet.
+    const mine = (r) => !user || (r.crewIds && r.crewIds.length ? !!userId && r.crewIds.includes(userId) : !r.owner || r.owner === user);
     const nRuns = s.runs.filter(r => (r.counts.total || r.pendingCreate) && mine(r)).length;
     parts.push(`<div class="muted">${s.online ? 'Signal OK' : 'NO SIGNAL'}${s.loggedOut ? ' · logged out' : ''}${s.pushing ? ' · pushing' : ''} · ${nRuns} run${nRuns === 1 ? '' : 's'} on this device` +
       `${user ? ` · signed in as <b>${esc(user)}</b>` : ''}` +
@@ -462,7 +477,7 @@
   // ---- the login's row: fetched when the login is seen, written when they change something
   const dbHeaders = () => ({ apikey: SYNC.key, Authorization: 'Bearer ' + SYNC.key, 'Content-Type': 'application/json' });
   async function dbGet(name) {
-    const r = await fetch(`${SYNC.url}?name=eq.${encodeURIComponent(name)}&select=name,settings,runs,updated_at`, { headers: dbHeaders() });
+    const r = await fetch(`${SYNC.url}?name=eq.${encodeURIComponent(name)}&select=name,settings,updated_at`, { headers: dbHeaders() });
     if (!r.ok) throw new Error('table ' + r.status);
     const rows = await r.json();
     return rows[0] || null;
@@ -471,7 +486,6 @@
     const r = await fetch(SYNC.url, { method: 'POST', headers: { ...dbHeaders(), Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify(row) });
     if (!r.ok) throw new Error('table ' + r.status);
   }
-  const myRunIds = () => (lastStatus ? lastStatus.runs : []).filter(r => r.owner === user && !r.tmp).map(r => r.realId || r.recordId);
   // A login just seen on this tablet: take their settings from the table (a new tablet gets what
   // they chose elsewhere); a login not yet in the table gets a row with what this tablet has.
   async function syncUser() {
@@ -483,18 +497,17 @@
       // last person on this tablet chose
       Object.assign(settings, openSettings(row && row.settings && typeof row.settings === 'object' ? row.settings : DEFAULT_SETTINGS));
       await sset({ settings }); toPage('settings', settings); layoutQuick();
-      await dbPut({ name: who, settings: openSettings(settings), runs: [...new Set([...(row && Array.isArray(row.runs) ? row.runs : []), ...myRunIds()])] });
+      await dbPut({ name: who, settings: openSettings(settings) });
       syncedUser = who; syncDirty = false;
     } catch (e) { syncDirty = true; } // no signal or the table is away: this tablet's settings stand, and the row is written later
     renderBar(); if (panelOpen) renderPanel();
   }
-  // Something of theirs changed here: write the row (merged with the runs their other tablets know).
+  // Something of theirs changed here: write the row.
   async function pushUser() {
     const who = user; if (!who) return;
     syncLastTry = Date.now();
     try {
-      const row = await dbGet(who);
-      await dbPut({ name: who, settings: openSettings(settings), runs: [...new Set([...(row && Array.isArray(row.runs) ? row.runs : []), ...myRunIds()])] });
+      await dbPut({ name: who, settings: openSettings(settings) });
       syncedUser = who; syncDirty = false;
     } catch (e) { syncDirty = true; }
   }

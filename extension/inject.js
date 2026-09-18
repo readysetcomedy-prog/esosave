@@ -27,7 +27,7 @@
   if (ext) return;
   if (window.__esosave) return;
 
-  const VERSION = '0.10.0';
+  const VERSION = '0.10.1';
   const API_PREFIX_RE = /^\/ehr\/api\/+/i;
   const FAKE_OK_TEXT = '{"result":"Success","data":[]}';
   const PROBE_PATH = '/ehr/api/thirdpartydata/partners';
@@ -95,6 +95,7 @@
     lastEvent: null,
     lastView: null,              // { view, recordId, ts } of the most recent live tab load
     user: null,                  // the ESO login's full name, from the metadata ESO's views carry
+    userId: null,                // and their agency person id, the same id the crew list uses
     lastProbeAt: 0,
     rejectedSeen: false,
   };
@@ -588,7 +589,8 @@
     // that first worked it on this device.
     const who = meta && meta.user && typeof meta.user.fullName === 'string' ? meta.user.fullName.trim() : '';
     if (who && !meta.esosaveOffline && !meta.esosaveSynthesized) {
-      if (S.user !== who) { S.user = who; emit(); }
+      const pid = typeof meta.user.agencyPersonId === 'string' ? meta.user.agencyPersonId : null;
+      if (S.user !== who || S.userId !== pid) { S.user = who; S.userId = pid; emit(); }
       if (!run.owner) { run.owner = who; persist(run); emit(); }
     }
     const model = j.data && j.data.model;
@@ -652,9 +654,17 @@
   const TRANSPORT_ADDR_RE = /^narrative\.(?:patientTransport|injuries)\.(\w+Ids)\.\['(\d+)'\]$/;
   const LIST_ADDR_RE = /^patient\.(patientMedicalHistories|patientMedications|patientAllergies)\.\['(\d+)'\]$/;
   const LIST_KEY = { patientMedicalHistories: 'histories', patientMedications: 'meds', patientAllergies: 'allergies' };
+  const CREW_ADDR_RE = /^incident\.crew\.\['([^']+)'\]$/;
   function noteListOps(run, ops) {
     let changed = false;
     for (const op of ops) {
+      const c = CREW_ADDR_RE.exec(op.address || '');
+      if (c) {
+        run.crew = run.crew || [];
+        if (op.verb === 'ADD' && op.value && typeof op.value === 'object' && op.value.personnelId && !run.crew.some(x => x && x.itemId === c[1])) { run.crew.push({ itemId: c[1], ...op.value }); changed = true; }
+        if (op.verb === 'DELETE' && run.crew.some(x => x && x.itemId === c[1])) { run.crew = run.crew.filter(x => !(x && x.itemId === c[1])); changed = true; }
+        continue;
+      }
       const m = LIST_ADDR_RE.exec(op.address || '');
       if (m) {
         const k = LIST_KEY[m[1]];
@@ -1283,7 +1293,7 @@
       createdAt: run.createdAt, lastSeenAt: run.lastSeenAt, lastSavedAt: run.lastSavedAt,
       restoredFrom: run.restoredFrom, counts, pages, log: run.log.slice(-60), times: run.times || null,
       sends: (run.sends || []).map(x => ({ kind: x.kind, status: x.status, destinationName: x.destinationName, ts: x.ts })), emailedAt: run.emailedAt || null,
-      lists: run.lists || null, owner: run.owner || null,
+      lists: run.lists || null, owner: run.owner || null, crewIds: (run.crew || []).map(c => c && c.personnelId).filter(Boolean),
       hasViews: Object.keys(run.views).length, hasCrew: !!(run.crew && run.crew.length),
     };
   }
@@ -1291,7 +1301,7 @@
     const runs = Object.values(S.runs).map(summary).sort((a, b) => b.lastSeenAt - a.lastSeenAt);
     return {
       version: VERSION, online: S.online, loggedOut: S.loggedOut, pushing: S.pushing, ready: S.ready, hasToken: !!S.xsrf,
-      currentRecordId: S.currentRecordId, runs, lastEvent: S.lastEvent, lastView: S.lastView, user: S.user,
+      currentRecordId: S.currentRecordId, runs, lastEvent: S.lastEvent, lastView: S.lastView, user: S.user, userId: S.userId,
       held: runs.reduce((n, r) => n + r.counts.held + (r.pendingCreate ? 1 : 0) + r.sends.filter(x => x.status === 'held').length, 0),
       unsent: S.unsent || null,
       rejected: runs.reduce((n, r) => n + r.counts.rejected, 0),
@@ -1328,6 +1338,7 @@
     const { type, payload } = ev.data;
     try {
       if (type === 'init') {
+        if (S.ready) return; // the stored state is merged once; a second copy would double every held batch
         mergeStored(payload.runs);
         if (payload.templates && payload.templates.views) S.templates = payload.templates;
         if (payload.fieldDefs && typeof payload.fieldDefs === 'object') for (const [k, v] of Object.entries(payload.fieldDefs)) if (Array.isArray(v) && !S.fieldDefs[k]) S.fieldDefs[k] = v;
@@ -1368,5 +1379,9 @@
     kick: () => kick(0),
   });
   document.documentElement.setAttribute('data-esosave', VERSION);
+  // Tell the extension side this script is listening. On browsers that load this file as a page
+  // script (Safari) it can start a moment after the extension side, which would otherwise post
+  // the stored state into thin air and lose every held change on a reload.
+  post('hello', { version: VERSION });
   emit();
 })();
