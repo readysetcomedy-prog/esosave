@@ -215,9 +215,6 @@
     .quick .chip.added::before { content: '✓ '; }
     .quick .chip.added.off { background: #fee2e2; border-color: #fca5a5; color: #991b1b; text-decoration: line-through; }
     .quick .chip.busy { opacity: .6; cursor: wait; }
-    .quick .chip.padval { line-height: 26px; cursor: default; min-width: 44px; text-align: center; color: #475569; }
-    .quick .chip.padval.on { color: #fff; }
-    .quick .allnone.padok { height: 28px; background: #15803d; color: #fff; border-color: #15803d; }
     .quick .chip.other, .quick .allnone.other { border-style: dashed; color: #475569; font-weight: 600; }
     .quick .sw { position: fixed; pointer-events: auto; width: 34px; height: 26px; border-radius: 7px; border: 2px solid transparent; cursor: pointer; box-shadow: 0 1px 2px rgba(0,0,0,.25); }
     .quick .sw.red { background: #dc2626; } .quick .sw.yellow { background: #facc15; } .quick .sw.green { background: #16a34a; }
@@ -421,8 +418,8 @@
         `<label class="s"><input type="checkbox" id="qdisposition" ${settings.quickDisposition === false ? '' : 'checked'}> Disposition: Transported ALS/BLS, Refusal, Canceled (Prior/Scene) buttons under Unit Disposition; Transport Mode and Reason for Refusal outlined in red until answered (Incident tab)</label>` +
         `<label class="s"><input type="checkbox" id="qautoresp" ${settings.autoResponse === false ? '' : 'checked'}> Auto-fill: choosing Emergent or Non-Emergent (response or transport mode) fills the lights/sirens, intersection, scheduled, speed and method fields that are still empty, and sets EMD Performed to No</label>` +
         `<label class="s"><input type="checkbox" id="qassess" ${settings.quickAssess === false ? '' : 'checked'}> Assessment: "All normal" (presses No Abnormalities on every category in ESO's Quick Ax) and "A&amp;Ox4" on each assessment (Assessments tab)</label>` +
-        `<label class="s"><input type="checkbox" id="qnarrative" ${settings.quickNarrative === false ? '' : 'checked'}> Narrative: rows for Primary and Secondary Impression, Provided Care Level, Anatomic Location and the complaint duration units, plus a 0-9 pad for the duration (Narrative tab)</label>` +
-        `<label class="s"><input type="checkbox" id="qpatient" ${settings.quickPatient === false ? '' : 'checked'}> Patient: Race row (every race, shortened) and 0-9 pads for Weight and Height (Patient tab)</label>` +
+        `<label class="s"><input type="checkbox" id="qnarrative" ${settings.quickNarrative === false ? '' : 'checked'}> Narrative: rows for Primary and Secondary Impression, Provided Care Level, Anatomic Location and the complaint duration units (Narrative tab)</label>` +
+        `<label class="s"><input type="checkbox" id="qpatient" ${settings.quickPatient === false ? '' : 'checked'}> Patient: Race row (every race, shortened) (Patient tab)</label>` +
         `<label class="s"><input type="checkbox" id="qrefusal" ${settings.quickRefusal === false ? '' : 'checked'}> Refusal form: chips for Legal, Decision-Making, Medical, Check All notifications and the four Patient Refusals inside ESO's Patient Refusal Form (Signatures tab)</label>` +
         `<label class="s"><input type="checkbox" id="qmileage" ${settings.autoMileage === false ? '' : 'checked'}> Loaded mileage: press ESO's Calculate Mileage once the scene and destination both have an address (Incident tab)</label>` +
         facilityPicker('facilitySending', 'Sending facility chips (Scene)') + facilityPicker('facilityDestination', 'Destination facility chips') +
@@ -1077,9 +1074,20 @@
   // under the field's label
   function anchorButton(group) {
     const el = findByText('button, a', group.button, { notInShelf: true });
-    return el ? (el.closest('button, a') || el) : null;
+    const b = el ? (el.closest('button, a') || el) : null;
+    return b && onTop(b) ? b : null;
   }
-  const fieldEl = (ref) => { const f = document.querySelector(`eso-field[data-field-ref="${ref}"]`); return f && visible(f) ? f : null; };
+  // Whether the element is what is actually on screen at its own top-left corner: false while
+  // ESO draws something over it (attachments, the camera, a print sheet, the patient popover,
+  // any dialog). Our own layers do not count.
+  function onTop(el) {
+    const r = el.getBoundingClientRect();
+    const x = r.left + Math.min(24, r.width / 2), y = r.top + Math.min(12, r.height / 2);
+    if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) return true; // off screen for now: nothing to say
+    const top = document.elementsFromPoint(x, y).find(e => !(host && host.contains(e)));
+    return !top || el.contains(top) || top.contains(el);
+  }
+  const fieldEl = (ref) => { const f = document.querySelector(`eso-field[data-field-ref="${ref}"]`); return f && visible(f) && onTop(f) ? f : null; };
   // Open a field's list the way a finger would. While ESO shows a field's quick-picks it hides
   // the list icon and puts the list behind the quick-picks' own "Other" button.
   function openPicker(f) {
@@ -1221,6 +1229,7 @@
   function acuityField(label) {
     // ESO marks every field with its ref; the click indicator inside opens the picker
     const f = document.querySelector(`eso-field[data-field-ref="${ACUITY_REF[label]}"]`);
+    if (f && visible(f) && !onTop(f)) return null;
     if (f && visible(f)) {
       const lab = f.querySelector('label') || f;
       const ctl = f.querySelector('.shelf-click-indicator') || f.querySelector('.field-area') || f;
@@ -1300,7 +1309,7 @@
   }
   // ---- delays: one button above the delay fields presses ESO's own "None/No Delay" on each empty one
   const DELAY_REFS = ['DISPATCHDELAYS', 'RESPONSEDELAYS', 'SCENEDELAYS', 'TRANSPORTDELAYS', 'TURNAROUNDDELAYS'];
-  const delayField = (ref) => { const f = document.querySelector(`eso-field[data-field-ref="${ref}"]`); return f && visible(f) ? f : null; };
+  const delayField = (ref) => { const f = document.querySelector(`eso-field[data-field-ref="${ref}"]`); return f && visible(f) && onTop(f) ? f : null; };
   const delayEmpty = (f) => { const v = f.querySelector('.display-value'); return !v || !norm(v.textContent); };
   let delaysDoneAt = 0;
   function layoutDelays() {
@@ -1350,7 +1359,7 @@
   };
   function locationBlock(g) {
     const loc = Array.from(document.querySelectorAll('eso-location')).find(l => (l.getAttribute('view-model') || '') === g.model && visible(l));
-    if (!loc) return null;
+    if (!loc || !onTop(loc)) return null;
     const pills = loc.querySelector('.button-group');
     const pill = pills ? Array.from(pills.querySelectorAll('button')).find(b => /^Predefined$/i.test(norm(b.textContent))) : null;
     return { loc, pills, pill };
@@ -1486,7 +1495,7 @@
   function layoutAssess() {
     const run = currentRun();
     const ok = settings.quickAssess !== false && run && !run.locked && onTab('Assessments') && !shelfOpen();
-    const records = ok ? Array.from(document.querySelectorAll('assessment-record')).filter(visible) : [];
+    const records = ok ? Array.from(document.querySelectorAll('assessment-record')).filter(r => visible(r) && onTop(r)) : [];
     const keep = new Set();
     records.forEach((rec, i) => {
       const id = rec.getAttribute('data-item-id') || String(i);
@@ -1698,92 +1707,6 @@
       placeRows(f, els);
     }
   }
-  // ---- 0-9 pads under ESO's numeric fields' labels: digits gather next to the field, a green OK
-  // appears beside them, and OK opens ESO's own number dial once, enters the value and presses
-  // its OK
-  const NUM_PADS = {
-    duration: { setting: 'quickNarrative', tab: 'Narrative', ref: 'CHIEFCOMPLAINTDURATION', what: 'Duration of Chief Complaint', max: 3 },
-    weight: { setting: 'quickPatient', tab: 'Patient', ref: 'PATIENTWEIGHT', what: 'Weight', max: 3 },
-    feet: { setting: 'quickPatient', tab: 'Patient', ref: 'HEIGHTFTCOMPONENT', what: 'Height (feet)', max: 1 },
-    inches: { setting: 'quickPatient', tab: 'Patient', ref: 'HEIGHTINCOMPONENT', what: 'Height (inches)', max: 2 },
-  };
-  const padValue = {}; // pad -> digits tapped, not yet entered
-  function layoutPads() {
-    const run = currentRun();
-    for (const [pk, pad] of Object.entries(NUM_PADS)) {
-      const f = settings[pad.setting] === false || !run || run.locked || !onTab(pad.tab) || shelfOpen() ? null : fieldEl(pad.ref);
-      if (!f) { dropQuick(`np:${pk}:`); continue; }
-      const r = f.getBoundingClientRect();
-      if (!r.width) { dropQuick(`np:${pk}:`); continue; }
-      const cur = norm(fieldValue(pad.ref));
-      if (!padValue[pk]) dropQuick(`np:${pk}:ok`); // the OK is there only while digits wait
-      const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', 'back', 'val', ...(padValue[pk] ? ['ok'] : [])];
-      const els = keys.map((k) => {
-        const b = quickEl(`np:${pk}:${k}`, () => {
-          const el = document.createElement(k === 'val' ? 'span' : 'button'); if (k !== 'val') el.type = 'button';
-          el.className = k === 'ok' ? 'allnone padok' : 'chip' + (k === 'val' ? ' padval' : k === 'back' ? ' other' : ''); el.dataset.group = 'np-' + pk;
-          el.textContent = k === 'back' ? '⌫' : k === 'val' ? '' : k === 'ok' ? 'OK' : k; el.title = k === 'back' ? 'Remove the last digit' : k === 'val' ? pad.what : k === 'ok' ? `Enter it in ESO's ${pad.what} dial` : `${pad.what}: ${k}`;
-          el.addEventListener('pointerdown', (e) => e.stopPropagation());
-          if (k !== 'val') el.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); if (k === 'ok') enterNumber(pk); else tapPad(pk, k); });
-          return el;
-        });
-        if (k === 'val') { const v = padValue[pk]; b.textContent = v ? v : (cur || '—'); b.classList.toggle('on', !!v); }
-        b.classList.toggle('busy', quickBusy);
-        b.style.display = 'block'; b.style.visibility = 'hidden';
-        return b;
-      });
-      placeRows(f, els);
-    }
-  }
-  function tapPad(pk, k) {
-    if (quickBusy) return;
-    const pad = NUM_PADS[pk];
-    let v = padValue[pk] || '';
-    if (k === 'back') v = v.slice(0, -1); else if (v.length < pad.max) v = v === '0' ? k : v + k;
-    padValue[pk] = v;
-    layoutPads();
-  }
-  async function enterNumber(pk) {
-    const pad = NUM_PADS[pk];
-    const v = padValue[pk];
-    if (quickBusy || !v) return;
-    quickBusy = true; layoutPads();
-    try {
-      const f = fieldReady(pad.ref);
-      if (!f) throw new Error('the field was not found');
-      lateVeil('Entering it in ESO…', `${pad.what}: ${v}`);
-      openPicker(f);
-      const shelf = await until(() => Array.from(document.querySelectorAll('shelf-panel')).find(p => visible(p) && p.querySelector('eso-masked-input input, numpad, eso-numpad')), 4000);
-      if (!shelf) throw new Error('the number pad did not open');
-      const input = await until(() => shelf.querySelector('eso-masked-input input, input[type=text], input:not([type])'), 2000);
-      if (!input) throw new Error('no number box in the pad');
-      input.focus();
-      // ESO's numpad keys act on mousedown/touchstart and feed the box through the app's own key
-      // handling, the way a finger does
-      const key = (ch) => shelf.querySelector(`numpad [data-char="${ch}"], eso-numpad [data-char="${ch}"]`);
-      const press = (el) => { for (const t of ['mousedown', 'mouseup', 'click']) el.dispatchEvent(new MouseEvent(t, { bubbles: true, cancelable: true, view: window })); };
-      const clear = Array.from(shelf.querySelectorAll('[data-char="clear"]')).find(visible) || key('back');
-      if (clear && input.value) { if (clear.dataset.char === 'clear') press(clear); else for (let i = 0; i < 12 && input.value; i++) press(clear); await wait(60); }
-      for (const ch of v) { const k = key(ch); if (k) press(k); await wait(40); }
-      await until(() => input.value === v, 600);
-      if (input.value !== v) { // the keys did not take: type into the box
-        input.value = v;
-        input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event('change', { bubbles: true }));
-        await wait(150);
-      }
-      const okBtn = Array.from(shelf.querySelectorAll('header button, button')).find(b => /^OK$/i.test(norm(b.textContent)));
-      if (!okBtn) throw new Error('no OK button');
-      okBtn.click();
-      const closed = await until(() => !document.body.contains(shelf) || !visible(shelf), 3000);
-      if (!closed) throw new Error('ESO did not accept ' + v);
-      await until(() => norm(fieldValue(pad.ref)).startsWith(v), 2000);
-    } catch (e) {
-      endVeil(); quickBusy = false; padValue[pk] = ''; layoutPads();
-      alert(`ESO Save: could not enter ${pad.what}. ` + (e && e.message ? e.message : '') + ' Enter it by hand.');
-      return;
-    }
-    endVeil(); quickBusy = false; padValue[pk] = ''; layoutPads();
-  }
   function layoutNeeds() {
     const run = currentRun();
     if (!run || !onTab('Incident') || shelfOpen()) { dropQuick('nd:'); return; }
@@ -1928,7 +1851,7 @@
   const crewPending = (name) => (crewPend[name] = crewPend[name] || { on: new Set(), off: new Set() });
   let crewBusy = null;
   function crewRows() {
-    return Array.from(document.querySelectorAll('crew-list grid-row, crew-grid grid-row')).filter(r => visible(r) && r.querySelector('.crew-info .name') && !r.classList.contains('add'));
+    return Array.from(document.querySelectorAll('crew-list grid-row, crew-grid grid-row')).filter(r => visible(r) && onTop(r) && r.querySelector('.crew-info .name') && !r.classList.contains('add'));
   }
   const crewName = (row) => norm(row.querySelector('.crew-info .name').textContent);
   // ESO lists a member's roles in an aside as "Roles: Lead - Transport, Driver - Transport"
@@ -2013,7 +1936,6 @@
     try { layoutAssess(); } catch (e) { /* keep going */ }
     try { layoutDisposition(); } catch (e) { /* keep going */ }
     try { layoutSingleRows(); } catch (e) { /* keep going */ }
-    try { layoutPads(); } catch (e) { /* keep going */ }
     try { layoutNeeds(); } catch (e) { /* keep going */ }
     try { watchModes(); } catch (e) { /* keep going */ }
     for (const gk of Object.keys(CHIP_GROUPS)) { try { layoutChips(gk); } catch (e) { /* keep going */ } }

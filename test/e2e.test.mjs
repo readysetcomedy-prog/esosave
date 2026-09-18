@@ -587,6 +587,12 @@ test('quick chips for medications and allergies work the same way, and every qui
   await waitFor(async () => (await chips()).length === 0, { label: 'chips gone while the list is open' });
   await app(() => document.querySelector('shelf-panel header button').click());
   await waitFor(async () => (await chips()).length >= 55, { label: 'chips back' });
+  // anything ESO draws over the page (the camera, attachments, a print sheet, a popover) hides the buttons under it
+  await app(() => { const o = document.createElement('div'); o.id = 'overlay'; o.setAttribute('style', 'position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:500'); document.body.appendChild(o); });
+  const hist = () => T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .chip[data-group=history]').length);
+  await waitFor(async () => (await hist()) === 0, { label: 'nothing under an overlay (the on-screen group)' });
+  await app(() => document.getElementById('overlay').remove());
+  await waitFor(async () => (await hist()) >= 20, { label: 'back when it goes' });
   // history chips do not anchor to the open list's own "Add History" title
   await app(() => document.getElementById('addhist').click());
   await waitFor(async () => (await chips()).length === 0, { label: 'none while Add History is open' });
@@ -896,11 +902,11 @@ test('mechanism of injury: all four as chips, more than one allowed', async () =
   await waitFor(async () => (await chips()).filter(c => /added/.test(c.cls)).length === 2, { label: 'both shown as set' });
 });
 
-test('Narrative rows: impressions, care level, duration units and every anatomic location, plus a 0-9 pad for the duration', async () => {
+test('Narrative rows: impressions, care level, duration units and every anatomic location', async () => {
   const id = await app(() => window.app.recordId);
   await app(() => window.app.openTab('Narrative'));
   const row = (g) => T.page.evaluate((gg) => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll(`.quick [data-group=${gg}]`)).map(b => ({ text: b.textContent, cls: b.className })), g);
-  await waitFor(async () => (await row('sr-primary')).length === 11 && (await row('sr-secondary')).length === 11 && (await row('sr-care')).length === 3 && (await row('sr-units')).length === 4 && (await row('sr-anatomic')).length === 9 && (await row('np-duration')).length === 12, { label: 'rows drawn' });
+  await waitFor(async () => (await row('sr-primary')).length === 11 && (await row('sr-secondary')).length === 11 && (await row('sr-care')).length === 3 && (await row('sr-units')).length === 4 && (await row('sr-anatomic')).length === 9, { label: 'rows drawn' });
   assert.deepEqual((await row('sr-anatomic')).map(b => b.text), ['Head', 'Neck', 'Chest', 'Abd', 'Back', 'Upper Ext', 'Lower Ext', 'Genitalia', 'General'], 'every location, abbreviated, no Other…');
   assert.equal((await row('sr-primary')).at(-1).text, 'Other…');
   const tap = async (g, text) => { await waitFor(async () => (await row(g)).some(b => b.text === text && !/busy/.test(b.cls)), { label: text }); await T.page.evaluate(([gg, t]) => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll(`.quick [data-group=${gg}]`)).find(b => b.textContent === t).click(), [g, text]); };
@@ -913,27 +919,14 @@ test('Narrative rows: impressions, care level, duration units and every anatomic
   await waitFor(async () => (await nar()).patientComplaint?.chiefComplaintAnatomicLocationId === 7096, { label: 'anatomic location', timeout: 15000 });
   await tap('sr-units', 'Hours');
   await waitFor(async () => (await nar()).patientComplaint?.chiefTimeUnitsOfComplaintDuration === 7082, { label: 'units', timeout: 15000 });
-  // the pad: digits gather beside the field with a green OK; OK opens ESO's own number dial once, enters the value, presses its OK
-  const opens = await app(() => window.app.shelfOpens);
-  assert.ok(!(await row('np-duration')).some(b => b.text === 'OK'), 'no OK until a digit is tapped');
-  await tap('np-duration', '4');
-  await waitFor(async () => (await row('np-duration')).some(b => /padval/.test(b.cls) && b.text === '4') && (await row('np-duration')).some(b => b.text === 'OK'), { label: 'pending value and OK shown' });
-  await tap('np-duration', '5');
-  await sleep(2000);
-  assert.notEqual((await nar()).patientComplaint?.chiefComplaintDuration, 45, 'nothing goes in until OK');
-  await tap('np-duration', 'OK');
-  await waitFor(async () => (await nar()).patientComplaint?.chiefComplaintDuration === 45, { label: 'duration entered', timeout: 15000 });
-  assert.equal(await app(() => window.app.shelfOpens), opens + 1, 'one open of the number shelf');
-  await waitFor(() => T.page.evaluate(() => document.querySelector('eso-field[data-field-ref=CHIEFCOMPLAINTDURATION] .display-value').textContent === '45'), { label: 'shown in the field' });
-  await waitFor(async () => (await row('np-duration')).some(b => /padval/.test(b.cls) && b.text === '45'), { label: 'pad shows the value' });
   assert.equal(await app(() => document.querySelectorAll('shelf-panel').length), 0);
 });
 
-test('Patient tab: Race row and 0-9 pads for Weight and Height (feet, inches); allergies keep only NKDA and Other…', async () => {
+test('Patient tab: Race row; allergies keep only NKDA and Other…', async () => {
   const id = await app(() => window.app.recordId);
   await app(() => window.app.openTab('Patient'));
   const row = (g) => T.page.evaluate((gg) => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll(`.quick [data-group=${gg}]`)).map(b => ({ text: b.textContent, cls: b.className })), g);
-  await waitFor(async () => (await row('sr-race')).length === 7 && (await row('np-weight')).length === 12 && (await row('np-feet')).length === 12 && (await row('np-inches')).length === 12 && (await row('allergies')).length === 2, { label: 'rows drawn' });
+  await waitFor(async () => (await row('sr-race')).length === 7 && (await row('allergies')).length === 2, { label: 'rows drawn' });
   assert.deepEqual((await row('allergies')).map(b => b.text), ['NKDA', 'Other…']);
   const tap = async (g, text) => { await waitFor(async () => (await row(g)).some(b => b.text === text && !/busy/.test(b.cls)), { label: text }); await T.page.evaluate(([gg, t]) => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll(`.quick [data-group=${gg}]`)).find(b => b.textContent === t).click(), [g, text]); };
   const demo = async () => (await T.record(id)).tree.patient?.demographics || {};
@@ -941,16 +934,6 @@ test('Patient tab: Race row and 0-9 pads for Weight and Height (feet, inches); a
   await tap('sr-race', 'Latino'); // no ESO quick-pick for this one: through the picker (a multi-select, so OK is pressed)
   await waitFor(async () => ((await demo()).raceIds || []).map(Number).includes(10317), { label: 'race', timeout: 15000 });
   await waitFor(async () => (await row('sr-race')).some(b => b.text === 'Latino' && /added/.test(b.cls)), { label: 'shown as set' });
-  await tap('np-weight', '1'); await tap('np-weight', '5'); await tap('np-weight', '0'); await tap('np-weight', 'OK');
-  await waitFor(async () => (await demo()).weight === 150, { label: 'weight', timeout: 15000 });
-  await waitFor(() => T.page.evaluate(() => document.querySelector('eso-field[data-field-ref=PATIENTWEIGHT] .display-value').textContent === '150 lbs'), { label: 'shown with its unit' });
-  await tap('np-feet', '5'); await tap('np-feet', 'OK');
-  await waitFor(async () => (await demo()).heightFtComponent === 5, { label: 'feet', timeout: 15000 });
-  await tap('np-inches', '1'); await tap('np-inches', '0'); await tap('np-inches', 'OK');
-  await waitFor(async () => (await demo()).heightInComponent === 10, { label: 'inches', timeout: 15000 });
-  // ⌫ takes the last digit back before OK
-  await tap('np-weight', '2'); await tap('np-weight', '9'); await tap('np-weight', '⌫'); await tap('np-weight', 'OK');
-  await waitFor(async () => (await demo()).weight === 2, { label: 'weight re-entered', timeout: 15000 });
   assert.equal(await app(() => document.querySelectorAll('shelf-panel').length), 0);
 });
 

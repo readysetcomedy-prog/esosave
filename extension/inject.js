@@ -27,7 +27,7 @@
   if (ext) return;
   if (window.__esosave) return;
 
-  const VERSION = '0.10.7';
+  const VERSION = '0.11.0';
   const API_PREFIX_RE = /^\/ehr\/api\/+/i;
   const FAKE_OK_TEXT = '{"result":"Success","data":[]}';
   const PROBE_PATH = '/ehr/api/thirdpartydata/partners';

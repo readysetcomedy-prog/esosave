@@ -38,10 +38,9 @@ to bad signal or a hung page.
   a finger would (taps that land while a list is being worked ride the next open). A second tap on
   a chip that is in opens the same list, unticks it and presses OK, so it comes back out. They hide while
   any ESO picker is open, and every button scrolls under
-  ESO's top bar and tab strip with the page. A Race row (every race, shortened) sits under the Race label, and 0-9 pads under Weight and Height (feet and inches): digits gather beside the field with a
-  green OK; OK opens ESO's own number dial once, presses its keys for each digit the way a finger
-  would (typing into its box only if the keys do not take), and presses its OK, so the dial does
-  not open on every tap; ⌫ takes the last digit back first. On the Incident tab, one "All: None/No Delay" button above the delay fields
+  ESO's top bar and tab strip with the page. A Race row (every race, shortened) sits under the Race label. Every button also
+  hides while ESO draws anything over its field (a dialog, attachments, the camera, a print
+  sheet, the patient popover). On the Incident tab, one "All: None/No Delay" button above the delay fields
   presses ESO's own None button on every delay still empty, leaving any already answered alone. On
   the Narrative tab, chips after each transport field (moved to stretcher, to and from the
   ambulance, position during transport) pick in ESO's list the same way. Facility chips under the
@@ -63,8 +62,7 @@ to bad signal or a hung page.
   not already offer (where ESO shows its own buttons and Other, the row has no Other… of its own).
   Mutual Aid stays hidden until the run type is mutual aid, as in ESO. Also on the Narrative tab: the ten
   most common impressions above Primary and Secondary Impression, ALS Paramedic / BLS above Local
-  Protocol Provided Care Level, Minutes / Hours / Days above the complaint duration's unit with a
-  0-9 pad for the duration itself, and every anatomic location (abbreviated) above Anatomic
+  Protocol Provided Care Level, Minutes / Hours / Days above the complaint duration's unit, and every anatomic location (abbreviated) above Anatomic
   Location. Every row ends with "Other…", which simply opens ESO's own list (a row that already
   holds every choice has no need of one). Every pick takes its row straight from the open list;
   only a list too long to show it all gets the name typed into its search box first, and the
