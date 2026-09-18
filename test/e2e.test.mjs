@@ -1193,14 +1193,14 @@ test('the card collapses to the logo, stays collapsed on no signal, expands on t
 });
 
 test('settings follow the ESO login: a row per login in the agency table; locked settings stay locked; runs of another login stay out of sight', async () => {
-  await T.control({ userName: 'GASTON, MICHAEL', userId: 'person-m' });
+  await T.control({ userName: 'JONES, ALEX', userId: 'person-m' });
   const db = () => fetch(T.base + '/__db_dump').then(r => r.json());
   const id = await freshRun();
   await app(() => window.app.edit('incident', 'incident.scene.manualAddress.locationName', 'His St'));
   await waitFor(async () => ((await T.run(id)) || {}).batches?.length >= 1 || (await app(() => window.app.responses.length)) >= 1, { label: 'a save of his' });
   // the login is read from ESO's own responses and shown on the card; a row is written for it
-  await waitFor(() => T.page.evaluate(() => (document.getElementById('esosave-host').shadowRoot.querySelector('.bar .who') || {}).textContent), { label: 'name on the card' }).then(v => assert.equal(v, 'GASTON, MICHAEL'));
-  const row = await waitFor(async () => (await db()).find(r => r.name === 'GASTON, MICHAEL'), { label: 'row written' });
+  await waitFor(() => T.page.evaluate(() => (document.getElementById('esosave-host').shadowRoot.querySelector('.bar .who') || {}).textContent), { label: 'name on the card' }).then(v => assert.equal(v, 'JONES, ALEX'));
+  const row = await waitFor(async () => (await db()).find(r => r.name === 'JONES, ALEX'), { label: 'row written' });
   assert.equal(row.settings.quickHistory, true);
   assert.ok(!('purgeHoursAfterLock' in row.settings) && !('warmTabs' in row.settings), 'locked settings never go to the table');
   for (const k of Object.keys(row)) assert.ok(['name', 'settings', 'updated_at'].includes(k), 'nothing else leaves the device: ' + k);
@@ -1211,9 +1211,9 @@ test('settings follow the ESO login: a row per login in the agency table; locked
   await waitFor(() => T.page.evaluate(() => !!document.getElementById('esosave-host').shadowRoot.querySelector('#qhistory')), { label: 'settings open' });
   const locked = await T.page.evaluate(() => ['#purge', '#warm', '#times', '#sendprompt', '#unsentlist'].map(s => document.getElementById('esosave-host').shadowRoot.querySelector(s).disabled));
   assert.deepEqual(locked, [true, true, true, true, true], 'the agency block cannot be changed');
-  assert.match(await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.panel').textContent), /signed in as GASTON, MICHAEL/);
+  assert.match(await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.panel').textContent), /signed in as JONES, ALEX/);
   await T.page.evaluate(() => { const r = document.getElementById('esosave-host').shadowRoot; r.querySelector('#qhistory').checked = false; r.querySelector('[data-act=save-settings]').click(); });
-  await waitFor(async () => (await db()).find(r => r.name === 'GASTON, MICHAEL').settings.quickHistory === false, { label: 'change reached the row' });
+  await waitFor(async () => (await db()).find(r => r.name === 'JONES, ALEX').settings.quickHistory === false, { label: 'change reached the row' });
   // another login on the same tablet: their own row, and a run whose crew she is not on is not listed for her
   await T.control({ userName: 'SMITH, JANE', userId: 'person-j' });
   const id2 = await freshRun();
@@ -1252,4 +1252,91 @@ test('settings follow the ESO login: a row per login in the agency table; locked
   await T.control({ dbDown: false });
   await waitFor(async () => (await db()).find(r => r.name === 'SMITH, JANE').settings.quickMeds === true, { label: 'written once the table is back', timeout: 40000 });
   await T.control({ userName: 'TEST, MEDIC', userId: 'person-1' });
+});
+
+test('CAD import: only a run the call log shows you on may be imported; then the unit capability and level of care follow the ambulance', async () => {
+  const seed = (table, rows) => fetch(T.base + '/__db_seed', { method: 'POST', body: JSON.stringify({ table, rows }) });
+  await seed('users', [{ username: 'thocq', first_name: 'Trent', last_name: 'Hocq' }, { username: 'efear', first_name: 'Emma', last_name: 'Fear' }, { username: 'tmedic', first_name: 'Medic', last_name: 'Test' }, { username: 'cberg', first_name: 'Chad', last_name: 'Berg' }]);
+  await seed('call_log_entries', [
+    { runnumber: '260918-024', callsign: 'RM-23', crewmemberone: 'thocq', crewmembertwo: 'efear', crewmemberthree: '', cmslevel: 'ALS-E', createdat: '2026-09-18T16:21:00Z' },
+    { runnumber: '260918-017', callsign: 'RM-16', crewmemberone: 'tmedic', crewmembertwo: 'cberg', crewmemberthree: '', cmslevel: 'BLS-E', createdat: '2026-09-18T12:54:00Z' },
+    { runnumber: '260918-031', callsign: 'RM-NT02', crewmemberone: 'cberg', crewmembertwo: 'tmedic', crewmemberthree: '', cmslevel: 'ALS-NE', createdat: '2026-09-18T10:07:00Z' },
+  ]);
+  await seed('ambulances', [{ number: 'RM-23', level: 'ALS' }, { number: 'RM-16', level: 'BLS' }, { number: 'RM-NT02', level: 'ALS' }]);
+  const id = await freshRun();
+  await app(() => window.app.openTab('Incident'));
+  const box = () => T.page.evaluate(() => { const b = document.getElementById('esosave-host').shadowRoot.querySelector('.veil .askbox'); return b ? b.textContent : null; });
+  const pick = async (incident) => { await app((n) => Array.from(document.querySelectorAll('eso-modal grid-row[data-cad]')).find(r => r.textContent.includes(n)).click(), incident); await app(() => document.querySelector('eso-modal .import').click()); };
+  await app(() => document.getElementById('cadimport').click());
+  await waitFor(() => app(() => !!document.querySelector('eso-modal .import')), { label: 'CAD dialog' });
+  // a run whose crew (thocq, efear) does not include TEST, MEDIC
+  await pick('260918-024');
+  await waitFor(async () => /not associated with this run/.test((await box()) || ''), { label: 'told it is not their run' });
+  assert.equal(await app(() => window.app.cadImports), 0, 'ESO never saw the press');
+  assert.equal(await app(() => !!document.querySelector('eso-modal .import')), true, 'the CAD dialog is still there to choose another');
+  await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.askbox button').click());
+  // a run the login is on: goes through; after the refresh the unit fields follow RM-16 (BLS)
+  await pick('260918-017');
+  await waitFor(async () => (await app(() => window.app.cadImports)) === 1, { label: 'imported (BLS run)', timeout: 15000 });
+  await waitFor(() => app(() => /CAD Import Success/.test(document.body.textContent)), { label: 'ESO success alert' });
+  await app(() => document.querySelector('eso-modal button').click());
+  const resp = async () => (await T.record(id)).tree.incident?.response || {};
+  await waitFor(async () => (await resp()).unitCapabilityID === 14136 && (await resp()).unitsLevelOfCareID === 9681, { label: 'Ground Transport (BLS Equipped) and BLS-Basic /EMT', timeout: 20000 });
+  assert.equal(await app(() => document.querySelectorAll('shelf-panel, eso-modal').length), 0);
+  // a non-transport unit (NT02, ALS): Non-Transport-Medical Treatment (ALS Equipped), ALS-Paramedic
+  const id2 = await freshRun();
+  await app(() => window.app.openTab('Incident'));
+  await app(() => document.getElementById('cadimport').click());
+  await waitFor(() => app(() => !!document.querySelector('eso-modal .import')), { label: 'CAD dialog' });
+  await pick('260918-031');
+  await waitFor(async () => (await app(() => window.app.cadImports)) === 1, { label: 'imported (NT run)', timeout: 15000 }); // a fresh page: its own count
+  await waitFor(() => app(() => /CAD Import Success/.test(document.body.textContent)), { label: 'ESO success alert' });
+  await app(() => document.querySelector('eso-modal button').click());
+  await waitFor(async () => { const r = (await T.record(id2)).tree.incident?.response || {}; return r.unitCapabilityID === 14138 && r.unitsLevelOfCareID === 9686; }, { label: 'non-transport ALS', timeout: 20000 });
+  // a run the call log does not have: asked, and Import anyway goes through
+  const id3 = await freshRun();
+  await app(() => window.app.openTab('Incident'));
+  await app(() => document.getElementById('cadimport').click());
+  await waitFor(() => app(() => !!document.querySelector('eso-modal .import')), { label: 'CAD dialog' });
+  await pick('260917-099');
+  await waitFor(async () => /not in the call log yet/.test((await box()) || ''), { label: 'asked' });
+  assert.equal(await app(() => window.app.cadImports), 0);
+  await T.page.evaluate(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.askbox button')).find(b => /Import anyway/.test(b.textContent)).click());
+  await waitFor(async () => (await app(() => window.app.cadImports)) === 1, { label: 'imported anyway', timeout: 15000 });
+  await app(() => document.querySelector('eso-modal button').click());
+  await waitFor(async () => { const r = (await T.record(id3)).tree.incident?.response || {}; return r.unitCapabilityID === 14135; }, { label: 'RM-23 is ALS: Ground Transport (ALS Equipped)', timeout: 20000 });
+});
+
+test('the agency settings: locked for everyone, changed only by the agency owner\'s ESO login, and they reach every tablet', async () => {
+  const db = () => fetch(T.base + '/__db_dump').then(r => r.json());
+  const openSettings = async () => {
+    await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.bar [data-act=open]').click());
+    await waitFor(() => T.page.evaluate(() => !!document.getElementById('esosave-host').shadowRoot.querySelector('.panel [data-act=settings]')), { label: 'panel' });
+    await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('[data-act=settings]').click());
+    await waitFor(() => T.page.evaluate(() => !!document.getElementById('esosave-host').shadowRoot.querySelector('#asklock')), { label: 'settings open' });
+  };
+  const lockedDisabled = () => T.page.evaluate(() => ['#purge', '#warm', '#asklock', '#cadgate'].map(s => document.getElementById('esosave-host').shadowRoot.querySelector(s).disabled));
+  // the owner, by ESO login
+  await T.control({ userName: 'GASTON, MICHAEL', userId: 'd4e45fac-ee36-4ac8-bf9a-3fb3e265c0d0' });
+  await freshRun();
+  await waitFor(() => T.page.evaluate(() => (document.getElementById('esosave-host').shadowRoot.querySelector('.bar .who') || {}).textContent === 'GASTON, MICHAEL'), { label: 'owner on the card' });
+  await openSettings();
+  assert.deepEqual(await lockedDisabled(), [false, false, false, false], 'the owner may change the agency block');
+  await T.page.evaluate(() => { const r = document.getElementById('esosave-host').shadowRoot; r.querySelector('#purge').value = '12'; r.querySelector('#asklock').checked = false; r.querySelector('[data-act=save-settings]').click(); });
+  await waitFor(async () => { const a = (await db()).find(r => r.name === '__agency__'); return a && a.settings.purgeHoursAfterLock === 12 && a.settings.askBeforeLock === false; }, { label: 'agency row written' });
+  assert.ok(!('quickHistory' in (await db()).find(r => r.name === '__agency__').settings), 'only the locked settings are the agency\'s');
+  // anyone else: greyed out, and the agency row is what their tablet runs with
+  await T.control({ userName: 'TEST, MEDIC', userId: 'person-1' });
+  const id = await freshRun();
+  await waitFor(async () => (await T.storage()).settings.purgeHoursAfterLock === 12 && (await T.storage()).settings.askBeforeLock === false, { label: 'agency settings applied' });
+  await openSettings();
+  assert.deepEqual(await lockedDisabled(), [true, true, true, true], 'locked for the crew');
+  assert.equal(await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('#purge').value), '12');
+  await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.panel [data-act=close]').click());
+  // with the question turned off by the agency, Lock Record goes straight through
+  await app(() => document.getElementById('lockrecord').click());
+  await waitFor(async () => (await T.record(id)).state === 'locked', { label: 'locked without the question', timeout: 15000 });
+  assert.equal(await T.page.evaluate(() => !!document.getElementById('esosave-host').shadowRoot.querySelector('.veil .lockask')), false);
+  await fetch(T.base + '/__db_set', { method: 'POST', body: JSON.stringify({ name: '__agency__', settings: {} }) });
+  await T.setStorage({ settings: { ...(await T.storage()).settings, purgeHoursAfterLock: 0, askBeforeLock: true } });
 });

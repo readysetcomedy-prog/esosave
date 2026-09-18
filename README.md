@@ -89,7 +89,17 @@ to bad signal or a hung page.
   opens the member, opens Roles, ticks the role, OK, OK. A second tap takes the role back out.
 - **Before a lock.** ESO's Lock Record press is caught and a question shown first: "Have you
   attached the proper paperwork for this run, or acknowledge it's not required?" Yes lets the
-  same press through to ESO; No leaves the run open.
+  same press through to ESO; No leaves the run open. A locked setting.
+- **CAD import gate.** The Import press in ESO's CAD Import dialog is caught first. The chosen
+  incident number is looked up in the agency's call log, its crew usernames mapped to names
+  through the agency's users, and only a run that lists the signed-in ESO login goes through;
+  otherwise: "You are not associated with this run, please choose another or inform dispatch."
+  A run the call log does not have yet asks before importing. After the import, Unit Capability
+  and Unit's Level of Care are set from the ambulance's level (RM-<unit>; a unit named NT… is
+  non-transport). A locked setting.
+- **Agency settings.** The locked block (retention, tab warm-up, call times, fax prompt, Not sent
+  list, the lock question, the CAD gate) is one agency row in the table, read by every tablet,
+  and only the agency owner's ESO login can change it.
 - **Loaded mileage.** Once the scene and the destination both have an address (a predefined
   place, or a typed street, city, state and zip), ESO's own Calculate Mileage button is pressed
   once for the crew, and again only if an address changes. A complaint ESO raises about it is

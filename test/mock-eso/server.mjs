@@ -66,6 +66,7 @@ export function createMockEso() {
   const control = { loggedOut: false, rejectValue: null, failAutosaves: 0, refuseAutosaves: 0, faxStatus: 'SUCCESS', userName: 'TEST, MEDIC', userId: 'person-1', dbDown: false, log: [] };
   // a stand-in for the extension's settings table (Supabase's REST shape): one row per ESO login
   const dbUsers = new Map();
+  const dbTables = { call_log_entries: [], users: [], ambulances: [] }; // the agency's own tables, seeded by tests
   const faxHistory = []; // agency-wide, like ESO's Fax History
   const emails = [];
   let faxSeq = 7370000;
@@ -211,6 +212,22 @@ export function createMockEso() {
       }
       if (path === '/__faxes') return send(200, { faxHistory, emails });
       if (path === '/__db_dump') return send(200, [...dbUsers.values()]);
+      if (path === '/__db_seed' && req.method === 'POST') { const b = JSON.parse(body || '{}'); dbTables[b.table] = b.rows || []; return send(200, { ok: true }); }
+      // the agency's tables, read the way Supabase's REST answers: ?col=eq.v, ?col=in.(a,b)
+      { const m = /^\/__db\/(call_log_entries|users|ambulances)$/.exec(path);
+        if (m) {
+          if (control.dbDown) { res.writeHead(503); return res.end(); }
+          if (req.headers.apikey !== 'test-anon') return send(401, { message: 'No API key found in request' });
+          let rows = dbTables[m[1]].slice();
+          for (const [k, v] of u.searchParams) {
+            if (['select', 'order', 'limit'].includes(k)) continue;
+            const eq = /^eq\.(.*)$/.exec(v), inn = /^in\.\((.*)\)$/.exec(v);
+            if (eq) rows = rows.filter(r => String(r[k]) === eq[1]);
+            else if (inn) { const set = inn[1].split(',').map(x => decodeURIComponent(x)); rows = rows.filter(r => set.includes(String(r[k]))); }
+          }
+          const lim = Number(u.searchParams.get('limit')); if (lim) rows = rows.slice(0, lim);
+          return send(200, rows);
+        } }
       if (path === '/__db_set' && req.method === 'POST') { const r = JSON.parse(body || '{}'); dbUsers.set(r.name, { settings: {}, ...r, updated_at: r.updated_at || new Date().toISOString() }); return send(200, { ok: true }); }
       // ---- the settings table, the way Supabase's REST answers: GET ?name=eq.X, POST upsert, PATCH ?name=eq.X
       if (path === '/__db/esosave_users') {

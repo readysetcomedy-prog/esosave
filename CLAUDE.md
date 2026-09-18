@@ -6,7 +6,9 @@ web app. See README.md for what it does and how it is tested (`npm test`, `npm r
 ## Settings: locked or open
 
 Settings come in two kinds. **Locked** ones (retention, tab warm-up, call times, fax prompt, Not
-sent list) are set in the code and shown greyed out in the panel. **Open** ones (the quick-button
+sent list, the paperwork question before a lock, the CAD import gate: the `LOCKED_SETTINGS` list)
+are the agency's: one `__agency__` row in the table, changed only by the agency owner's ESO login
+(`ADMIN` in `extension/content.js`) and shown greyed out to everyone else. **Open** ones (the quick-button
 toggles and the facility chips, the `OPEN_SETTINGS` list in `extension/content.js`) may be changed
 by the crew and follow the ESO login through the `esosave_users` table.
 

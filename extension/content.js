@@ -43,7 +43,7 @@
   const sget = (keys) => new Promise(res => storage.get(keys, (v) => res(v || {})));
   const sset = (obj) => new Promise(res => storage.set(obj, () => res()));
   const sremove = (keys) => new Promise(res => storage.remove(keys, () => res()));
-  const DEFAULT_SETTINGS = { purgeHoursAfterLock: 0, probeSec: 20, heldProbeSec: 8, warmTabs: true, cardCollapsed: false, showTimes: true, sendPrompt: true, unsentList: true, quickHistory: true, quickMeds: true, quickAllergies: true, quickAcuity: true, quickDelays: true, quickTransport: true, quickAssess: true, quickDisposition: true, autoResponse: true, quickIncident: true, quickMechanism: true, quickFacilities: true, quickNarrative: true, quickPatient: true, quickRefusal: true, autoMileage: true, facilitySending: [], facilityDestination: [] };
+  const DEFAULT_SETTINGS = { purgeHoursAfterLock: 0, probeSec: 20, heldProbeSec: 8, warmTabs: true, cardCollapsed: false, showTimes: true, sendPrompt: true, unsentList: true, quickHistory: true, quickMeds: true, quickAllergies: true, quickAcuity: true, quickDelays: true, quickTransport: true, quickAssess: true, quickDisposition: true, autoResponse: true, quickIncident: true, quickMechanism: true, quickFacilities: true, quickNarrative: true, quickPatient: true, quickRefusal: true, autoMileage: true, askBeforeLock: true, cadGate: true, facilitySending: [], facilityDestination: [] };
   // The agency's standard facility chips (ids and names from ESO's saved facilities). Every install
   // starts with these; Settings can add or remove per device.
   const FAC = {
@@ -77,6 +77,15 @@
     ? { url: 'https://qkprkwydxbtybaxylhln.supabase.co/rest/v1/esosave_users', key: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFrcHJrd3lkeGJ0eWJheHlsaGxuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzY2MTc2MjYsImV4cCI6MjA1MjE5MzYyNn0.DNjMTLqWtB7KJfZc3I03ufAPoIx69eA6wCkvhgdp7u4' }
     : { url: location.origin + '/__db/esosave_users', key: 'test-anon' };
   const openSettings = (src) => { const o = {}; for (const k of OPEN_SETTINGS) if (k in src) o[k] = src[k]; return o; };
+  // The locked settings are the agency's: one row for all tablets, changed only by the agency's
+  // owner (matched by ESO login name or agency person id), shown greyed out to everyone else.
+  const LOCKED_SETTINGS = ['purgeHoursAfterLock', 'warmTabs', 'showTimes', 'sendPrompt', 'unsentList', 'askBeforeLock', 'cadGate'];
+  const lockedSettings = (src) => { const o = {}; for (const k of LOCKED_SETTINGS) if (k in src) o[k] = src[k]; return o; };
+  const AGENCY_ROW = '__agency__';
+  const ADMIN = { name: 'GASTON, MICHAEL', id: 'd4e45fac-ee36-4ac8-bf9a-3fb3e265c0d0' };
+  const isAdmin = () => (user && user.toUpperCase() === ADMIN.name) || (userId && userId === ADMIN.id);
+  // the agency's tables (the RuralMed site): the call log, its users and its ambulances
+  const AGENCY_DB = ON_ESO ? { url: 'https://qkprkwydxbtybaxylhln.supabase.co/rest/v1', key: SYNC.key } : { url: location.origin + '/__db', key: 'test-anon' };
   async function loadAll() {
     const all = await sget(null);
     const runs = {};
@@ -127,6 +136,7 @@
   }
   (async () => {
     await booted;
+    syncAgency();
     if (document.documentElement.hasAttribute('data-esosave')) await sendInit();
     setTimeout(() => toPage('action', { name: 'facilities' }), 1500);
     setInterval(() => purgeLocked(settings), 10 * 60 * 1000);
@@ -398,13 +408,16 @@
       `${s.hasTemplates ? '' : ' · <span title="Start one run with signal so a blank-run template is saved">no offline new-run template yet</span>'}</div>`);
     parts.push(`<div class="actions"><button class="a" data-act="push">Push all held changes now</button><button class="a sec" data-act="export-all">Export everything</button><button class="a sec" data-act="settings">Settings</button></div>`);
     if (settingsOpen) {
+      const dis = isAdmin() ? '' : 'disabled', lk = isAdmin() ? '' : ' locked';
       parts.push(`<div class="run">` +
-        `<div class="lock">🔒 Set by the agency. These cannot be changed here.</div>` +
-        `<label class="s locked">Clear a run from this device <input type="number" min="0" max="720" id="purge" value="${esc(settings.purgeHoursAfterLock)}" disabled> hours after it is locked (0 = as soon as the lock is seen)</label>` +
-        `<label class="s locked"><input type="checkbox" id="warm" ${settings.warmTabs === false ? '' : 'checked'} disabled> Open every tab once, quietly, when a run opens (so tabs you have not touched still work with no signal)</label>` +
-        `<label class="s locked"><input type="checkbox" id="times" ${settings.showTimes === false ? '' : 'checked'} disabled> Show the call times (dispatched, en route, on scene, at patient, depart, at destination, transfer) in the empty part of ESO's top bar</label>` +
-        `<label class="s locked"><input type="checkbox" id="sendprompt" ${settings.sendPrompt === false ? '' : 'checked'} disabled> When a run is locked, offer to fax or email it to the destination if it has not been sent yet</label>` +
-        `<label class="s locked"><input type="checkbox" id="unsentlist" ${settings.unsentList === false ? '' : 'checked'} disabled> Keep a list of locked runs from the last 15 days that have a fax or email destination but were never sent</label>` +
+        `<div class="lock">${isAdmin() ? '🔓 Agency settings: yours to change. They apply to every tablet.' : '🔒 Set by the agency. These cannot be changed here.'}</div>` +
+        `<label class="s${lk}">Clear a run from this device <input type="number" min="0" max="720" id="purge" value="${esc(settings.purgeHoursAfterLock)}" ${dis}> hours after it is locked (0 = as soon as the lock is seen)</label>` +
+        `<label class="s${lk}"><input type="checkbox" id="warm" ${settings.warmTabs === false ? '' : 'checked'} ${dis}> Open every tab once, quietly, when a run opens (so tabs you have not touched still work with no signal)</label>` +
+        `<label class="s${lk}"><input type="checkbox" id="times" ${settings.showTimes === false ? '' : 'checked'} ${dis}> Show the call times (dispatched, en route, on scene, at patient, depart, at destination, transfer) in the empty part of ESO's top bar</label>` +
+        `<label class="s${lk}"><input type="checkbox" id="sendprompt" ${settings.sendPrompt === false ? '' : 'checked'} ${dis}> When a run is locked, offer to fax or email it to the destination if it has not been sent yet</label>` +
+        `<label class="s${lk}"><input type="checkbox" id="unsentlist" ${settings.unsentList === false ? '' : 'checked'} ${dis}> Keep a list of locked runs from the last 15 days that have a fax or email destination but were never sent</label>` +
+        `<label class="s${lk}"><input type="checkbox" id="asklock" ${settings.askBeforeLock === false ? '' : 'checked'} ${dis}> Before a lock, ask whether the proper paperwork is attached (or not required); No leaves the run open</label>` +
+        `<label class="s${lk}"><input type="checkbox" id="cadgate" ${settings.cadGate === false ? '' : 'checked'} ${dis}> CAD import: only a run the call log shows you on may be imported; then the unit's capability and level of care are set from the ambulance's level</label>` +
         `<div class="s" style="margin-top:8px;font-weight:700">Quick buttons${user ? ` <span class="muted" style="font-weight:400">· yours, ${esc(user)}: they follow your ESO login to any tablet</span>` : ''}</div>` +
         `<label class="s"><input type="checkbox" id="qdelays" ${settings.quickDelays === false ? '' : 'checked'}> Delays: one "All: None/No Delay" button above the delay fields (Incident tab) that presses ESO's own None button on every delay still empty</label>` +
         `<label class="s"><input type="checkbox" id="qhistory" ${settings.quickHistory === false ? '' : 'checked'}> History: one-tap chips for common conditions under Add History (Patient tab)</label>` +
@@ -489,6 +502,7 @@
   async function syncUser() {
     const who = user; if (!who) return;
     syncLastTry = Date.now();
+    await syncAgency();
     try {
       const row = await dbGet(who);
       // their row, or, for a login the table has never seen, the agency defaults: not whatever the
@@ -508,6 +522,17 @@
       await dbPut({ name: who, settings: openSettings(settings) });
       syncedUser = who; syncDirty = false;
     } catch (e) { syncDirty = true; }
+  }
+  // the agency row: locked settings for every tablet, read at start and with each login
+  async function syncAgency() {
+    try {
+      const row = await dbGet(AGENCY_ROW);
+      if (row && row.settings && typeof row.settings === 'object') { Object.assign(settings, lockedSettings(row.settings)); await sset({ settings }); toPage('settings', settings); renderTimes(); }
+    } catch (e) { /* no signal: the tablet's copy stands */ }
+  }
+  async function pushAgency() {
+    if (!isAdmin()) return;
+    try { await dbPut({ name: AGENCY_ROW, settings: lockedSettings(settings) }); } catch (e) { syncDirty = true; }
   }
   const openLogs = new Set();
   let settingsOpen = false;
@@ -532,7 +557,17 @@
     else if (act === 'push') toPage('action', { name: 'pushNow' });
     else if (act === 'settings') { settingsOpen = !settingsOpen; renderPanel(); }
     else if (act === 'save-settings') {
-      // the locked block is display only: its values come from the code
+      if (isAdmin()) { // the agency's owner sets the locked block for every tablet
+        const v = Number(panel.querySelector('#purge').value);
+        settings.purgeHoursAfterLock = Number.isFinite(v) && v >= 0 ? v : 0;
+        settings.warmTabs = !!panel.querySelector('#warm').checked;
+        settings.showTimes = !!panel.querySelector('#times').checked;
+        settings.sendPrompt = !!panel.querySelector('#sendprompt').checked;
+        settings.unsentList = !!panel.querySelector('#unsentlist').checked;
+        settings.askBeforeLock = !!panel.querySelector('#asklock').checked;
+        settings.cadGate = !!panel.querySelector('#cadgate').checked;
+        pushAgency();
+      }
       settings.quickDelays = !!panel.querySelector('#qdelays').checked;
       settings.quickHistory = !!panel.querySelector('#qhistory').checked;
       settings.quickMeds = !!panel.querySelector('#qmeds').checked;
@@ -2066,6 +2101,7 @@
   document.addEventListener('click', (e) => {
     const btn = e.target && e.target.closest ? e.target.closest('button, a') : null;
     if (!btn || (host && host.contains(btn)) || !/^Lock Record$/i.test(norm(btn.textContent))) return;
+    if (settings.askBeforeLock === false) return;
     if (lockApproved) { lockApproved = false; return; }
     e.preventDefault(); e.stopImmediatePropagation(); e.stopPropagation();
     askBeforeLock(btn);
@@ -2079,6 +2115,97 @@
       <div class="actions"><button class="a" data-act="lock-yes">Yes, lock it</button><button class="a sec" data-act="lock-no">No, not yet</button></div></div>`;
     veil.querySelector('[data-act=lock-no]').addEventListener('click', () => hideVeil());
     veil.querySelector('[data-act=lock-yes]').addEventListener('click', () => { hideVeil(); lockApproved = true; btn.click(); lockApproved = false; });
+    shadow.appendChild(veil);
+  }
+  // ---- CAD import: the Import press in ESO's "CAD Import - Select an incident" dialog is caught
+  // on the way down. The chosen incident is looked up in the agency's call log; only a run whose
+  // crew (by the agency's users) includes this ESO login goes through. After the import, the
+  // unit's capability and level of care are set from the ambulance's level (RM-<unit>; a unit
+  // named NT… is non-transport).
+  let cadApproved = false;
+  let pendingUnit = null; // { unit, level, nt, at }
+  document.addEventListener('click', (e) => {
+    const btn = e.target && e.target.closest ? e.target.closest('button') : null;
+    if (!btn || (host && host.contains(btn)) || !/^Import$/i.test(norm(btn.textContent))) return;
+    const dlg = btn.closest('eso-modal-dialog');
+    if (!dlg || !/CAD Import/i.test(norm(dlg.textContent))) return;
+    if (settings.cadGate === false) return;
+    if (cadApproved) { cadApproved = false; return; }
+    const row = dlg.querySelector('grid-row.selected');
+    const cells = row ? Array.from(row.querySelectorAll('grid-cell')).map(c => norm(c.textContent)) : [];
+    if (!row || cells.length < 4) return; // nothing chosen: ESO's own behaviour
+    e.preventDefault(); e.stopImmediatePropagation(); e.stopPropagation();
+    gateCad(btn, cells[1], cells[3]);
+  }, true);
+  const agencyGet = async (path) => {
+    const r = await fetch(`${AGENCY_DB.url}/${path}`, { headers: { apikey: AGENCY_DB.key, Authorization: 'Bearer ' + AGENCY_DB.key } });
+    if (!r.ok) throw new Error('table ' + r.status);
+    return r.json();
+  };
+  const nameKey = (s) => String(s || '').toUpperCase().replace(/[^A-Z]/g, '');
+  function sameCrew(u) { // the agency's user against the ESO login "LAST, FIRST"
+    const [last, first] = (user || '').split(',').map(nameKey);
+    const ul = nameKey(u.last_name), uf = nameKey(u.first_name);
+    return !!last && ul === last && (!first || !uf || uf === first || uf.startsWith(first) || first.startsWith(uf));
+  }
+  async function gateCad(btn, incident, unit) {
+    lateVeil('Checking the call log…', incident);
+    let calls = null, level = null, users = [];
+    try {
+      calls = await agencyGet(`call_log_entries?runnumber=eq.${encodeURIComponent(incident)}&select=runnumber,callsign,crewmemberone,crewmembertwo,crewmemberthree,cmslevel&order=createdat.desc&limit=5`);
+    } catch (e) { calls = null; } // the call log is out of reach: nothing to check against
+    const call = Array.isArray(calls) ? calls.find(c => c.crewmemberone || c.crewmembertwo || c.crewmemberthree) || calls[0] : null;
+    if (call) {
+      const names = [call.crewmemberone, call.crewmembertwo, call.crewmemberthree].map(x => norm(x)).filter(Boolean);
+      try { users = names.length ? await agencyGet(`users?username=in.(${names.map(encodeURIComponent).join(',')})&select=username,first_name,last_name`) : []; } catch (e) { users = []; }
+      if (!users.some(sameCrew)) {
+        endVeil();
+        askBox('Not your run', 'You are not associated with this run, please choose another or inform dispatch.', [['OK', null]]);
+        return;
+      }
+    } else if (Array.isArray(calls)) {
+      endVeil();
+      const go = await new Promise(res => askBox('Not in the call log', `Run ${incident} is not in the call log yet, so the crew cannot be checked. Import it anyway?`, [['Import anyway', true], ['Cancel', false]], res));
+      if (!go) return;
+    }
+    // the unit's level: the ambulance (RM-<unit>), else the call's CMS level
+    try {
+      const nt = /^NT/i.test(unit);
+      const numbers = [`RM-${unit}`, unit, `RM-${unit.replace(/^NT/i, '')}`];
+      const amb = await agencyGet(`ambulances?number=in.(${numbers.map(encodeURIComponent).join(',')})&select=number,level`);
+      const hit = numbers.map(n => amb.find(a => a.number === n)).find(Boolean);
+      level = hit && /^(ALS|BLS)/i.test(hit.level || '') ? hit.level.toUpperCase().slice(0, 3) : null;
+      if (!level && call && /^(ALS|BLS)/i.test(call.cmslevel || '')) level = call.cmslevel.toUpperCase().slice(0, 3);
+      pendingUnit = level ? { unit, level, nt, at: Date.now() } : null;
+    } catch (e) { pendingUnit = null; }
+    endVeil();
+    cadApproved = true; btn.click(); cadApproved = false;
+  }
+  // once the import is in and the Incident tab is back, the two unit fields are set
+  setInterval(async () => {
+    if (!pendingUnit || quickBusy || autoBusy || !onTab('Incident') || shelfOpen()) return;
+    if (Date.now() - pendingUnit.at > 3 * 60 * 1000) { pendingUnit = null; return; }
+    const cap = fieldReady('UNITCAPABILITYID'), loc = fieldReady('UNITSLEVELOFCAREID');
+    if (!cap || !loc) return;
+    const unitShown = norm(fieldValue('UNITID') || '');
+    if (!unitShown || !unitShown.toUpperCase().includes(pendingUnit.unit.toUpperCase())) return; // the import has not landed yet
+    const p = pendingUnit; pendingUnit = null;
+    quickBusy = true; lateVeil('Setting the unit\'s level…', `${p.unit}: ${p.level}`);
+    try {
+      await setSingle('UNITCAPABILITYID', p.nt ? `Non-Transport-Medical Treatment (${p.level} Equipped)` : `Ground Transport (${p.level} Equipped)`);
+      await wait(60);
+      await setSingle('UNITSLEVELOFCAREID', p.level === 'ALS' ? 'ALS-Paramedic' : 'BLS-Basic /EMT');
+    } catch (e) { alert('ESO Save: could not set the unit\'s level. ' + (e && e.message ? e.message : '')); }
+    endVeil(); quickBusy = false; layoutQuick();
+  }, 700);
+  // a question or a notice in our own overlay: [label, value] buttons; the value goes to the callback
+  function askBox(title, text, buttons, cb) {
+    hideVeil();
+    if (!shadow) return;
+    veil = document.createElement('div');
+    veil.className = 'veil';
+    veil.innerHTML = `<div class="box askbox"><h2>${esc(title)}</h2><div class="why" style="font-size:15px;margin:10px 0 16px">${esc(text)}</div><div class="actions">${buttons.map(([l], i) => `<button class="a${i ? ' sec' : ''}" data-i="${i}">${esc(l)}</button>`).join('')}</div></div>`;
+    veil.querySelectorAll('button').forEach(b => b.addEventListener('click', () => { hideVeil(); if (cb) cb(buttons[Number(b.dataset.i)][1]); }));
     shadow.appendChild(veil);
   }
   function showVeilMessage(title, text) {

@@ -193,6 +193,9 @@
     RESPONSEMODESCHEDULED: { label: 'Response Mode Scheduled', addr: 'incident.response.responseModeScheduledId', list: [[14807, 'No (Unscheduled)'], [14808, 'Yes (Scheduled)']], quick: { 14807: 'No', 14808: 'Yes' } },
     RESPONSEMODESPEED: { label: 'Response Mode Speed', addr: 'incident.response.responseModeSpeedId', list: [[14810, 'Speed-Enhanced per Local Policy'], [14811, 'Speed-Normal Traffic']], quick: { 14811: 'Normal Traffic', 14810: 'Enhanced per Policy' } },
     EMDPERFORMEDID: { label: 'EMD Performed', addr: 'incident.response.emdPerformedID', list: [[6868, 'No'], [6869, 'Yes, With Pre-Arrival Instructions'], [6870, 'Yes, Without Pre-Arrival Instructions'], [10307, 'Yes, Unknown if Pre-Arrival Instructions Given']], quick: { 6869: 'Yes, w/ Instructions', 6870: 'Yes, w/o Instructions', 10307: 'Yes, Unknown', 6868: 'No' } },
+    UNITID: { label: 'Unit', addr: 'incident.response.unitId', list: [[3001, '23'], [3002, '16'], [3003, 'NT02']] },
+    UNITCAPABILITYID: { label: 'Unit Capability', addr: 'incident.response.unitCapabilityID', list: [[14135, 'Ground Transport (ALS Equipped)'], [14136, 'Ground Transport (BLS Equipped)'], [14138, 'Non-Transport-Medical Treatment (ALS Equipped)'], [14139, 'Non-Transport-Medical Treatment (BLS Equipped)']] },
+    UNITSLEVELOFCAREID: { label: "Unit's Level Of Care", addr: 'incident.response.unitsLevelOfCareID', list: [[9686, 'ALS-Paramedic'], [9681, 'BLS-Basic /EMT']] },
     UNITDISPOSITIONITEMID: { label: 'Unit Disposition', addr: 'incident.disposition.unitDispositionItemID', list: [[14402, 'Patient Contact Made'], [14403, 'Canceled on Scene'], [14404, 'Canceled Prior to Arrival at Scene'], [14405, 'No Patient Contact'], [14406, 'No Patient Found']] },
     PATIENTEVALUATIONCAREDISPOSITIONITEMID: { label: 'Patient Evaluation and/or Care Disposition', addr: 'incident.disposition.patientEvaluationCareDispositionItemID', list: [[14410, 'Patient Evaluated and Care Provided'], [14411, 'Patient Evaluated and Refused Care'], [14412, 'Patient Evaluated, No Care Required'], [14413, 'Patient Refused Evaluation and Care']] },
     CREWDISPOSITIONITEMID: { label: 'Crew Disposition', addr: 'incident.disposition.crewDispositionItemID', list: [[14415, 'Initiated and Continued Primary Care'], [14417, 'Provided Care Supporting Primary EMS Crew'], [14420, 'Back in Service, No Care or Support Services Required'], [14421, 'Back in Service, Care or Support Services Refused']] },
@@ -243,7 +246,7 @@
     else { app.ss[ref] = id; app.edit(d.scope || 'incident', d.addr, id, 'singleselect'); }
     ssRender(ref);
   }
-  document.getElementById('response').innerHTML = ['RUNTYPEID', '__MUTUAL__', 'PRIORITYID', 'RESPONSEMODELIGHTSANDSIRENSUSE', 'RESPONSEMODEINTERSECTIONNAVIGATION', 'RESPONSEMODESCHEDULED', 'RESPONSEMODESPEED', 'EMDCOMPLAINTID', 'EMDPERFORMEDID', 'REQUESTEDBYITEMID'].map(r => r === '__MUTUAL__' ? `<div eso-show-hide-slide="" class="eso-hide" style="margin:0;padding:0;overflow:hidden;height:0px;visibility:hidden;position:absolute">${ssHtml('MUTUALAIDID')}</div>` : ssHtml(r)).join('');
+  document.getElementById('response').innerHTML = ['UNITID', 'UNITCAPABILITYID', 'UNITSLEVELOFCAREID', 'RUNTYPEID', '__MUTUAL__', 'PRIORITYID', 'RESPONSEMODELIGHTSANDSIRENSUSE', 'RESPONSEMODEINTERSECTIONNAVIGATION', 'RESPONSEMODESCHEDULED', 'RESPONSEMODESPEED', 'EMDCOMPLAINTID', 'EMDPERFORMEDID', 'REQUESTEDBYITEMID'].map(r => r === '__MUTUAL__' ? `<div eso-show-hide-slide="" class="eso-hide" style="margin:0;padding:0;overflow:hidden;height:0px;visibility:hidden;position:absolute">${ssHtml('MUTUALAIDID')}</div>` : ssHtml(r)).join('');
   document.getElementById('disposition').innerHTML = ['UNITDISPOSITIONITEMID', 'PATIENTEVALUATIONCAREDISPOSITIONITEMID', 'CREWDISPOSITIONITEMID', 'TRANSPORTDISPOSITIONITEMID', 'REFUSALRELEASEITEMIDS', 'TRANSPORTMODEID', 'TRANSPORTMODELIGHTSANDSIRENSUSE', 'TRANSPORTMETHODID', 'LEVELOFSERVICEID'].map(ssHtml).join('');
   // ---- numeric fields, as ESO draws them: display value with a suffix, numpad indicator, and a
   // number shelf (masked input + numpad + OK) when tapped
@@ -398,11 +401,31 @@
       shelfHost.appendChild(sh);
     }));
   }
-  // ---- the CAD import dialog, as ESO's modal service draws a dialog: eso-modal holding an eso-modal-dialog
+  // ---- the CAD import dialog, as ESO's modal service draws it: eso-modal holding an eso-modal-dialog,
+  // a row per CAD record (tap selects), Import once one is selected, then a success alert whose
+  // button refreshes the tab
+  app.cads = [{ cadId: 1, dt: '09/18/2026 @16:21:00', incidentNumber: '260918-024', unit: '23' }, { cadId: 2, dt: '09/18/2026 @12:54:00', incidentNumber: '260918-017', unit: '16' }, { cadId: 3, dt: '09/18/2026 @10:07:00', incidentNumber: '260918-031', unit: 'NT02' }, { cadId: 4, dt: '09/17/2026 @11:53:00', incidentNumber: '260917-099', unit: '23' }];
+  app.cadImports = 0;
   document.getElementById('cadimport').addEventListener('click', () => {
     const m = document.createElement('eso-modal'); m.setAttribute('modal-type', 'modal');
-    m.innerHTML = '<eso-modal-dialog class="modal-grid"><h1>CAD Import - Select an incident</h1><div class="content-container">…</div><div class="button-set"><button class="btn">Cancel</button><button class="btn green-btn">Import</button></div></eso-modal-dialog>';
-    m.querySelectorAll('button').forEach(b => b.addEventListener('click', () => m.remove()));
+    m.innerHTML = `<eso-modal-dialog class="modal-grid"><h1>CAD Import - Select an incident</h1><div class="content-container">
+      <grid-row class="grid-header"><grid-cell>Date & Time</grid-cell><grid-cell>Incident Number</grid-cell><grid-cell>Scene Location</grid-cell><grid-cell>Unit</grid-cell><grid-cell>Patient Name</grid-cell></grid-row>
+      ${app.cads.map(c => `<grid-row data-cad="${c.cadId}"><grid-cell><strong>${c.dt}</strong></grid-cell><grid-cell><strong>${c.incidentNumber}</strong></grid-cell><grid-cell><strong></strong></grid-cell><grid-cell><strong>${c.unit}</strong></grid-cell><grid-cell><strong>- -</strong></grid-cell></grid-row>`).join('')}
+      </div><div class="button-set"><button class="btn cancel">Cancel</button><button class="btn green-btn import" style="display:none">Import</button></div></eso-modal-dialog>`;
+    let sel = null;
+    m.querySelectorAll('grid-row[data-cad]').forEach(r => r.addEventListener('click', () => { m.querySelectorAll('grid-row').forEach(x => x.classList.remove('selected')); r.classList.add('selected'); sel = app.cads.find(c => String(c.cadId) === r.dataset.cad); m.querySelector('.import').style.display = ''; }));
+    m.querySelector('.cancel').addEventListener('click', () => m.remove());
+    m.querySelector('.import').addEventListener('click', () => {
+      if (!sel) return;
+      app.cadImports++;
+      const unitId = (SS.UNITID.list.find(u => u[1] === sel.unit) || [null])[0]; if (unitId) ssSet('UNITID', unitId);
+      app.edit('incident', 'incident.response.incidentNumber', sel.incidentNumber);
+      m.remove();
+      const ok = document.createElement('eso-modal'); ok.setAttribute('modal-type', 'modal');
+      ok.innerHTML = '<eso-modal-dialog><h1>CAD Import Success!</h1><div>Successfully imported CAD data.</div><div class="button-set"><button class="btn green-btn">Refresh with new data</button></div></eso-modal-dialog>';
+      ok.querySelector('button').addEventListener('click', async () => { ok.remove(); await app.flush(); app.openTab('Incident'); }); // like ESO: the import is saved before the refresh
+      document.body.appendChild(ok);
+    });
     document.body.appendChild(m);
   });
   // ---- loaded mileage, the way ESO does it: only with both addresses; a Calculating dialog, then
