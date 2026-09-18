@@ -860,6 +860,12 @@ test('Run Type, Mutual Aid, EMD Complaint and Requested By rows; Mutual Aid only
   assert.ok(new Set(emd.map(c => Math.round(c.rect.top))).size >= 2, 'more than one row');
   const tap = async (g, text) => { await waitFor(async () => (await row(g)).some(b => b.text === text && !/busy/.test(b.cls)), { label: text }); await T.page.evaluate(([gg, t]) => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll(`.quick [data-group=${gg}]`)).find(b => b.textContent === t).click(), [g, text]); };
   const resp = async () => (await T.record(id)).tree.incident?.response || {};
+  // a dialog of ESO's (CAD import) hides every quick button until it closes
+  const allQuick = () => T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick > *').length);
+  await app(() => document.getElementById('cadimport').click());
+  await waitFor(async () => (await allQuick()) === 0, { label: 'nothing while the CAD import dialog is up' });
+  await app(() => document.querySelector('eso-modal button').click());
+  await waitFor(async () => (await row('sr-runtype')).length === 4, { label: 'rows back after Cancel' });
   await tap('sr-runtype', 'Hosp-Hosp'); // no ESO quick-pick for this one: goes through the picker
   await waitFor(async () => (await resp()).runTypeId === 14627, { label: 'run type', timeout: 15000 });
   await tap('sr-runtype', 'Mutual Aid');

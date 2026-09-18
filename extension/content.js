@@ -43,7 +43,7 @@
   const sget = (keys) => new Promise(res => storage.get(keys, (v) => res(v || {})));
   const sset = (obj) => new Promise(res => storage.set(obj, () => res()));
   const sremove = (keys) => new Promise(res => storage.remove(keys, () => res()));
-  const DEFAULT_SETTINGS = { purgeHoursAfterLock: 0, probeSec: 20, heldProbeSec: 8, warmTabs: true, cardCollapsed: false, showTimes: true, sendPrompt: true, unsentList: true, quickHistory: true, quickMeds: true, quickAllergies: true, quickAcuity: true, quickDelays: true, quickTransport: true, quickAssess: true, quickDisposition: true, autoResponse: true, quickIncident: true, quickMechanism: true, quickFacilities: true, quickNarrative: true, quickPatient: true, quickRefusal: true, facilitySending: [], facilityDestination: [] };
+  const DEFAULT_SETTINGS = { purgeHoursAfterLock: 0, probeSec: 20, heldProbeSec: 8, warmTabs: true, cardCollapsed: false, showTimes: true, sendPrompt: true, unsentList: true, quickHistory: true, quickMeds: true, quickAllergies: true, quickAcuity: true, quickDelays: true, quickTransport: true, quickAssess: true, quickDisposition: true, autoResponse: true, quickIncident: true, quickMechanism: true, quickFacilities: true, quickNarrative: true, quickPatient: true, quickRefusal: true, autoMileage: true, facilitySending: [], facilityDestination: [] };
   // The agency's standard facility chips (ids and names from ESO's saved facilities). Every install
   // starts with these; Settings can add or remove per device.
   const FAC = {
@@ -68,7 +68,7 @@
 
   // Settings the crew may change; everything else in Settings is locked (set in the code).
   // Ask the owner whether a new setting is locked or open before adding it (see CLAUDE.md).
-  const OPEN_SETTINGS = ['quickHistory', 'quickMeds', 'quickAllergies', 'quickAcuity', 'quickDelays', 'quickTransport', 'quickAssess', 'quickDisposition', 'autoResponse', 'quickIncident', 'quickMechanism', 'quickFacilities', 'quickNarrative', 'quickPatient', 'quickRefusal', 'facilitySending', 'facilityDestination'];
+  const OPEN_SETTINGS = ['quickHistory', 'quickMeds', 'quickAllergies', 'quickAcuity', 'quickDelays', 'quickTransport', 'quickAssess', 'quickDisposition', 'autoResponse', 'quickIncident', 'quickMechanism', 'quickFacilities', 'quickNarrative', 'quickPatient', 'quickRefusal', 'autoMileage', 'facilitySending', 'facilityDestination'];
   // The open settings follow the ESO login: one row per login in the agency's table, written when
   // the login is first seen and whenever they change something. Only these settings go there;
   // never a run, nor which runs were worked. The key is the project's public one.
@@ -424,6 +424,7 @@
         `<label class="s"><input type="checkbox" id="qnarrative" ${settings.quickNarrative === false ? '' : 'checked'}> Narrative: rows for Primary and Secondary Impression, Provided Care Level, Anatomic Location and the complaint duration units, plus a 0-9 pad for the duration (Narrative tab)</label>` +
         `<label class="s"><input type="checkbox" id="qpatient" ${settings.quickPatient === false ? '' : 'checked'}> Patient: Race row (Asian, Latino) and 0-9 pads for Weight and Height (Patient tab)</label>` +
         `<label class="s"><input type="checkbox" id="qrefusal" ${settings.quickRefusal === false ? '' : 'checked'}> Refusal form: chips for Legal, Decision-Making, Medical, Check All notifications and the four Patient Refusals inside ESO's Patient Refusal Form (Signatures tab)</label>` +
+        `<label class="s"><input type="checkbox" id="qmileage" ${settings.autoMileage === false ? '' : 'checked'}> Loaded mileage: press ESO's Calculate Mileage once the scene and destination both have an address (Incident tab)</label>` +
         facilityPicker('facilitySending', 'Sending facility chips (Scene)') + facilityPicker('facilityDestination', 'Destination facility chips') +
         `<div class="actions"><button class="a" data-act="save-settings">Save</button></div></div>`);
     }
@@ -550,6 +551,7 @@
       settings.quickNarrative = !!panel.querySelector('#qnarrative').checked;
       settings.quickPatient = !!panel.querySelector('#qpatient').checked;
       settings.quickRefusal = !!panel.querySelector('#qrefusal').checked;
+      settings.autoMileage = !!panel.querySelector('#qmileage').checked;
       layoutQuick();
       await sset({ settings }); toPage('settings', settings); settingsOpen = false; renderPanel(); renderTimes();
       pushUser();
@@ -1039,12 +1041,16 @@
   function currentRun() { const s = lastStatus; return s && s.currentRecordId ? s.runs.find(r => r.recordId === s.currentRecordId) : null; }
   function onTab(view) { const s = lastStatus; return s && s.lastView && s.lastView.view === view && s.lastView.recordId === s.currentRecordId; }
   // ESO's pickers slide over the page; while one is open no quick button is shown
-  const shelfOpen = () => Array.from(document.querySelectorAll('shelf-panel')).some(visible);
+  // ESO's dialogs (CAD import, confirmations, the mileage calculation) sit in eso-modal; while
+  // one is up no quick button is shown either. The Patient Refusal Form is a shelf of its own kind
+  // and keeps its chips.
+  const modalOpen = () => Array.from(document.querySelectorAll('eso-modal, eso-modal-dialog')).some(m => visible(m) && !m.querySelector('standard-refusal'));
+  const shelfOpen = () => Array.from(document.querySelectorAll('shelf-panel')).some(visible) || modalOpen();
   // a form ESO shows as a modal that is not a picker (the Patient Refusal Form): open when its
   // title is on screen and no picker sits on top of it
   const formOpen = (re) => {
     const h = Array.from(document.querySelectorAll('standard-refusal h1, jump-link-shelf-panel h1, shelf-panel h1')).find(x => visible(x) && re.test(norm(x.textContent)));
-    return !!h && !Array.from(document.querySelectorAll('shelf-panel')).some(p => visible(p) && !p.contains(h));
+    return !!h && !modalOpen() && !Array.from(document.querySelectorAll('shelf-panel')).some(p => visible(p) && !p.contains(h));
   };
   // the names a multi-select field shows, upper-cased
   const shownParts = (ref) => { const v = fieldValue(ref); return v ? v.split(',').map(x => norm(x).toUpperCase()).filter(Boolean) : []; };
@@ -1880,7 +1886,7 @@
   }
   function watchMileage() {
     const run = currentRun(); const s = lastStatus;
-    if (!run || run.locked || !s || !s.online || !onTab('Incident') || shelfOpen() || quickBusy || autoBusy || mileageBusy || warming) return;
+    if (settings.autoMileage === false || !run || run.locked || !s || !s.online || !onTab('Incident') || shelfOpen() || quickBusy || autoBusy || mileageBusy || warming) return;
     const btn = document.getElementById('calcMileage');
     if (!btn || !visible(btn) || (host && host.contains(btn))) return; // no button: the mileage is already there
     if (document.querySelector('eso-modal-dialog')) return;

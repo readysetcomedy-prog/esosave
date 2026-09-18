@@ -397,6 +397,13 @@
       shelfHost.appendChild(sh);
     }));
   }
+  // ---- the CAD import dialog, as ESO's modal service draws a dialog: eso-modal holding an eso-modal-dialog
+  document.getElementById('cadimport').addEventListener('click', () => {
+    const m = document.createElement('eso-modal'); m.setAttribute('modal-type', 'modal');
+    m.innerHTML = '<eso-modal-dialog class="modal-grid"><h1>CAD Import - Select an incident</h1><div class="content-container">…</div><div class="button-set"><button class="btn">Cancel</button><button class="btn green-btn">Import</button></div></eso-modal-dialog>';
+    m.querySelectorAll('button').forEach(b => b.addEventListener('click', () => m.remove()));
+    document.body.appendChild(m);
+  });
   // ---- loaded mileage, the way ESO does it: only with both addresses; a Calculating dialog, then
   // the three mileage fields are saved and the button goes; otherwise an alert dialog
   app.calcClicks = 0; app.mileage = null;
