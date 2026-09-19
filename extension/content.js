@@ -218,6 +218,7 @@
     .bar.warn, .bar.bad { animation: pulse 1.6s ease-in-out infinite; }
     .copylayer { position: fixed; inset: 0; pointer-events: none; z-index: 2147483640; }
     .quick { position: fixed; inset: 0; pointer-events: none; z-index: 2147483640; font: 13px/1.2 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    .copylayer .sheet, .quick .sheet { position: absolute; inset: 0; pointer-events: none; will-change: transform; }
     .quick .chip { position: fixed; pointer-events: auto; height: 28px; padding: 0 11px; border-radius: 14px; border: 1px solid #94a3b8; background: #fff; color: #1e293b; font: inherit; font-weight: 600; cursor: pointer; white-space: nowrap; box-shadow: 0 1px 2px rgba(0,0,0,.12); }
     .quick .chip:hover { border-color: #15803d; }
     .quick .chip.on { background: #15803d; border-color: #15803d; color: #fff; }
@@ -881,8 +882,13 @@
   // Make a little room in ESO's bar: cap the widest text on the left (the patient name) and shrink
   // the label on the right ("POSITIVE IDENTIFICATION"). Undone the moment there is room again.
   const squeezed = new Map(); // element -> original inline style
+  let squeezedAt = 0; // the bar's width when the neighbours were squeezed
   function squeezeNeighbours(bar, on) {
-    if (!on) { for (const [el, st] of squeezed) el.setAttribute('style', st); squeezed.clear(); return false; }
+    // letting go and squeezing again on every look made the bar flicker (Safari); once squeezed,
+    // the neighbours are let go only when the bar has grown since
+    if (!on) { if (!squeezed.size || (bar && bar.rect.width < squeezedAt + 40)) return false; for (const [el, st] of squeezed) el.setAttribute('style', st); squeezed.clear(); squeezedAt = 0; return false; }
+    if (squeezed.size) return false;
+    squeezedAt = bar.rect.width;
     if (squeezed.size) return false;
     const mid = bar.rect.left + bar.rect.width / 2;
     const leaves = [];
@@ -906,7 +912,7 @@
     // only while the page is actually inside that run (ESO keeps the run id in the address)
     const inRun = run && (location.href.includes(run.recordId) || (run.realId && location.href.includes(run.realId)));
     const bar = settings.showTimes !== false && inRun && !run.locked ? topBarRect() : null;
-    if (!bar) { if (timesEl) { timesEl.remove(); timesEl = null; timesKey = ''; } if (squeezed.size) squeezeNeighbours(null, false); return; }
+    if (!bar) { if (timesEl) { timesEl.remove(); timesEl = null; timesKey = ''; } if (squeezed.size) { for (const [el, st] of squeezed) el.setAttribute('style', st); squeezed.clear(); squeezedAt = 0; } return; }
     if (!timesEl) { timesEl = document.createElement('div'); timesEl.className = 'times'; shadow.appendChild(timesEl); }
     const times = run.times || {};
     const key = TIME_FIELDS.map(([k]) => times[k] || '').join('|');
@@ -992,6 +998,10 @@
       setting: 'quickAllergies', button: /^Add Allergies$/i, title: /^Add Allergies$/i, listKey: 'allergies',
       chips: [['NKDA', 'No known allergies', 518]],
     },
+    transportDueTo: {
+      setting: 'quickDisposition', tab: 'Incident', field: 'TRANSPORTDUETOITEMIDS', title: /^Transport Due To$/i, what: 'Transport Due To',
+      chips: [['Closest Facility', 'Closest Facility', 429], ['Diversion', 'Diversion', 431], ['Family Choice', 'Family Choice', 426], ["Patient's Choice", "Patient's Choice", 425], ['Protocol', 'Protocol', 427]],
+    },
     // Inside ESO's Patient Refusal Form (Signatures tab). The form is not a picker itself, so its
     // chips show while it is open and hide while one of its own pickers is on top. Ids here are
     // the agency's (GUIDs) or ESO's; what is set is read from the field's own display text.
@@ -1059,12 +1069,13 @@
   }
   function ensureQuickLayer() {
     if (quickLayer || !shadow) return quickLayer;
-    quickLayer = document.createElement('div'); quickLayer.className = 'quick'; shadow.appendChild(quickLayer);
+    quickLayer = document.createElement('div'); quickLayer.className = 'quick'; quickLayer.innerHTML = '<div class="sheet"></div>'; shadow.appendChild(quickLayer);
     return quickLayer;
   }
+  const quickSheet = () => ensureQuickLayer().firstElementChild;
   function quickEl(key, make) {
     let el = quickEls.get(key);
-    if (!el) { el = make(); quickEls.set(key, el); ensureQuickLayer().appendChild(el); }
+    if (!el) { el = make(); quickEls.set(key, el); quickSheet().appendChild(el); }
     return el;
   }
   function dropQuick(prefix) {
@@ -1152,7 +1163,7 @@
     const gap = 6, rowH = 34;
     let x = r.left + r.width + 12, y = r.top + (r.height - 28) / 2, row = 0;
     const under = r.bottom;
-    const layer = ensureQuickLayer();
+    const layer = quickSheet();
     const els = [];
     for (const [short, name, id] of [...g.chips, ...(g.noOther ? [] : [['Other…', null, 'other']])]) {
       const chip = quickEl(`${gk}:${id}`, () => {
@@ -1428,7 +1439,7 @@
     const fr0 = firstField ? firstField.getBoundingClientRect() : lr;
     const left = Math.min(pr.left, fr0.left), right = Math.max(pr.right, fr0.right, lr.right - 8);
     let x = left, y = pr.bottom + 8, row = 0;
-    const layer = ensureQuickLayer();
+    const layer = quickSheet();
     for (const fac of chosen) {
       const chip = quickEl(`f:${gk}:${fac.id}`, () => {
         const c = document.createElement('button'); c.type = 'button'; c.className = 'chip' + (fac.id === 'other' ? ' other' : ''); c.textContent = fac.label || fac.name; c.title = fac.name; c.dataset.group = 'fac-' + gk;
@@ -2030,6 +2041,7 @@
     if (copyLayer || !shadow) return copyLayer;
     copyLayer = document.createElement('div');
     copyLayer.className = 'copylayer';
+    copyLayer.innerHTML = '<div class="sheet"></div>';
     shadow.appendChild(copyLayer);
     return copyLayer;
   }
@@ -2063,7 +2075,7 @@
       const nth = seen[time] = (seen[time] || 0);
       seen[time]++;
       let btn = copyButtons.get(el);
-      if (!btn) { btn = makeCopyButton(); copyButtons.set(el, btn); layer.appendChild(btn); }
+      if (!btn) { btn = makeCopyButton(); copyButtons.set(el, btn); layer.firstElementChild.appendChild(btn); }
       keep.add(el);
       btn.dataset.time = time; btn.dataset.nth = String(nth);
       // hidden when something (the entry form, a menu) is drawn over the row
@@ -2097,15 +2109,29 @@
   function endVeil() { clearTimeout(lateVeilTimer); lateVeilTimer = null; hideVeil(); }
   // ---- before a lock: the paperwork question. ESO's "Lock Record" button (in its validation
   // dialog) is caught on the way down; Yes lets the same press through, No leaves the run open.
+  // A press on one of ESO's buttons is caught before ESO sees it: the click on a desktop, and
+  // the touch itself on an iPad, where ESO acts on touchend and never sees a click. Once approved,
+  // the same button is clicked for the crew and let through.
+  let tapEndAt = 0; // one gesture ends with touchend/pointerup and then a click: act on the first, not both
+  function guardTap(match, onTap) {
+    for (const type of ['touchstart', 'touchend', 'pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click']) {
+      document.addEventListener(type, (e) => {
+        const btn = e.target && e.target.closest ? e.target.closest('button, a') : null;
+        if (!btn || (host && host.contains(btn))) return;
+        const m = match(btn, e); if (!m) return;
+        if (m === 'through') return;
+        e.preventDefault(); e.stopImmediatePropagation(); e.stopPropagation();
+        if (type === 'touchend' || type === 'pointerup') { tapEndAt = Date.now(); onTap(btn, m); }
+        else if (type === 'click' && Date.now() - tapEndAt > 600) onTap(btn, m);
+      }, { capture: true, passive: false });
+    }
+  }
   let lockApproved = false;
-  document.addEventListener('click', (e) => {
-    const btn = e.target && e.target.closest ? e.target.closest('button, a') : null;
-    if (!btn || (host && host.contains(btn)) || !/^Lock Record$/i.test(norm(btn.textContent))) return;
-    if (settings.askBeforeLock === false) return;
-    if (lockApproved) { lockApproved = false; return; }
-    e.preventDefault(); e.stopImmediatePropagation(); e.stopPropagation();
-    askBeforeLock(btn);
-  }, true);
+  guardTap((btn) => {
+    if (!/^Lock Record$/i.test(norm(btn.textContent)) || settings.askBeforeLock === false) return null;
+    if (lockApproved) { lockApproved = false; return 'through'; }
+    return 'ask';
+  }, (btn) => askBeforeLock(btn));
   function askBeforeLock(btn) {
     hideVeil();
     if (!shadow) return;
@@ -2121,19 +2147,16 @@
   // on the way down. The chosen incident is looked up in the agency's call log; only a run whose
   // crew (by the agency's users) includes this ESO login goes through.
   let cadApproved = false;
-  document.addEventListener('click', (e) => {
-    const btn = e.target && e.target.closest ? e.target.closest('button') : null;
-    if (!btn || (host && host.contains(btn)) || !/^Import$/i.test(norm(btn.textContent))) return;
+  guardTap((btn) => {
+    if (!/^Import$/i.test(norm(btn.textContent)) || settings.cadGate === false) return null;
     const dlg = btn.closest('eso-modal-dialog');
-    if (!dlg || !/CAD Import/i.test(norm(dlg.textContent))) return;
-    if (settings.cadGate === false) return;
-    if (cadApproved) { cadApproved = false; return; }
+    if (!dlg || !/CAD Import/i.test(norm(dlg.textContent))) return null;
+    if (cadApproved) { cadApproved = false; return 'through'; }
     const row = dlg.querySelector('grid-row.selected');
     const cells = row ? Array.from(row.querySelectorAll('grid-cell')).map(c => norm(c.textContent)) : [];
-    if (!row || cells.length < 4) return; // nothing chosen: ESO's own behaviour
-    e.preventDefault(); e.stopImmediatePropagation(); e.stopPropagation();
-    gateCad(btn, cells[1]);
-  }, true);
+    if (!row || cells.length < 4) return null; // nothing chosen: ESO's own behaviour
+    return cells[1];
+  }, (btn, incident) => gateCad(btn, incident));
   const agencyGet = async (path) => {
     const r = await fetch(`${AGENCY_DB.url}/${path}`, { headers: { apikey: AGENCY_DB.key, Authorization: 'Bearer ' + AGENCY_DB.key } });
     if (!r.ok) throw new Error('table ' + r.status);
@@ -2279,7 +2302,30 @@
   const rowObserver = new MutationObserver(() => scheduleRows(150));
   const startRowObserver = () => { if (document.body) rowObserver.observe(document.body, { childList: true, subtree: true, characterData: true }); };
   if (document.body) startRowObserver(); else document.addEventListener('DOMContentLoaded', startRowObserver);
-  addEventListener('scroll', () => { scheduleRows(30); layoutQuick(); }, { capture: true, passive: true });
+  // While the page scrolls, the layers slide with it by exactly the scrolled distance, one
+  // transform per frame (Safari delivers scroll events unevenly; laying everything out on each
+  // one made the buttons bounce). A full layout follows once the scrolling settles.
+  let scroller = null, scrollBase = null, scrollUntil = 0, scrollRaf = 0;
+  const scrollPos = (el) => el === document || el === document.documentElement || el === document.body ? { x: scrollX, y: scrollY } : { x: el.scrollLeft, y: el.scrollTop };
+  function slideLayers() {
+    const sheets = [quickLayer, copyLayer].map(l => l && l.firstElementChild).filter(Boolean);
+    if (scroller && scrollBase) {
+      const p = scrollPos(scroller);
+      const t = `translate(${Math.round(scrollBase.x - p.x)}px, ${Math.round(scrollBase.y - p.y)}px)`;
+      for (const s of sheets) if (s.style.transform !== t) s.style.transform = t;
+    }
+    if (Date.now() < scrollUntil) { scrollRaf = requestAnimationFrame(slideLayers); return; }
+    scrollRaf = 0; scroller = null; scrollBase = null;
+    for (const s of sheets) s.style.transform = '';
+    decorateVitalRows(); layoutQuick();
+  }
+  addEventListener('scroll', (e) => {
+    const el = e.target && e.target.nodeType === 9 ? document : e.target;
+    if (!el || (host && host.contains(el))) return;
+    if (scroller !== el) { for (const s of [quickLayer, copyLayer].map(l => l && l.firstElementChild).filter(Boolean)) s.style.transform = ''; decorateVitalRows(); layoutQuick(); scroller = el; scrollBase = scrollPos(el); }
+    scrollUntil = Date.now() + 160;
+    if (!scrollRaf) scrollRaf = requestAnimationFrame(slideLayers);
+  }, { capture: true, passive: true });
   document.addEventListener('pointerdown', (e) => {
     if (!copyButtons.size || (host && e.composedPath().includes(host))) return;
     const t = e.target && e.target.closest ? e.target.closest('a, button, [role="tab"], li') : null;

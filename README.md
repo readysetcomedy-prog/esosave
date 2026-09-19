@@ -53,7 +53,9 @@ to bad signal or a hung page.
   device from the last bundle seen, and Settings shows the type beside each chip. On the Assessments tab, "All normal" on each assessment opens ESO's own Quick Ax,
   presses No Abnormalities on every category still unset and presses OK; "A&Ox4" opens Mental Status
   and presses Alert and Oriented x4. On the Incident tab, Transported ALS / BLS, Refusal, Canceled
-  (Prior) and Canceled (Scene) set the whole disposition set through ESO's pickers, then outline
+  (Prior) and Canceled (Scene) set the whole disposition set through ESO's pickers (Closest
+  Facility, Diversion, Family Choice, Patient's Choice and Protocol chips sit under Transport Due
+  To), then outline
   Transport Mode or Reason for Refusal in red until answered; choosing Emergent or Non-Emergent for
   the response or transport mode fills the lights/sirens, intersection, scheduled, speed and method
   fields still empty and sets EMD Performed to No. Rows for Run Type, Mutual Aid, EMD Complaint

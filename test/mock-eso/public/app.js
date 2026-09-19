@@ -209,6 +209,7 @@
     CREWDISPOSITIONITEMID: { label: 'Crew Disposition', addr: 'incident.disposition.crewDispositionItemID', list: [[14415, 'Initiated and Continued Primary Care'], [14417, 'Provided Care Supporting Primary EMS Crew'], [14420, 'Back in Service, No Care or Support Services Required'], [14421, 'Back in Service, Care or Support Services Refused']] },
     TRANSPORTDISPOSITIONITEMID: { label: 'Transport Disposition', addr: 'incident.disposition.transportDispositionItemID', list: [[14435, 'Transport by This EMS Unit (This Crew Only)'], [14436, 'Transport by This EMS Unit, with a Member of Another Crew'], [14439, 'Patient Refused Transport'], [14441, 'No Transport']] },
     REFUSALRELEASEITEMIDS: { label: 'Reason for Refusal or Release', addr: 'incident.disposition.refusalReleaseItemIDs', multi: true, list: [[14443, 'Against Medical Advice'], [14444, 'Patient/Guardian Indicates Ambulance Transport is Not Necessary'], [14445, 'Released Following Protocol Guidelines']] },
+    TRANSPORTDUETOITEMIDS: { label: 'Transport Due To', addr: 'incident.disposition.transportDueToItemIDs', multi: true, list: [[429, 'Closest Facility'], [431, 'Diversion'], [426, 'Family Choice'], [9365, 'Insurance'], [9366, 'Law Enforcement'], [9367, 'On-Line/On-Scene Medical Direction'], [432, 'Other'], [425, "Patient's Choice"], [430, "Patient's Physician's Choice"], [427, 'Protocol'], [9368, 'Regional Specialty Center']] },
     TRANSPORTMODEID: { label: 'Transport Mode', addr: 'incident.disposition.transportModeID', list: [[11850, 'Emergent (Immediate Response)'], [11851, 'Emergent Downgraded to Non-Emergent'], [11852, 'Non-Emergent'], [11853, 'Non-Emergent Upgraded to Emergent']] },
     TRANSPORTMODELIGHTSANDSIRENSUSE: { label: 'Transport Mode Lights & Sirens Use', addr: 'incident.disposition.transportModeLightsAndSirensUseId', list: [[14813, 'Lights and Sirens'], [14814, 'Lights and No Sirens'], [14815, 'No Lights or Sirens']], quick: { 14813: 'Lights & Sirens', 14815: 'No Lights or Sirens', 14814: 'Lights and No Sirens' } },
     TRANSPORTMETHODID: { label: 'Transport Method', addr: 'incident.disposition.transportMethodID', list: [[10353, 'Ground-Ambulance'], [10352, 'Air Medical-Rotor Craft'], [10355, 'Ground-Bariatric']], quick: { 10353: 'Ambulance', 10352: 'Rotor Craft', 10355: 'Bariatric' } },
@@ -250,12 +251,12 @@
   }
   function ssSet(ref, id) {
     const d = SS[ref];
-    if (d.multi) { app.ss[ref] = (app.ss[ref] || []).concat([id]); app.addScalar(d.scope || 'incident', `${d.addr}.['${id}']`, id); }
+    if (d.multi) { if ((app.ss[ref] || []).includes(id)) return; app.ss[ref] = (app.ss[ref] || []).concat([id]); app.addScalar(d.scope || 'incident', `${d.addr}.['${id}']`, id); }
     else { app.ss[ref] = id; app.edit(d.scope || 'incident', d.addr, id, 'singleselect'); }
     ssRender(ref);
   }
   document.getElementById('response').innerHTML = ['UNITID', 'UNITCAPABILITYID', 'UNITSLEVELOFCAREID', 'RUNTYPEID', '__MUTUAL__', 'PRIORITYID', 'RESPONSEMODELIGHTSANDSIRENSUSE', 'RESPONSEMODEINTERSECTIONNAVIGATION', 'RESPONSEMODESCHEDULED', 'RESPONSEMODESPEED', 'EMDCOMPLAINTID', 'EMDPERFORMEDID', 'REQUESTEDBYITEMID'].map(r => r === '__MUTUAL__' ? `<div eso-show-hide-slide="" class="eso-hide" style="margin:0;padding:0;overflow:hidden;height:0px;visibility:hidden;position:absolute">${ssHtml('MUTUALAIDID')}</div>` : ssHtml(r)).join('');
-  document.getElementById('disposition').innerHTML = ['UNITDISPOSITIONITEMID', 'PATIENTEVALUATIONCAREDISPOSITIONITEMID', 'CREWDISPOSITIONITEMID', 'TRANSPORTDISPOSITIONITEMID', 'REFUSALRELEASEITEMIDS', 'TRANSPORTMODEID', 'TRANSPORTMODELIGHTSANDSIRENSUSE', 'TRANSPORTMETHODID', 'LEVELOFSERVICEID'].map(ssHtml).join('');
+  document.getElementById('disposition').innerHTML = ['UNITDISPOSITIONITEMID', 'PATIENTEVALUATIONCAREDISPOSITIONITEMID', 'CREWDISPOSITIONITEMID', 'TRANSPORTDISPOSITIONITEMID', 'REFUSALRELEASEITEMIDS', 'TRANSPORTMODEID', 'TRANSPORTMODELIGHTSANDSIRENSUSE', 'TRANSPORTMETHODID', 'TRANSPORTDUETOITEMIDS', 'LEVELOFSERVICEID'].map(ssHtml).join('');
   // ---- numeric fields, as ESO draws them: display value with a suffix, numpad indicator, and a
   // number shelf (masked input + numpad + OK) when tapped
   const NUM = {
@@ -335,7 +336,10 @@
     f.querySelector('.shelf-click-indicator').addEventListener('click', () => {
       if (f.hasAttribute('disabled')) return;
       const d = SS[ref];
-      openShelf({ title: d.label, items: d.list, multi: !!d.multi, checked: d.multi ? (app.ss[ref] || []) : [], onPick: (id) => ssSet(ref, id), onOk: (ids) => { for (const id of ids) if (!(app.ss[ref] || []).includes(id)) ssSet(ref, id); } });
+      openShelf({ title: d.label, items: d.list, multi: !!d.multi, checked: d.multi ? (app.ss[ref] || []) : [], onPick: (id) => ssSet(ref, id), onOk: (ids) => {
+        for (const id of ids) if (!(app.ss[ref] || []).includes(id)) ssSet(ref, id);
+        for (const id of (app.ss[ref] || []).slice()) if (!ids.includes(id)) { app.ss[ref] = app.ss[ref].filter(x => x !== id); app.del(d.scope || 'incident', `${d.addr}.['${id}']`, 'multiselect'); ssRender(ref); }
+      } });
     });
     ssRender(ref);
   }

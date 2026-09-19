@@ -886,7 +886,7 @@ test('Run Type, Mutual Aid, EMD Complaint and Requested By rows; Mutual Aid only
   const tap = async (g, text) => { await waitFor(async () => (await row(g)).some(b => b.text === text && !/busy/.test(b.cls)), { label: text }); await T.page.evaluate(([gg, t]) => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll(`.quick [data-group=${gg}]`)).find(b => b.textContent === t).click(), [g, text]); };
   const resp = async () => (await T.record(id)).tree.incident?.response || {};
   // a dialog of ESO's (CAD import) hides every quick button until it closes
-  const allQuick = () => T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick > *').length);
+  const allQuick = () => T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .sheet > *').length);
   await app(() => document.getElementById('cadimport').click());
   await waitFor(async () => (await allQuick()) === 0, { label: 'nothing while the CAD import dialog is up' });
   await app(() => document.querySelector('eso-modal button').click());
@@ -1362,4 +1362,34 @@ test('the agency settings: locked for everyone, changed only by the agency owner
   assert.equal(await T.page.evaluate(() => !!document.getElementById('esosave-host').shadowRoot.querySelector('.veil .lockask')), false);
   await fetch(T.base + '/__db_set', { method: 'POST', body: JSON.stringify({ name: '__agency__', settings: {} }) });
   await T.setStorage({ settings: { ...(await T.storage()).settings, purgeHoursAfterLock: 0, askBeforeLock: true } });
+});
+
+test('Transport Due To chips (Incident): tick through ESO\'s list, a second tap unticks', async () => {
+  const id = await freshRun();
+  await app(() => window.app.openTab('Incident'));
+  const chips = () => T.page.evaluate(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .chip[data-group=transportDueTo]')).map(c => ({ text: c.textContent, cls: c.className })));
+  await waitFor(async () => (await chips()).length === 6, { label: 'five chips and Other…' });
+  assert.deepEqual((await chips()).map(c => c.text), ['Closest Facility', 'Diversion', 'Family Choice', "Patient's Choice", 'Protocol', 'Other…']);
+  const tap = async (t) => { await waitFor(async () => (await chips()).some(c => c.text === t && !/busy/.test(c.cls)), { label: t }); await T.page.evaluate((tt) => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .chip[data-group=transportDueTo]')).find(c => c.textContent === tt).click(), t); };
+  const due = async () => ((await T.record(id)).tree.incident?.disposition?.transportDueToItemIDs || []).map(Number).sort();
+  await tap('Closest Facility'); await tap('Protocol');
+  await waitFor(async () => (await due()).join() === '427,429', { label: 'both in', timeout: 15000 });
+  await waitFor(async () => (await chips()).filter(c => /added/.test(c.cls)).length === 2, { label: 'shown as set' });
+  await tap('Protocol');
+  await waitFor(async () => (await due()).join() === '429', { label: 'Protocol out again', timeout: 15000 });
+  assert.equal(await app(() => document.querySelectorAll('shelf-panel').length), 0);
+});
+
+test('on a touch screen the lock question and the CAD gate catch the tap itself, the way ESO acts on it', async () => {
+  const id = await freshRun();
+  // ESO on an iPad acts on touchend and never sees a click: a touch on Lock Record must not lock
+  const touch = (sel) => app((s) => { const el = document.querySelector(s); for (const t of ['touchstart', 'touchend']) el.dispatchEvent(new Event(t, { bubbles: true, cancelable: true })); }, sel);
+  await app(() => { document.getElementById('lockrecord').addEventListener('touchend', (e) => { if (!e.defaultPrevented) { window.app.lockClicks++; window.app.lock(); } }); });
+  await touch('#lockrecord');
+  await waitFor(() => T.page.evaluate(() => /attached the proper paperwork/.test((document.getElementById('esosave-host').shadowRoot.querySelector('.veil .lockask') || {}).textContent || '')), { label: 'the question' });
+  await sleep(500);
+  assert.equal(await app(() => window.app.lockClicks), 0, 'ESO never got the touch');
+  assert.equal((await T.record(id)).state, 'draft');
+  await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('[data-act=lock-yes]').click());
+  await waitFor(async () => (await T.record(id)).state === 'locked', { label: 'Yes locks it', timeout: 15000 });
 });
