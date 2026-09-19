@@ -1258,7 +1258,7 @@ test('settings follow the ESO login: a row per login in the agency table; locked
   await T.control({ userName: 'TEST, MEDIC', userId: 'person-1' });
 });
 
-test('CAD import: only a run the call log shows you on may be imported; then the unit capability and level of care follow the ambulance', async () => {
+test('CAD import: only a run the call log shows you on may be imported', async () => {
   const seed = (table, rows) => fetch(T.base + '/__db_seed', { method: 'POST', body: JSON.stringify({ table, rows }) });
   await seed('users', [{ username: 'thocq', first_name: 'Trent', last_name: 'Hocq' }, { username: 'efear', first_name: 'Emma', last_name: 'Fear' }, { username: 'tmedic', first_name: 'Medic', last_name: 'Test' }, { username: 'cberg', first_name: 'Chad', last_name: 'Berg' }]);
   await seed('call_log_entries', [
@@ -1266,7 +1266,6 @@ test('CAD import: only a run the call log shows you on may be imported; then the
     { runnumber: '260918-017', callsign: 'RM-16', crewmemberone: 'tmedic', crewmembertwo: 'cberg', crewmemberthree: '', cmslevel: 'BLS-E', createdat: '2026-09-18T12:54:00Z' },
     { runnumber: '260918-031', callsign: 'QRV-2', crewmemberone: 'cberg', crewmembertwo: 'tmedic', crewmemberthree: '', cmslevel: 'ALS-NE', createdat: '2026-09-18T10:07:00Z' },
   ]);
-  await seed('ambulances', [{ number: 'RM-23', level: 'ALS' }, { number: 'RM-16', level: 'BLS' }]); // no row for the QRV: its level comes from the call
   const id = await freshRun();
   await app(() => window.app.openTab('Incident'));
   const box = () => T.page.evaluate(() => { const b = document.getElementById('esosave-host').shadowRoot.querySelector('.veil .askbox'); return b ? b.textContent : null; });
@@ -1279,7 +1278,7 @@ test('CAD import: only a run the call log shows you on may be imported; then the
   assert.equal(await app(() => window.app.cadImports), 0, 'ESO never saw the press');
   assert.equal(await app(() => !!document.querySelector('eso-modal .import')), true, 'the CAD dialog is still there to choose another');
   await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.askbox button').click());
-  // a run the login is on: goes through; after the refresh the unit fields follow RM-16 (BLS)
+  // a run the login is on: goes through; the unit fields follow the crew's ESO certifications (TEST, MEDIC is an EMT-Basic: BLS)
   await pick('260918-017');
   await waitFor(async () => (await app(() => window.app.cadImports)) === 1, { label: 'imported (BLS run)', timeout: 15000 });
   await waitFor(() => app(() => /CAD Import Success/.test(document.body.textContent)), { label: 'ESO success alert' });
@@ -1287,7 +1286,7 @@ test('CAD import: only a run the call log shows you on may be imported; then the
   const resp = async () => (await T.record(id)).tree.incident?.response || {};
   await waitFor(async () => (await resp()).unitCapabilityID === 14136 && (await resp()).unitsLevelOfCareID === 9681, { label: 'Ground Transport (BLS Equipped) and BLS-Basic /EMT', timeout: 20000 });
   assert.equal(await app(() => document.querySelectorAll('shelf-panel, eso-modal').length), 0);
-  // a non-transport unit (NT02 in ESO, QRV-2 in the call log, no ambulance row): the call's CMS level ALS-NE gives Non-Transport-Medical Treatment (ALS Equipped), ALS-Paramedic
+  // a non-transport unit (NT02 in ESO): Non-Transport-Medical Treatment (BLS Equipped) for this EMT-Basic crew
   const id2 = await freshRun();
   await app(() => window.app.openTab('Incident'));
   await app(() => document.getElementById('cadimport').click());
@@ -1296,7 +1295,7 @@ test('CAD import: only a run the call log shows you on may be imported; then the
   await waitFor(async () => (await app(() => window.app.cadImports)) === 1, { label: 'imported (NT run)', timeout: 15000 }); // a fresh page: its own count
   await waitFor(() => app(() => /CAD Import Success/.test(document.body.textContent)), { label: 'ESO success alert' });
   await app(() => document.querySelector('eso-modal button').click());
-  await waitFor(async () => { const r = (await T.record(id2)).tree.incident?.response || {}; return r.unitCapabilityID === 14138 && r.unitsLevelOfCareID === 9686; }, { label: 'non-transport ALS', timeout: 20000 });
+  await waitFor(async () => { const r = (await T.record(id2)).tree.incident?.response || {}; return r.unitCapabilityID === 14139 && r.unitsLevelOfCareID === 9681; }, { label: 'non-transport BLS', timeout: 20000 });
   // a run the call log does not have: asked, and Import anyway goes through
   const id3 = await freshRun();
   await app(() => window.app.openTab('Incident'));
@@ -1308,7 +1307,24 @@ test('CAD import: only a run the call log shows you on may be imported; then the
   await T.page.evaluate(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.askbox button')).find(b => /Import anyway/.test(b.textContent)).click());
   await waitFor(async () => (await app(() => window.app.cadImports)) === 1, { label: 'imported anyway', timeout: 15000 });
   await app(() => document.querySelector('eso-modal button').click());
-  await waitFor(async () => { const r = (await T.record(id3)).tree.incident?.response || {}; return r.unitCapabilityID === 14135; }, { label: 'RM-23 is ALS: Ground Transport (ALS Equipped)', timeout: 20000 });
+  await waitFor(async () => { const r = (await T.record(id3)).tree.incident?.response || {}; return r.unitCapabilityID === 14136; }, { label: 'unit 23 with an EMT-Basic crew: Ground Transport (BLS Equipped)', timeout: 20000 });
+});
+
+test('the unit\'s level follows the crew\'s ESO certifications: an EMT-Basic crew is BLS; a paramedic on the crew makes it ALS; an NT unit is non-transport', async () => {
+  const id = await freshRun();
+  await app(() => window.app.openTab('Incident'));
+  const resp = async () => (await T.record(id)).tree.incident?.response || {};
+  // TEST, MEDIC holds EMT-Basic: BLS, ground (no unit chosen yet)
+  await waitFor(async () => (await resp()).unitCapabilityID === 14136 && (await resp()).unitsLevelOfCareID === 9681, { label: 'BLS from the crew', timeout: 20000 });
+  // a paramedic joins the crew: ALS, whatever they run it as
+  await T.shape(id, { crew: [{ personnelId: 'person-1', certification: 'cred-b1' }, { personnelId: 'person-2', certification: 'cred-p2' }] });
+  await app((rid) => window.app.use(rid), id);
+  await waitFor(async () => (await resp()).unitCapabilityID === 14135 && (await resp()).unitsLevelOfCareID === 9686, { label: 'ALS once a paramedic is on', timeout: 20000 });
+  // the unit becomes an NT unit: non-transport, still ALS
+  await waitFor(() => T.page.evaluate(() => !document.getElementById('esosave-host').shadowRoot.querySelector('.veil')), { label: 'settled' });
+  await app(() => window.app.ssSetForTest('UNITID', 3003));
+  await waitFor(async () => (await resp()).unitCapabilityID === 14138 && (await resp()).unitsLevelOfCareID === 9686, { label: 'non-transport ALS', timeout: 20000 });
+  assert.equal(await app(() => document.querySelectorAll('shelf-panel').length), 0);
 });
 
 test('the agency settings: locked for everyone, changed only by the agency owner\'s ESO login, and they reach every tablet', async () => {

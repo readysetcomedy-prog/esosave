@@ -27,7 +27,7 @@
   if (ext) return;
   if (window.__esosave) return;
 
-  const VERSION = '0.12.2';
+  const VERSION = '0.13.0';
   const API_PREFIX_RE = /^\/ehr\/api\/+/i;
   const FAKE_OK_TEXT = '{"result":"Success","data":[]}';
   const PROBE_PATH = '/ehr/api/thirdpartydata/partners';
@@ -772,6 +772,8 @@
       items: vals('UDL.LOCATIONS').filter(x => x && x.itemId && x.itemName).map(x => ({ id: x.itemId, name: x.itemName, typeId: x.locationTypeId || null, city: x.city || null })),
       locationTypes: vals('SL.LOCATIONTYPE').map(x => ({ id: x.itemId, name: x.itemName })),
       destinationTypes: vals('SL.DESTINATIONTYPE').map(x => ({ id: x.itemId, name: x.itemName, locationTypeId: x.parentItemId || null })),
+      // the agency's people and their credentials (a run's crew entry names one by personCredentialID)
+      crew: vals('UDL.CREW').filter(x => x && x.itemId).map(x => ({ id: x.itemId, creds: (Array.isArray(x.credentials) ? x.credentials : []).map(c => ({ id: c.personCredentialID || c.credentialId || null, name: c.credentialName || '' })) })),
     };
     post('facilities', S.facilities);
   }
@@ -1294,6 +1296,7 @@
       restoredFrom: run.restoredFrom, counts, pages, log: run.log.slice(-60), times: run.times || null,
       sends: (run.sends || []).map(x => ({ kind: x.kind, status: x.status, destinationName: x.destinationName, ts: x.ts })), emailedAt: run.emailedAt || null,
       lists: run.lists || null, owner: run.owner || null, crewIds: (run.crew || []).map(c => c && c.personnelId).filter(Boolean),
+      crewCerts: (run.crew || []).filter(c => c && c.personnelId).map(c => ({ id: c.personnelId, cert: c.certification || null })),
       hasViews: Object.keys(run.views).length, hasCrew: !!(run.crew && run.crew.length),
     };
   }

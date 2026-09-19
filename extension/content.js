@@ -84,7 +84,7 @@
   const AGENCY_ROW = '__agency__';
   const ADMIN = { name: 'GASTON, MICHAEL', id: 'd4e45fac-ee36-4ac8-bf9a-3fb3e265c0d0' };
   const isAdmin = () => (user && user.toUpperCase() === ADMIN.name) || (userId && userId === ADMIN.id);
-  // the agency's tables (the RuralMed site): the call log, its users and its ambulances
+  // the agency's tables (the RuralMed site): the call log and its users
   const AGENCY_DB = ON_ESO ? { url: 'https://qkprkwydxbtybaxylhln.supabase.co/rest/v1', key: SYNC.key } : { url: location.origin + '/__db', key: 'test-anon' };
   async function loadAll() {
     const all = await sget(null);
@@ -156,7 +156,7 @@
       onVitalCopied(payload);
     } else if (type === 'facilities' && payload && Array.isArray(payload.items)) {
       facilities = payload;
-      facilityTypes = { locationTypes: payload.locationTypes || [], destinationTypes: payload.destinationTypes || [] };
+      facilityTypes = { locationTypes: payload.locationTypes || [], destinationTypes: payload.destinationTypes || [], crew: payload.crew || [] };
       await sset({ facilityTypes });
       if (panelOpen && settingsOpen) renderPanel(); layoutQuick();
     } else if (type === 'event' && payload && payload.name === 'sendPrompt') {
@@ -417,7 +417,7 @@
         `<label class="s${lk}"><input type="checkbox" id="sendprompt" ${settings.sendPrompt === false ? '' : 'checked'} ${dis}> When a run is locked, offer to fax or email it to the destination if it has not been sent yet</label>` +
         `<label class="s${lk}"><input type="checkbox" id="unsentlist" ${settings.unsentList === false ? '' : 'checked'} ${dis}> Keep a list of locked runs from the last 15 days that have a fax or email destination but were never sent</label>` +
         `<label class="s${lk}"><input type="checkbox" id="asklock" ${settings.askBeforeLock === false ? '' : 'checked'} ${dis}> Before a lock, ask whether the proper paperwork is attached (or not required); No leaves the run open</label>` +
-        `<label class="s${lk}"><input type="checkbox" id="cadgate" ${settings.cadGate === false ? '' : 'checked'} ${dis}> CAD import: only a run the call log shows you on may be imported; then the unit's capability and level of care are set from the ambulance's level</label>` +
+        `<label class="s${lk}"><input type="checkbox" id="cadgate" ${settings.cadGate === false ? '' : 'checked'} ${dis}> CAD import: only a run the call log shows you on may be imported. Unit Capability and Unit's Level of Care follow the crew's ESO certifications (a paramedic on the crew makes it ALS; a unit named NT… is non-transport)</label>` +
         `<div class="s" style="margin-top:8px;font-weight:700">Quick buttons${user ? ` <span class="muted" style="font-weight:400">· yours, ${esc(user)}: they follow your ESO login to any tablet</span>` : ''}</div>` +
         `<label class="s"><input type="checkbox" id="qdelays" ${settings.quickDelays === false ? '' : 'checked'}> Delays: one "All: None/No Delay" button above the delay fields (Incident tab) that presses ESO's own None button on every delay still empty</label>` +
         `<label class="s"><input type="checkbox" id="qhistory" ${settings.quickHistory === false ? '' : 'checked'}> History: one-tap chips for common conditions under Add History (Patient tab)</label>` +
@@ -2119,11 +2119,8 @@
   }
   // ---- CAD import: the Import press in ESO's "CAD Import - Select an incident" dialog is caught
   // on the way down. The chosen incident is looked up in the agency's call log; only a run whose
-  // crew (by the agency's users) includes this ESO login goes through. After the import, the
-  // unit's capability and level of care are set from the ambulance's level (RM-<unit>; a unit
-  // named NT… is non-transport).
+  // crew (by the agency's users) includes this ESO login goes through.
   let cadApproved = false;
-  let pendingUnit = null; // { unit, level, nt, at }
   document.addEventListener('click', (e) => {
     const btn = e.target && e.target.closest ? e.target.closest('button') : null;
     if (!btn || (host && host.contains(btn)) || !/^Import$/i.test(norm(btn.textContent))) return;
@@ -2135,7 +2132,7 @@
     const cells = row ? Array.from(row.querySelectorAll('grid-cell')).map(c => norm(c.textContent)) : [];
     if (!row || cells.length < 4) return; // nothing chosen: ESO's own behaviour
     e.preventDefault(); e.stopImmediatePropagation(); e.stopPropagation();
-    gateCad(btn, cells[1], cells[3]);
+    gateCad(btn, cells[1]);
   }, true);
   const agencyGet = async (path) => {
     const r = await fetch(`${AGENCY_DB.url}/${path}`, { headers: { apikey: AGENCY_DB.key, Authorization: 'Bearer ' + AGENCY_DB.key } });
@@ -2148,11 +2145,11 @@
     const ul = nameKey(u.last_name), uf = nameKey(u.first_name);
     return !!last && ul === last && (!first || !uf || uf === first || uf.startsWith(first) || first.startsWith(uf));
   }
-  async function gateCad(btn, incident, unit) {
+  async function gateCad(btn, incident) {
     lateVeil('Checking the call log…', incident);
-    let calls = null, level = null, users = [];
+    let calls = null, users = [];
     try {
-      calls = await agencyGet(`call_log_entries?runnumber=eq.${encodeURIComponent(incident)}&select=runnumber,callsign,crewmemberone,crewmembertwo,crewmemberthree,cmslevel&order=createdat.desc&limit=5`);
+      calls = await agencyGet(`call_log_entries?runnumber=eq.${encodeURIComponent(incident)}&select=runnumber,callsign,crewmemberone,crewmembertwo,crewmemberthree&order=createdat.desc&limit=5`);
     } catch (e) { calls = null; } // the call log is out of reach: nothing to check against
     const call = Array.isArray(calls) ? calls.find(c => c.crewmemberone || c.crewmembertwo || c.crewmemberthree) || calls[0] : null;
     if (call) {
@@ -2168,36 +2165,44 @@
       const go = await new Promise(res => askBox('Not in the call log', `Run ${incident} is not in the call log yet, so the crew cannot be checked. Import it anyway?`, [['Import anyway', true], ['Cancel', false]], res));
       if (!go) return;
     }
-    // the unit's level: the ambulance (RM-<unit>; an NT unit is a QRV in the agency's tables,
-    // which usually has no ambulance row), else the call's CMS level (ALS-… / BLS-…)
-    try {
-      const nt = /^NT/i.test(unit);
-      const n = unit.replace(/^NT/i, '').replace(/^0+(?=\d)/, '');
-      const numbers = nt ? [`QRV-${n}`, `QRV${n}`, `RM-QRV${n}`, `RM-${unit}`, unit] : [`RM-${unit}`, unit];
-      const amb = await agencyGet(`ambulances?number=in.(${numbers.map(encodeURIComponent).join(',')})&select=number,level`);
-      const hit = numbers.map(n => amb.find(a => a.number === n)).find(Boolean);
-      level = hit && /^(ALS|BLS)/i.test(hit.level || '') ? hit.level.toUpperCase().slice(0, 3) : null;
-      if (!level && call && /^(ALS|BLS)/i.test(call.cmslevel || '')) level = call.cmslevel.toUpperCase().slice(0, 3);
-      pendingUnit = level ? { unit, level, nt, at: Date.now() } : null;
-    } catch (e) { pendingUnit = null; }
     endVeil();
     cadApproved = true; btn.click(); cadApproved = false;
   }
-  // once the import is in and the Incident tab is back, the two unit fields are set
+  // ---- the unit's level, from ESO itself: the crew on the run and their certifications (the
+  // agency's people in ESO's configuration bundle). A paramedic on the crew makes the unit ALS,
+  // whatever they run it as; otherwise BLS. A unit named NT… is non-transport. Set once per crew
+  // and unit, again when either changes.
+  const unitLevelDone = {}; // recordId -> the crew+unit it was set for
+  function crewLevel(run) {
+    const people = (facilityTypes && facilityTypes.crew) || (facilities && facilities.crew) || null;
+    if (!people || !run || !run.crewCerts || !run.crewCerts.length) return null;
+    let known = false, als = false;
+    for (const m of run.crewCerts) {
+      const p = people.find(x => x.id === m.id); if (!p) continue;
+      const cred = m.cert ? p.creds.find(c => c.id === m.cert) : null;
+      const names = cred ? [cred.name] : p.creds.map(c => c.name); // no certification chosen on the run yet: what they hold
+      if (!names.length) continue;
+      known = true;
+      if (names.some(n => /paramedic/i.test(n))) als = true;
+    }
+    return known ? (als ? 'ALS' : 'BLS') : null;
+  }
   setInterval(async () => {
-    if (!pendingUnit || quickBusy || autoBusy || !onTab('Incident') || shelfOpen()) return;
-    if (Date.now() - pendingUnit.at > 3 * 60 * 1000) { pendingUnit = null; return; }
+    const run = currentRun();
+    if (settings.cadGate === false || !run || run.locked || quickBusy || autoBusy || !onTab('Incident') || shelfOpen() || warming) return;
+    const level = crewLevel(run); if (!level) return;
     const cap = fieldReady('UNITCAPABILITYID'), loc = fieldReady('UNITSLEVELOFCAREID');
     if (!cap || !loc) return;
-    const unitShown = norm(fieldValue('UNITID') || '');
-    if (!unitShown || !unitShown.toUpperCase().includes(pendingUnit.unit.toUpperCase())) return; // the import has not landed yet
-    const p = pendingUnit; pendingUnit = null;
-    quickBusy = true; lateVeil('Setting the unit\'s level…', `${p.unit}: ${p.level}`);
+    const unit = norm(fieldValue('UNITID') || ''); const nt = /^NT/i.test(unit);
+    const key = `${run.crewCerts.map(c => c.id + ':' + c.cert).sort().join('|')}#${unit}#${level}`;
+    if (unitLevelDone[run.recordId] === key) return;
+    unitLevelDone[run.recordId] = key;
+    quickBusy = true; lateVeil("Setting the unit's level…", `${level}${nt ? ', non-transport' : ''}`);
     try {
-      await setSingle('UNITCAPABILITYID', p.nt ? `Non-Transport-Medical Treatment (${p.level} Equipped)` : `Ground Transport (${p.level} Equipped)`);
+      await setSingle('UNITCAPABILITYID', nt ? `Non-Transport-Medical Treatment (${level} Equipped)` : `Ground Transport (${level} Equipped)`);
       await wait(60);
-      await setSingle('UNITSLEVELOFCAREID', p.level === 'ALS' ? 'ALS-Paramedic' : 'BLS-Basic /EMT');
-    } catch (e) { alert('ESO Save: could not set the unit\'s level. ' + (e && e.message ? e.message : '')); }
+      await setSingle('UNITSLEVELOFCAREID', level === 'ALS' ? 'ALS-Paramedic' : 'BLS-Basic /EMT');
+    } catch (e) { alert("ESO Save: could not set the unit's level. " + (e && e.message ? e.message : '')); }
     endVeil(); quickBusy = false; layoutQuick();
   }, 700);
   // a question or a notice in our own overlay: [label, value] buttons; the value goes to the callback

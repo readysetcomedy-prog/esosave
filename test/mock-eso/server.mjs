@@ -79,7 +79,7 @@ export function createMockEso() {
       id, incidentNumber: `TEST-${String(seq).padStart(4, '0')}`, state: 'draft', locked: false,
       tree: {}, ops: [], mappings: [], knownKeys: new Set(), autosaves: 0,
       incidentDateTime: new Date(), destination: null, // { name, fax, email }
-      crew: [{ personnelId: control.userId, itemId: randomUUID(), firstName: (control.userName.split(',')[1] || 'MEDIC').trim(), lastName: control.userName.split(',')[0].trim(), rank: 0, roleIds: [] }],
+      crew: [{ personnelId: control.userId, itemId: randomUUID(), firstName: (control.userName.split(',')[1] || 'MEDIC').trim(), lastName: control.userName.split(',')[0].trim(), rank: 0, roleIds: [], certification: ({ 'person-1': 'cred-b1', 'person-2': 'cred-p2', 'person-m': 'cred-bm', 'person-j': 'cred-bj', 'd4e45fac-ee36-4ac8-bf9a-3fb3e265c0d0': 'cred-bg' })[control.userId] || null }],
     };
     rec.knownKeys.add(rec.crew[0].itemId);
     records.set(id, rec);
@@ -271,6 +271,13 @@ export function createMockEso() {
             { itemId: 'loc-sbl', itemName: 'Sarah Bush Lincoln', locationTypeId: 6540, city: 'Mattoon' },
             { itemId: 'loc-breese', itemName: 'Breese Nursing Home', locationTypeId: 6542, city: 'Breese' },
             { itemId: 'loc-lakeland', itemName: 'Lakeland Rehab & Healthcare', locationTypeId: 6545, city: 'Effingham' },
+          ] },
+          'UDL.CREW': { values: [
+            { itemId: 'person-1', firstName: 'MEDIC', lastName: 'TEST', credentials: [{ credentialName: 'EMT-Basic', personCredentialID: 'cred-b1', credentialId: 'd4874fd4' }] },
+            { itemId: 'person-2', firstName: 'PAT', lastName: 'MEDIC', credentials: [{ credentialName: 'EMT-Paramedic', personCredentialID: 'cred-p2', credentialId: '0316067f' }] },
+            { itemId: 'person-m', firstName: 'ALEX', lastName: 'JONES', credentials: [{ credentialName: 'EMT-Basic', personCredentialID: 'cred-bm', credentialId: 'd4874fd4' }] },
+            { itemId: 'person-j', firstName: 'JANE', lastName: 'SMITH', credentials: [{ credentialName: 'EMT-Basic', personCredentialID: 'cred-bj', credentialId: 'd4874fd4' }] },
+            { itemId: 'd4e45fac-ee36-4ac8-bf9a-3fb3e265c0d0', firstName: 'MICHAEL', lastName: 'GASTON', credentials: [{ credentialName: 'EMT-Basic', personCredentialID: 'cred-bg', credentialId: 'd4874fd4' }] },
           ] },
           'SL.LOCATIONTYPE': { values: [{ itemId: 6535, itemName: 'Home/Residence' }, { itemId: 6540, itemName: 'Hospital' }, { itemId: 6542, itemName: 'Nursing home' }, { itemId: 6545, itemName: 'Rehabilitation Center' }] },
           'SL.DESTINATIONTYPE': { values: [{ itemId: 6575, itemName: 'Hospital', parentItemId: 6540 }, { itemId: 6577, itemName: 'Nursing Home', parentItemId: 6542 }, { itemId: 6580, itemName: 'Rehabilitation Center', parentItemId: 6545 }, { itemId: 6582, itemName: 'Home', parentItemId: 6535 }] },
