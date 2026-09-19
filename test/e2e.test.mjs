@@ -1314,7 +1314,10 @@ test('the unit\'s level follows the crew\'s ESO certifications: an EMT-Basic cre
   const id = await freshRun();
   await app(() => window.app.openTab('Incident'));
   const resp = async () => (await T.record(id)).tree.incident?.response || {};
-  // TEST, MEDIC holds EMT-Basic: BLS, ground (no unit chosen yet)
+  await sleep(1500);
+  assert.equal((await resp()).unitCapabilityID, undefined, 'nothing until the unit is known');
+  await app(() => window.app.ssSetForTest('UNITID', 3002)); // unit 16
+  // TEST, MEDIC holds EMT-Basic: BLS, ground
   await waitFor(async () => (await resp()).unitCapabilityID === 14136 && (await resp()).unitsLevelOfCareID === 9681, { label: 'BLS from the crew', timeout: 20000 });
   // a paramedic joins the crew: ALS, whatever they run it as
   await T.shape(id, { crew: [{ personnelId: 'person-1', certification: 'cred-b1' }, { personnelId: 'person-2', certification: 'cred-p2' }] });

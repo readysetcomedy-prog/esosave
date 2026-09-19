@@ -98,8 +98,8 @@ to bad signal or a hung page.
 - **Unit level from the crew.** Unit Capability and Unit's Level of Care follow the crew on the run
   and their certifications in ESO (the agency's people in ESO's own configuration bundle): a
   paramedic on the crew makes the unit ALS, whatever they run it as; otherwise BLS. A unit named
-  NT… is non-transport. Set once per crew and unit, again when either changes. Under the CAD
-  gate's setting.
+  NT… is non-transport. Set once the unit is known (the CAD import brings it), once per crew and
+  unit, again when either changes. Under the CAD gate's setting.
 - **Agency settings.** The locked block (retention, tab warm-up, call times, fax prompt, Not sent
   list, the lock question, the CAD gate) is one agency row in the table, read by every tablet,
   and only the agency owner's ESO login can change it.

@@ -2170,8 +2170,8 @@
   }
   // ---- the unit's level, from ESO itself: the crew on the run and their certifications (the
   // agency's people in ESO's configuration bundle). A paramedic on the crew makes the unit ALS,
-  // whatever they run it as; otherwise BLS. A unit named NT… is non-transport. Set once per crew
-  // and unit, again when either changes.
+  // whatever they run it as; otherwise BLS. A unit named NT… is non-transport. Set once the unit
+  // is known (the CAD import brings it), once per crew and unit, again when either changes.
   const unitLevelDone = {}; // recordId -> the crew+unit it was set for
   function crewLevel(run) {
     const people = (facilityTypes && facilityTypes.crew) || (facilities && facilities.crew) || null;
@@ -2194,6 +2194,7 @@
     const cap = fieldReady('UNITCAPABILITYID'), loc = fieldReady('UNITSLEVELOFCAREID');
     if (!cap || !loc) return;
     const unit = norm(fieldValue('UNITID') || ''); const nt = /^NT/i.test(unit);
+    if (!unit) return; // no unit yet (it comes with the CAD import): ground or non-transport is not known
     const key = `${run.crewCerts.map(c => c.id + ':' + c.cert).sort().join('|')}#${unit}#${level}`;
     if (unitLevelDone[run.recordId] === key) return;
     unitLevelDone[run.recordId] = key;
