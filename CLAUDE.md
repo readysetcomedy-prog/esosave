@@ -10,7 +10,8 @@ sent list, the paperwork question before a lock, the CAD import gate: the `LOCKE
 are the agency's: one `__agency__` row in the table, changed only by the agency owner's ESO login
 (`ADMIN` in `extension/content.js`) and shown greyed out to everyone else. **Open** ones (the quick-button
 toggles and the facility chips, the `OPEN_SETTINGS` list in `extension/content.js`) may be changed
-by the crew and follow the ESO login through the `esosave_users` table.
+by the crew and follow the ESO login through the `esosave_users` table. The paperwork scanner
+(`scanDocs`) is open.
 
 **Before adding any new setting, ask the repo owner whether it is locked or open.** Do not guess.
 
@@ -20,3 +21,13 @@ Only the open settings go to the table (`supabase/esosave_users.sql`); which run
 is decided on the tablet from each run's crew list. Recorded runs, signature images, field definitions, the emailed
 map and the Not sent list never do. The Supabase Management token lives in `.env.local`
 (gitignored) and is never committed; the anon key in `content.js` is public by design.
+
+## Attachments and the scanner
+
+ESO's attachment upload is one multipart POST (`description`, `file`) to
+`PatientCareRecords/{id}/Attachments`, delete is `DELETE …/Attachments/{itemId}`; both were
+recorded from the app. Desktop uploads stay ESO's own: the extension only sets the description.
+iPad scans are uploaded by the extension with that same request. The Patient and Billing pages are
+filled with the app's own autosave ops (recorded), never through the UI. Facesheet photos and
+recordings are PHI: they live in the scratchpad only, never in the repo. The parser's fixtures in
+`test/e2e.test.mjs` are made up.

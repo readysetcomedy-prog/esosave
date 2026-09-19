@@ -1398,3 +1398,264 @@ test('on a touch screen the lock question and the CAD gate catch the tap itself,
   await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('[data-act=lock-yes]').click());
   await waitFor(async () => (await T.record(id)).state === 'locked', { label: 'Yes locks it', timeout: 15000 });
 });
+
+test('paperwork: Camera and Add Attachment ask what it is, the label becomes the description, one Facesheet per run', async () => {
+  await T.control({ scanner: false }); // no ESO Save app around: ESO's own camera does the taking
+  const id = await freshRun();
+  const inc = (await T.record(id)).incidentNumber;
+  await app(() => window.app.openTab('Incident'));
+  const box = () => T.page.evaluate(() => { const b = document.getElementById('esosave-host').shadowRoot.querySelector('.veil .askbox'); return b ? b.textContent : null; });
+  const choose = (label) => T.page.evaluate((l) => { const b = Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.askbox button')).find(x => x.textContent.trim() === l); if (!b) throw new Error('no button ' + l); b.click(); }, label);
+  const press = (cls) => app((c) => document.querySelector(`eso-modal-dialog .${c}`).click(), cls);
+  const list = async () => (await T.record(id)).attachments;
+  await app(() => document.getElementById('attachments').click());
+  await waitFor(() => app(() => !!document.querySelector('eso-modal-dialog .camera')), { label: 'Attachments dialog' });
+  // Camera: the question first, ESO's camera never saw the press
+  await press('camera');
+  await waitFor(async () => /What is this paperwork/.test((await box()) || ''), { label: 'the type question' });
+  assert.equal(await app(() => window.app.cameraClicks), 0);
+  for (const t of ['Facesheet', 'Physician Certification', 'Med List', 'Monitor Printout', 'Other', 'Cancel']) assert.match((await box()) || '', new RegExp(t));
+  await choose('Med List');
+  await waitFor(async () => (await app(() => window.app.uploads)) === 1, { label: 'ESO uploaded the photo', timeout: 15000 });
+  let l = await list();
+  assert.equal(l.length, 1); assert.equal(l[0].description, `${inc}:Med List`); assert.match(l[0].name, new RegExp(`^${inc}Photo1\\.jpg$`));
+  // a facesheet, then a second one: asked, Replace it leaves exactly one (the new one)
+  await waitFor(() => app(() => document.querySelectorAll('eso-modal-dialog grid-row').length === 1), { label: 'list redrawn' });
+  await press('camera'); await waitFor(async () => /What is this paperwork/.test((await box()) || ''), { label: 'asked again' }); await choose('Facesheet');
+  await waitFor(async () => (await list()).length === 2, { label: 'facesheet attached', timeout: 15000 });
+  const firstFs = (await list()).find(a => a.description === `${inc}:Facesheet`).itemId;
+  await waitFor(() => app(() => document.querySelectorAll('eso-modal-dialog grid-row').length === 2), { label: 'list redrawn' });
+  await waitFor(async () => ((await T.status()).runs.find(r => r.recordId === id) || {}).attachments?.length === 2, { label: 'extension knows both' });
+  await press('camera'); await waitFor(async () => /What is this paperwork/.test((await box()) || ''), { label: 'asked' }); await choose('Facesheet');
+  await waitFor(async () => /already attached/.test((await box()) || ''), { label: 'the replace question' });
+  assert.match((await box()) || '', new RegExp(`${inc}:Facesheet`));
+  await choose('Replace it');
+  await waitFor(async () => { const a = await list(); return a.filter(x => x.description === `${inc}:Facesheet`).length === 1 && !a.some(x => x.itemId === firstFs); }, { label: 'old facesheet gone, new one there', timeout: 15000 });
+  assert.equal((await list()).length, 2);
+  // Keep both keeps both
+  await waitFor(() => app(() => document.querySelectorAll('eso-modal-dialog grid-row').length === 2), { label: 'list redrawn' });
+  await press('camera'); await waitFor(async () => /What is this paperwork/.test((await box()) || ''), { label: 'asked' }); await choose('Facesheet');
+  await waitFor(async () => /already attached/.test((await box()) || ''), { label: 'asked to replace' });
+  await choose('Keep both');
+  await waitFor(async () => (await list()).filter(x => x.description === `${inc}:Facesheet`).length === 2, { label: 'two facesheets', timeout: 15000 });
+  // Cancel in the question: nothing happens
+  await waitFor(() => app(() => document.querySelectorAll('eso-modal-dialog grid-row').length === 3), { label: 'list redrawn' });
+  const before = await app(() => window.app.uploads);
+  await press('camera'); await waitFor(async () => /What is this paperwork/.test((await box()) || ''), { label: 'asked' }); await choose('Cancel');
+  await sleep(600);
+  assert.equal(await app(() => window.app.uploads), before);
+  assert.equal(await app(() => window.app.cameraClicks), 4);
+  // Add Attachment: the same question, then ESO's own dialog; the label overrides whatever is typed
+  await press('add');
+  await waitFor(async () => /What is this paperwork/.test((await box()) || ''), { label: 'asked for a file too' });
+  assert.equal(await app(() => window.app.attachClicks), 0);
+  await choose('Physician Certification');
+  await waitFor(() => app(() => !!document.querySelector('eso-modal-dialog input[type=file]')), { label: "ESO's Add Attachment dialog" });
+  assert.equal(await app(() => window.app.attachClicks), 1);
+  await app(() => { window.app.pickFile('cert.pdf', 'pdf bytes'); document.querySelector('eso-modal-dialog eso-text input').value = 'typed by hand'; document.querySelector('eso-modal-dialog .attach').click(); });
+  await waitFor(async () => (await list()).some(a => a.description === `${inc}:Physician Certification`), { label: 'certification attached with the label', timeout: 15000 });
+  assert.match((await list()).find(a => a.description === `${inc}:Physician Certification`).name, /\.pdf$/);
+  // the switch off (settings follow the login): ESO's camera straight away, description empty
+  await T.setStorage({ settings: { ...(await T.storage()).settings, scanDocs: false } });
+  await fetch(T.base + '/__db_set', { method: 'POST', body: JSON.stringify({ name: 'TEST, MEDIC', settings: { scanDocs: false } }) });
+  await T.page.goto(T.url);
+  await waitFor(() => T.page.evaluate(() => !!window.__esosave), { label: 'interceptor' });
+  await app((rid) => window.app.use(rid), id);
+  await sleep(1500);
+  await app(() => document.getElementById('attachments').click());
+  await waitFor(() => app(() => !!document.querySelector('eso-modal-dialog .camera')), { label: 'Attachments dialog' });
+  await press('camera');
+  await waitFor(async () => (await app(() => window.app.cameraClicks)) === 1, { label: 'ESO camera at once' });
+  await waitFor(async () => (await list()).length === 5, { label: 'plain upload', timeout: 15000 });
+  assert.equal((await list())[4].description, null);
+  assert.equal(await box(), null);
+  await T.setStorage({ settings: { ...(await T.storage()).settings, scanDocs: true } });
+  await fetch(T.base + '/__db_set', { method: 'POST', body: JSON.stringify({ name: 'TEST, MEDIC', settings: {} }) });
+});
+
+test('paperwork on an iPad: Camera hops to the ESO Save scanner and the pages come back onto the run', async () => {
+  await T.control({ scanner: true });
+  await fetch(T.base + '/__native_reset', { method: 'POST' });
+  const id = await freshRun();
+  const inc = (await T.record(id)).incidentNumber;
+  await app(() => window.app.openTab('Incident'));
+  const box = () => T.page.evaluate(() => { const b = document.getElementById('esosave-host').shadowRoot.querySelector('.veil .askbox'); return b ? b.textContent : null; });
+  const choose = (label) => T.page.evaluate((l) => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.askbox button')).find(x => x.textContent.trim() === l).click(), label);
+  const list = async () => (await T.record(id)).attachments;
+  const native = () => fetch(T.base + '/__native_dump').then(r => r.json());
+  await app(() => document.getElementById('attachments').click());
+  await waitFor(() => app(() => !!document.querySelector('eso-modal-dialog .camera')), { label: 'Attachments dialog' });
+  await app(() => document.querySelector('eso-modal-dialog .camera').click());
+  await waitFor(async () => /scanner opens next/.test((await box()) || ''), { label: 'the question says the scanner is coming' });
+  await choose('Monitor Printout');
+  await waitFor(async () => (await native()).opened.length === 1, { label: 'hopped to the app' });
+  const url = new URL((await native()).opened[0]);
+  assert.equal(url.protocol, 'esosave:'); assert.equal(url.searchParams.get('type'), 'Monitor Printout'); assert.equal(url.searchParams.get('record'), id); assert.equal(url.searchParams.get('incident'), inc); assert.equal(url.searchParams.get('pages'), '12');
+  assert.equal(await app(() => window.app.cameraClicks), 0, "ESO's camera stayed shut");
+  // the app scans two pages and leaves them for the extension
+  const jpeg = Buffer.from('ffd8ffe000104a46494600010100000100010000ffd9', 'hex').toString('base64');
+  await fetch(T.base + '/__native_seed', { method: 'POST', body: JSON.stringify({ scans: [{ id: 'scan-1', type: 'Monitor Printout', record: id, incident: inc, pages: [jpeg, jpeg], at: Date.now() }] }) });
+  await waitFor(async () => (await list()).length === 2, { label: 'both pages attached', timeout: 20000 });
+  const l = await list();
+  assert.deepEqual(l.map(a => a.description), [`${inc}:Monitor Printout`, `${inc}:Monitor Printout`]);
+  assert.deepEqual(l.map(a => a.name), [`${inc}Photo1.jpg`, `${inc}Photo2.jpg`]);
+  assert.ok(l.every(a => a.bytes === 22 && /image\/jpeg/.test(a.contentType)), 'the bytes ESO got are the scanned pages');
+  await waitFor(async () => (await native()).consumed.includes('scan-1') && (await native()).scans.length === 0, { label: 'the scan was consumed' });
+  await waitFor(() => T.page.evaluate(() => /attached/.test((document.getElementById('esosave-host').shadowRoot.querySelector('.veil') || {}).textContent || '')), { label: 'the notice' });
+  // a facesheet replacing one that came back: the old one goes
+  await waitFor(async () => ((await T.status()).runs.find(r => r.recordId === id) || {}).attachments?.length === 2, { label: 'extension knows the list' });
+  await app(() => document.querySelector('eso-modal-dialog .camera').click());
+  await waitFor(async () => /What is this paperwork/.test((await box()) || ''), { label: 'asked' }); await choose('Facesheet');
+  await waitFor(async () => (await native()).opened.length === 2, { label: 'hopped' });
+  assert.equal(new URL((await native()).opened[1]).searchParams.get('pages'), '1');
+  await fetch(T.base + '/__native_seed', { method: 'POST', body: JSON.stringify({ scans: [{ id: 'scan-2', type: 'Facesheet', record: id, incident: inc, pages: [jpeg], at: Date.now() }] }) });
+  await waitFor(async () => (await list()).some(a => a.description === `${inc}:Facesheet`), { label: 'facesheet attached', timeout: 20000 });
+  const fs1 = (await list()).find(a => a.description === `${inc}:Facesheet`).itemId;
+  await waitFor(async () => ((await T.status()).runs.find(r => r.recordId === id) || {}).attachments?.length === 3, { label: 'extension knows three' });
+  await app(() => document.querySelector('eso-modal-dialog .camera').click());
+  await waitFor(async () => /What is this paperwork/.test((await box()) || ''), { label: 'asked' }); await choose('Facesheet');
+  await waitFor(async () => /already attached/.test((await box()) || ''), { label: 'replace question' }); await choose('Replace it');
+  await waitFor(async () => (await native()).opened.length === 3, { label: 'hopped' });
+  await fetch(T.base + '/__native_seed', { method: 'POST', body: JSON.stringify({ scans: [{ id: 'scan-3', type: 'Facesheet', record: id, incident: inc, pages: [jpeg], at: Date.now() }] }) });
+  await waitFor(async () => { const a = await list(); return a.filter(x => x.description === `${inc}:Facesheet`).length === 1 && !a.some(x => x.itemId === fs1); }, { label: 'replaced', timeout: 20000 });
+  assert.equal((await list()).length, 3);
+  await T.control({ scanner: false });
+});
+
+// Two facesheets as the app's text recognition hands them over: one recognised row per line,
+// the cells of a row separated by " | " (made-up people).
+const FACESHEET_A = [
+  'Fayette County Hospital | 650 W Taylor Street',
+  'Patient Information',
+  'Patient Name: DOE, JANE Q | Alt Phone:',
+  'Home Address: PO BOX 337 | Sex: Female',
+  'BROWNSTOWN, IL 6241803 | DOB: 09/22/1947',
+  'Home Phone: (618)699-1518 | Age: 78 Years',
+  'Mobile Phone: | Religion: Christian',
+  'Work Phone: | SSN: XXX-XX-8969',
+  'Guarantor Information',
+  'Guarantor Name: DOE, JANE Q | Alt Phone:',
+  "Patient's Reltn: Self | Sex: Female",
+  'Billing Address: PO BOX 337 | DOB: 09/22/1947',
+  'BROWNSTOWN, IL 624180337 | Age: 78 Years',
+  'Home Phone: (618)699-1518 | SSN: XXX-XX-8969',
+  'Contact Information',
+  'Emergency Contact | Next of Kin',
+  'Contact Name: LACH, JULIE L | Contact Name:',
+  "Patient's Reltn: Mother | Patient's Reltn:",
+  'Sex: Female | Sex:',
+  'Home Phone: (618)267-3695 | Home Phone:',
+  'Primary Insurance',
+  'Subscriber Name: DOE, JANE Q | Insurance Name: UHC Complete Care Medicare',
+  "Patient's Reltn: Self | Claim Address: PO BOX 31362",
+  'Sex: Female | SALT LAKE CITY, UT 841310362',
+  'DOB: 09/22/1947 | Insurance Phone: (877)842-3210',
+  'Age: 78 Years | Policy Number: 916615452',
+  'Employer Name: | Group Number: 84506',
+  'Financial Class: Medicare Advantage | Authorization Number:',
+  'Secondary Insurance',
+  'Subscriber Name: DOE, JANE Q | Insurance Name: ILLINOIS MEDICAID',
+  "Patient's Reltn: Self | Claim Address: 431 W WASHINGTON ST",
+  'Sex: Female | SPRINGFIELD, IL 627011207',
+  'DOB: 09/22/1947 | Insurance Phone:',
+  'Age: 78 Years | Policy Number: 366900232',
+  'Financial Class: Medicaid | Group Number:',
+  'Encounter Information',
+  'Reg Dt/Tm: 09/16/2026 17:17 | Patient Type: Emergency | Admit Type: Emergency',
+  'Admit Reason: fall, trouble moving | Attend Physician: Paul W Koch, MD',
+  'PCP: Deidre Langston, APRN',
+  'DOE, JANE Q | Female / 78 Years',
+  'MRN: 000546068 | FIN: 1207599505',
+].join('\n');
+const FACESHEET_B = [
+  "St Anthony's Memorial | Encounter Date: | 9/19/2026",
+  'Hospital Effingham | Hospital Account: | 97169873',
+  'MRN: | 55712705',
+  'Guarantor: | ROE,LOUISE M',
+  'ENCOUNTER',
+  'Patient Class: | Emergency | Unit: | SAE EMERGENCY R*',
+  'PATIENT',
+  'Name: | ROE, LOUISE M | DOB: | 10/24/1931 (94 yrs)',
+  'Address: | 707 S Oak St | Sex: | female',
+  'City: | EFFINGHAM, IL 62401-1954 | White Or Caucasian',
+  'Primary Care Provider: | Jeffrey Brummer, DO | Primary Phone: | 217-343-9134',
+  'Work Phone:',
+  'Mobile Phone: | 217-343-9134',
+  'EMERGENCY CONTACT',
+  'Contact Name | Legal Guardian? | Relationship to Patient | Home Phone | Work Phone | Mobile Phone',
+  '1. ROE,SUSAN | Daughter | (217)342-4932 | 217-343-9134',
+  'GUARANTOR',
+  'Guarantor: | ROE,LOUISE M | DOB: | 10/24/1931',
+  'Address: | 707 S Oak St | Sex: | Female',
+  'City: | Effingham, IL 62401-1954',
+  'Relation to Patient: | Self | Home Phone: | 217-342-4932',
+  'Guarantor ID: | 2477266 | Mobile Phone: | 217-343-9134',
+  'GUARANTOR EMPLOYER',
+  'Employer: | RETIRED | Status: | RETIRED',
+  'COVERAGE',
+  'PRIMARY INSURANCE',
+  'Payor: | MEDICARE | Plan: | MEDICARE PART A&B',
+  'Group Number: | Insurance Type: | INDEMNITY',
+  'Subscriber Name: | ROE,LOUISE M | Subscriber DOB: | 10/24/1931',
+  'Subscriber ID: | 4M41X00GG90',
+  'Pat. Rel. to Subscriber: | Self',
+  'SECONDARY INSURANCE',
+  'Payor: | Plan:',
+  'Group Number: | Insurance Type:',
+  'Subscriber Name: | Subscriber DOB:',
+  'Subscriber ID:',
+  'Pat. Rel. to Subscriber:',
+].join('\n');
+
+test('facesheet: a scanned facesheet is read and, on a yes, fills the Patient and Billing pages', async () => {
+  await T.control({ scanner: true });
+  await fetch(T.base + '/__native_reset', { method: 'POST' });
+  const jpeg = Buffer.from('ffd8ffe000104a46494600010100000100010000ffd9', 'hex').toString('base64');
+  const box = () => T.page.evaluate(() => { const b = document.getElementById('esosave-host').shadowRoot.querySelector('.veil .askbox'); return b ? b.textContent : null; });
+  const choose = (label) => T.page.evaluate((l) => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.askbox button')).find(x => x.textContent.trim() === l).click(), label);
+  const scanFacesheet = async (id, text, scanId) => {
+    await app(() => document.getElementById('attachments').click());
+    await waitFor(() => app(() => !!document.querySelector('eso-modal-dialog .camera')), { label: 'Attachments dialog' });
+    await app(() => document.querySelector('eso-modal-dialog .camera').click());
+    await waitFor(async () => /What is this paperwork/.test((await box()) || ''), { label: 'asked' }); await choose('Facesheet');
+    await waitFor(async () => (await fetch(T.base + '/__native_dump').then(r => r.json())).opened.length >= 1, { label: 'hopped' });
+    await fetch(T.base + '/__native_seed', { method: 'POST', body: JSON.stringify({ scans: [{ id: scanId, type: 'Facesheet', record: id, incident: (await T.record(id)).incidentNumber, pages: [jpeg], text, at: Date.now() }] }) });
+    await waitFor(async () => /Fill from the facesheet/.test((await box()) || ''), { label: 'the fill question', timeout: 20000 });
+    return await box();
+  };
+  // ---- the two-column "Patient Information" facesheet
+  const id = await freshRun();
+  await app(() => window.app.openTab('Patient'));
+  let q = await scanFacesheet(id, FACESHEET_A, 'fs-a');
+  for (const t of ['Name: DOE, JANE Q', 'Sex: Female', 'DOB: 09/22/1947', 'PO BOX 337, BROWNSTOWN, IL, 62418', 'Home phone: (618) 699-1518', 'Physician: Deidre Langston', 'Primary insurance: UHC Complete Care Medicare, policy 916615452, group 84506, (877) 842-3210', 'Secondary insurance: ILLINOIS MEDICAID, policy 366900232', 'Method of payment: Medicare', 'Medicaid number: 366900232', 'Insured: DOE, JANE (Self), DOB 09/22/1947', 'SSN (masked on the facesheet)']) assert.ok(q.includes(t), `question lists ${t}: ${q}`);
+  assert.ok(!/Medicare number/.test(q), 'a Medicare Advantage member id is not a Medicare number');
+  await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('[data-act=fill-yes]').click());
+  const tree = async () => (await T.record(id)).tree;
+  await waitFor(async () => { const t = await tree(); return t.patient?.demographics?.lastName === 'DOE' && t.billing?.payment?.methodOfPaymentId === 6505 && t.patient?.contact?.address?.placeId; }, { label: 'both pages written', timeout: 20000 });
+  const t = await tree();
+  const d = t.patient.demographics, c = t.patient.contact, b = t.billing;
+  assert.equal(d.firstName, 'JANE'); assert.equal(d.middleName, 'Q'); assert.equal(d.sexId, 15359); assert.equal(d.genderId, 314); assert.equal(d.dob, '09/22/1947 00:00:00'); assert.equal(d.ssn, undefined, 'masked SSN left alone');
+  assert.equal(c.address.address1, 'PO BOX 337'); assert.equal(c.address.city, 'BROWNSTOWN'); assert.equal(c.address.stateId, 260); assert.equal(c.address.zip, '62418'); assert.equal(c.address.placeId.county, 'Fayette');
+  const phones = Object.values(c.patientPhoneNumbers?.items || {});
+  assert.deepEqual(phones.map(p => [p.phoneTypeId, p.phoneNumber]), [[12830, '6186991518']]);
+  assert.equal(c.physicianFirstName, 'Deidre'); assert.equal(c.physicianLastName, 'Langston');
+  assert.equal(b.payment.primaryInsuranceId, '837a41ec-8038-4835-ab43-5c3807219a7f'); assert.equal(b.payment.primaryCompanyName, 'UHC Complete Care Medicare'); assert.equal(b.payment.primaryPolicyNumber, '916615452'); assert.equal(b.payment.primaryGroupNumber, '84506');
+  assert.deepEqual(Object.values(b.payment.primaryInsurancePhoneNumbers.items).map(p => [p.phoneTypeId, p.phoneNumber]), [[12827, '8778423210']]);
+  assert.equal(b.payment.secondaryCompanyName, 'ILLINOIS MEDICAID'); assert.equal(b.payment.secondaryPolicyNumber, '366900232'); assert.equal(b.payment.medicaidName, '366900232'); assert.equal(b.payment.medicareName, undefined);
+  assert.equal(b.contactForPayment.relationshipToTheInsuredId, 5780); assert.equal(b.contactForPayment.insuredLastName, 'DOE'); assert.equal(b.contactForPayment.insuredFirstName, 'JANE'); assert.equal(b.contactForPayment.dob, '09/22/1947 00:00:00');
+  assert.equal(b.contactForPayment.address.address1, 'PO BOX 337'); assert.equal(b.contactForPayment.address.city, 'BROWNSTOWN'); assert.equal(b.contactForPayment.address.stateId, 260); assert.equal(b.contactForPayment.address.zip, '62418'); assert.equal(b.contactForPayment.address.county, 'Fayette');
+  await waitFor(() => T.page.evaluate(() => /pages filled/.test((document.getElementById('esosave-host').shadowRoot.querySelector('.veil') || {}).textContent || '')), { label: 'the notice' });
+  assert.equal((await T.record(id)).attachments.length, 1, 'and the facesheet itself is attached');
+  // ---- the right-aligned "PATIENT / GUARANTOR / COVERAGE" facesheet; Not now leaves the pages alone
+  await fetch(T.base + '/__native_reset', { method: 'POST' });
+  const id2 = await freshRun();
+  await app(() => window.app.openTab('Incident'));
+  q = await scanFacesheet(id2, FACESHEET_B, 'fs-b');
+  for (const t of ['Name: ROE, LOUISE M', 'Sex: Female', 'DOB: 10/24/1931', 'Race: White', '707 S Oak St, EFFINGHAM, IL, 62401', 'Home phone: (217) 343-9134', 'Mobile phone: (217) 343-9134', 'Physician: Jeffrey Brummer', 'Primary insurance: MEDICARE (MEDICARE PART A&B), policy 4M41X00GG90', 'Method of payment: Medicare', 'Medicare number: 4M41X00GG90', 'Insured: ROE, LOUISE (Self), DOB 10/24/1931']) assert.ok(q.includes(t), `question lists ${t}: ${q}`);
+  assert.ok(!/Secondary insurance/.test(q) && !/Medicaid/.test(q), 'an empty secondary block is nothing');
+  await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('[data-act=fill-no]').click());
+  await sleep(800);
+  assert.equal((await T.record(id2)).tree.patient?.demographics?.lastName, undefined, 'Not now wrote nothing');
+  assert.equal(await box(), null);
+  await T.control({ scanner: false });
+});

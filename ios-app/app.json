@@ -12,11 +12,19 @@
       "supportsTablet": true,
       "buildNumber": "1",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSCameraUsageDescription": "ESO Save uses the camera to scan paperwork (facesheets, certifications, med lists, monitor printouts) onto the run open in Safari."
+      },
+      "entitlements": {
+        "com.apple.security.application-groups": [
+          "group.com.ruralmedems.esosave"
+        ]
       }
     },
     "plugins": [
-      "@bacons/apple-targets"
-    ]
+      "@bacons/apple-targets",
+      "react-native-document-scanner-plugin"
+    ],
+    "scheme": "esosave"
   }
 }

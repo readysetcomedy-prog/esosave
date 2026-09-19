@@ -1,12 +1,13 @@
 {
   "manifest_version": 3,
   "name": "ESO Save",
-  "version": "0.13.2",
+  "version": "0.14.0",
   "description": "Keeps every ESO EHR change on this device until ESO confirms it saved. Warns on lost signal and restores runs.",
   "permissions": [
     "storage",
     "unlimitedStorage",
-    "alarms"
+    "alarms",
+    "nativeMessaging"
   ],
   "host_permissions": [
     "https://www.esosuite.net/*",

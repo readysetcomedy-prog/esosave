@@ -1,12 +1,112 @@
 import SafariServices
+import Vision
+import UIKit
 import os.log
 
-// Required by Safari for every web extension. ESO Save never sends native messages, so this only
-// acknowledges anything it receives.
+// The extension's native side. The page script asks, through the background script:
+//   ping                -> is the app here, does it scan
+//   scans               -> the pages the app scanned and left in the shared container
+//                          (a facesheet also carries the text read off its pages)
+//   consume {id}        -> that scan has been attached; drop it
+//   ocr {image: base64} -> the text on one image (an uploaded facesheet, for the fill)
+let appGroup = "group.com.ruralmedems.esosave"
+
 class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
     func beginRequest(with context: NSExtensionContext) {
+        let item = context.inputItems.first as? NSExtensionItem
+        var message: [String: Any] = [:]
+        if let m = item?.userInfo?[SFExtensionMessageKey] as? [String: Any] { message = m }
+        else if let m = item?.userInfo?["message"] as? [String: Any] { message = m }
+        let type = message["type"] as? String ?? ""
+        var reply: [String: Any] = ["ok": true]
+        switch type {
+        case "ping":
+            reply = ["ok": true, "scanner": true, "app": Bundle.main.bundleIdentifier ?? ""]
+        case "scans":
+            reply = ["ok": true, "scans": Scans.list()]
+        case "consume":
+            if let id = message["id"] as? String { Scans.consume(id) }
+        case "ocr":
+            if let b64 = message["image"] as? String, let data = Data(base64Encoded: b64), let img = UIImage(data: data) {
+                reply = ["ok": true, "text": OCR.text(of: img)]
+            } else {
+                reply = ["ok": false, "error": "no image"]
+            }
+        default:
+            break
+        }
         let response = NSExtensionItem()
-        response.userInfo = [SFExtensionMessageKey: ["ok": true]]
+        response.userInfo = [SFExtensionMessageKey: reply]
         context.completeRequest(returningItems: [response], completionHandler: nil)
+    }
+}
+
+enum Scans {
+    static var dir: URL? {
+        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroup)?.appendingPathComponent("scans", isDirectory: true)
+    }
+    // Every scan the app left, oldest first. A facesheet gets its text read here, once, and the
+    // file rewritten with it, so a second listing does not read it again.
+    static func list() -> [[String: Any]] {
+        guard let dir = dir, let names = try? FileManager.default.contentsOfDirectory(atPath: dir.path) else { return [] }
+        var out: [[String: Any]] = []
+        for name in names.sorted() where name.hasSuffix(".json") {
+            let url = dir.appendingPathComponent(name)
+            guard let data = try? Data(contentsOf: url), var scan = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { continue }
+            if (scan["type"] as? String) == "Facesheet", scan["text"] == nil, let pages = scan["pages"] as? [String] {
+                var text = ""
+                for p in pages { if let d = Data(base64Encoded: p), let img = UIImage(data: d) { text += OCR.text(of: img) + "\n" } }
+                scan["text"] = text
+                if let d = try? JSONSerialization.data(withJSONObject: scan) { try? d.write(to: url) }
+            }
+            out.append(scan)
+        }
+        return out
+    }
+    static func consume(_ id: String) {
+        guard let dir = dir else { return }
+        let safe = id.replacingOccurrences(of: "/", with: "").replacingOccurrences(of: "..", with: "")
+        try? FileManager.default.removeItem(at: dir.appendingPathComponent(safe + ".json"))
+    }
+}
+
+enum OCR {
+    // The text on a page: one line per printed row, top to bottom, the cells of a row (a label
+    // and its value, the two columns of a facesheet) left to right separated by " | ".
+    static func text(of image: UIImage) -> String {
+        guard let cg = image.cgImage else { return "" }
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = .accurate
+        request.usesLanguageCorrection = false
+        let handler = VNImageRequestHandler(cgImage: cg, orientation: cgOrientation(image.imageOrientation), options: [:])
+        do { try handler.perform([request]) } catch { return "" }
+        let obs = (request.results ?? []).compactMap { o -> (String, CGRect)? in
+            guard let t = o.topCandidates(1).first?.string, !t.isEmpty else { return nil }
+            return (t, o.boundingBox)
+        }
+        // Vision's origin is the bottom-left corner: higher midY is higher on the page
+        let sorted = obs.sorted { $0.1.midY > $1.1.midY }
+        var rows: [[(String, CGRect)]] = []
+        for o in sorted {
+            if let last = rows.last, let first = last.first {
+                let tol = max(first.1.height, o.1.height) * 0.6
+                if abs(first.1.midY - o.1.midY) <= tol { rows[rows.count - 1].append(o); continue }
+            }
+            rows.append([o])
+        }
+        return rows.map { row in row.sorted { $0.1.minX < $1.1.minX }.map { $0.0 }.joined(separator: " | ") }.joined(separator: "\n")
+    }
+    static func cgOrientation(_ o: UIImage.Orientation) -> CGImagePropertyOrientation {
+        switch o {
+        case .up: return .up
+        case .down: return .down
+        case .left: return .left
+        case .right: return .right
+        case .upMirrored: return .upMirrored
+        case .downMirrored: return .downMirrored
+        case .leftMirrored: return .leftMirrored
+        case .rightMirrored: return .rightMirrored
+        @unknown default: return .up
+        }
     }
 }

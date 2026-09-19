@@ -63,7 +63,7 @@ export function applyToTree(tree, op) {
 
 export function createMockEso() {
   const records = new Map();
-  const control = { loggedOut: false, rejectValue: null, failAutosaves: 0, refuseAutosaves: 0, faxStatus: 'SUCCESS', userName: 'TEST, MEDIC', userId: 'person-1', dbDown: false, log: [] };
+  const control = { loggedOut: false, rejectValue: null, failAutosaves: 0, refuseAutosaves: 0, faxStatus: 'SUCCESS', userName: 'TEST, MEDIC', userId: 'person-1', dbDown: false, scanner: false, log: [] };
   // a stand-in for the extension's settings table (Supabase's REST shape): one row per ESO login
   const dbUsers = new Map();
   const dbTables = { call_log_entries: [], users: [], ambulances: [] }; // the agency's own tables, seeded by tests
@@ -180,13 +180,36 @@ export function createMockEso() {
     };
   }
 
+  const native = { scans: [], opened: [], consumed: [] };
+  function multipart(buf, boundary) {
+    const out = [];
+    const sep = Buffer.from('--' + boundary);
+    let pos = buf.indexOf(sep);
+    while (pos !== -1) {
+      let start = pos + sep.length;
+      if (buf.slice(start, start + 2).toString() === '--') break;
+      start += 2; // CRLF
+      const hEnd = buf.indexOf('\r\n\r\n', start); if (hEnd === -1) break;
+      const headers = buf.slice(start, hEnd).toString('utf8');
+      const next = buf.indexOf(sep, hEnd + 4); if (next === -1) break;
+      const data = buf.slice(hEnd + 4, next - 2);
+      const name = (/name="([^"]*)"/.exec(headers) || [])[1] || '';
+      const filename = (/filename="([^"]*)"/.exec(headers) || [])[1];
+      const contentType = (/content-type:\s*([^\r\n]+)/i.exec(headers) || [])[1] || null;
+      out.push({ name, filename, contentType, data, text: filename === undefined ? data.toString('utf8') : null });
+      pos = next;
+    }
+    return out;
+  }
   const server = http.createServer((req, res) => {
     const u = new URL(req.url, 'http://x');
     const path = u.pathname.replace(/\/{2,}/g, '/');
     control.log.push({ method: req.method, path: path + u.search, t: Date.now() });
-    let body = '';
-    req.on('data', (c) => { body += c; });
+    const chunks = [];
+    req.on('data', (c) => { chunks.push(c); });
     req.on('end', () => {
+      const raw = Buffer.concat(chunks);
+      const body = raw.toString('utf8');
       const send = (status, payload, type) => {
         const text = typeof payload === 'string' ? payload : JSON.stringify(payload);
         res.writeHead(status, { 'content-type': type || 'application/json; charset=utf-8', 'cache-control': 'no-store' });
@@ -197,7 +220,7 @@ export function createMockEso() {
       if (path === '/__records') return send(200, [...records.values()].map(r => ({ id: r.id, incidentNumber: r.incidentNumber, state: r.state, autosaves: r.autosaves, ops: r.ops.length })));
       if (path.startsWith('/__record/')) {
         const r = records.get(path.split('/')[2]);
-        return r ? send(200, { id: r.id, incidentNumber: r.incidentNumber, state: r.state, tree: r.tree, ops: r.ops, mappings: r.mappings, crew: r.crew, autosaves: r.autosaves }) : send(404, { error: 'no such record' });
+        return r ? send(200, { id: r.id, incidentNumber: r.incidentNumber, state: r.state, tree: r.tree, ops: r.ops, mappings: r.mappings, crew: r.crew, autosaves: r.autosaves, attachments: (r.attachments || []).map(a => ({ itemId: a.itemId, name: a.name, description: a.description, bytes: a.bytes, contentType: a.contentType })) }) : send(404, { error: 'no such record' });
       }
       if (path === '/__log') return send(200, control.log);
       // shape a record the way an admin would: destination, lock state, incident date
@@ -212,6 +235,18 @@ export function createMockEso() {
       }
       if (path === '/__faxes') return send(200, { faxHistory, emails });
       if (path === '/__db_dump') return send(200, [...dbUsers.values()]);
+      // the ESO Save app's side of the iPad scanner, as the Safari extension handler would answer
+      if (path === '/__native' && req.method === 'POST') {
+        const m = JSON.parse(body || '{}');
+        if (m.type === 'ping') return send(200, { ok: true, native: true, scanner: control.scanner !== false });
+        if (m.type === 'scans') return send(200, { scans: native.scans });
+        if (m.type === 'consume') { native.scans = native.scans.filter(x => x.id !== m.id); native.consumed.push(m.id); return send(200, { ok: true }); }
+        if (m.type === 'open') { native.opened.push(m.url); return send(200, { ok: true }); }
+        return send(200, { ok: false });
+      }
+      if (path === '/__native_seed' && req.method === 'POST') { const b = JSON.parse(body || '{}'); native.scans.push(...(b.scans || [])); return send(200, { ok: true }); }
+      if (path === '/__native_dump') return send(200, native);
+      if (path === '/__native_reset' && req.method === 'POST') { native.scans = []; native.opened = []; native.consumed = []; return send(200, { ok: true }); }
       if (path === '/__db_seed' && req.method === 'POST') { const b = JSON.parse(body || '{}'); dbTables[b.table] = b.rows || []; return send(200, { ok: true }); }
       // the agency's tables, read the way Supabase's REST answers: ?col=eq.v, ?col=in.(a,b)
       { const m = /^\/__db\/(call_log_entries|users|ambulances)$/.exec(path);
@@ -281,9 +316,24 @@ export function createMockEso() {
           ] },
           'SL.LOCATIONTYPE': { values: [{ itemId: 6535, itemName: 'Home/Residence' }, { itemId: 6540, itemName: 'Hospital' }, { itemId: 6542, itemName: 'Nursing home' }, { itemId: 6545, itemName: 'Rehabilitation Center' }] },
           'SL.DESTINATIONTYPE': { values: [{ itemId: 6575, itemName: 'Hospital', parentItemId: 6540 }, { itemId: 6577, itemName: 'Nursing Home', parentItemId: 6542 }, { itemId: 6580, itemName: 'Rehabilitation Center', parentItemId: 6545 }, { itemId: 6582, itemName: 'Home', parentItemId: 6535 }] },
+          // what a facesheet fill needs, as ESO lists them
+          'UDL.PLACESSTATES': { values: [{ itemId: 260, stateName: 'Illinois', stateAbbr: 'IL', itemName: 'Illinois' }, { itemId: 261, stateName: 'Indiana', stateAbbr: 'IN', itemName: 'Indiana' }, { itemId: 269, stateName: 'Missouri', stateAbbr: 'MO', itemName: 'Missouri' }] },
+          'SL.PHONETYPES': { values: [{ itemId: 12833, itemName: 'Daytime' }, { itemId: 12834, itemName: 'Evening' }, { itemId: 12830, itemName: 'Home' }, { itemId: 12831, itemName: 'Home Mobile' }, { itemId: 12827, itemName: 'Work' }, { itemId: 12828, itemName: 'Work Mobile' }] },
+          'SL.SEX': { values: [{ itemId: 15359, itemName: 'Female' }, { itemId: 15360, itemName: 'Male' }, { itemId: 15361, itemName: 'Unknown' }] },
+          'SL.GENDER': { values: [{ itemId: 314, itemName: 'Female' }, { itemId: 313, itemName: 'Male' }, { itemId: 10316, itemName: 'Unknown (Unable to Determine)' }] },
+          'SL.RACE': { values: [{ itemId: 315, itemName: 'American Indian or Alaska Native' }, { itemId: 316, itemName: 'Asian' }, { itemId: 317, itemName: 'Black or African American' }, { itemId: 10317, itemName: 'Hispanic or Latino' }, { itemId: 1338789, itemName: 'Middle Eastern or North African' }, { itemId: 318, itemName: 'Native Hawaiian or Other Pacific Islander' }, { itemId: 319, itemName: 'White' }] },
+          'UDL.BILLINGINSURANCEPRIMARYPAYER': { values: [{ itemId: 6503, itemName: 'Insurance' }, { itemId: 6504, itemName: 'Medicaid' }, { itemId: 6505, itemName: 'Medicare' }, { itemId: 6506, itemName: 'Not Billed (for any reason)' }, { itemId: 6508, itemName: 'Self Pay' }] },
+          'SL.BILLING_INSURANCE_RELATIONSHIP': { values: [{ itemId: 5780, itemName: 'Self' }, { itemId: 5781, itemName: 'Spouse' }, { itemId: 5782, itemName: 'Child/Dependent' }, { itemId: 5783, itemName: 'Parent' }, { itemId: 5784, itemName: 'Other Relationship' }] },
+          'UDL.INSURANCECOMPANY': { values: [{ isOtherInsurance: true, itemId: '837a41ec-8038-4835-ab43-5c3807219a7f', itemName: 'Other Insurance' }] },
         },
       });
       if (rest.startsWith('WebApi') && req.method === 'POST') return send(200, { result: '', status: 204 });
+      // ESO's places table, looked up after a zip is typed: GET /placesSearch?city=&stateId=&zip=
+      if (rest === 'placesSearch' && req.method === 'GET') {
+        const zip = u.searchParams.get('zip') || '', st = Number(u.searchParams.get('stateId'));
+        const places = [{ placeId: 'd18c7e7e-01e7-4498-a5fe-c53f6cde4159', city: 'Salem', stateId: 260, state: 'Illinois', county: 'Marion', zip: '62881' }, { placeId: 'place-brownstown', city: 'Brownstown', stateId: 260, state: 'Illinois', county: 'Fayette', zip: '62418' }, { placeId: 'place-effingham', city: 'Effingham', stateId: 260, state: 'Illinois', county: 'Effingham', zip: '62401' }];
+        return send(200, { data: places.filter(p => p.zip === zip && p.stateId === st), meta: null, responseStatus: null });
+      }
       if (rest.startsWith('custom/lookup')) return send(200, { items: [1, 2, 3] });
       if (rest === 'PatientCareRecords' && req.method === 'POST') { const r = newRecord(); return send(200, { result: 'Success', data: r.id }); }
       const esoDate = (d) => `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}/${d.getFullYear()}`;
@@ -320,7 +370,22 @@ export function createMockEso() {
       const v = /^Views\/([^/]+)$/.exec(tail);
       if (v && req.method === 'GET') return send(200, view(rec, v[1]));
       if (tail === 'CardiacMonitor') return send(200, { data: [], hasImportedCases: false });
-      if (tail === 'Attachments') return send(200, { data: { model: { attachments: [], incidentNumber: rec.incidentNumber } }, meta: { state: rec.state }, responseStatus: null });
+      rec.attachments = rec.attachments || [];
+      if (tail === 'Attachments' && req.method === 'GET') return send(200, { data: { model: { attachments: rec.attachments.map(a => ({ ...a, bytes: undefined })), incidentNumber: rec.incidentNumber } }, meta: { state: rec.state, user: { agencyPersonId: control.userId, claims: ['CREW'], fullName: control.userName } }, responseStatus: null });
+      if (tail === 'Attachments' && req.method === 'POST') {
+        // multipart, as ESO's dialog sends it: a description part and a file part
+        const bm = /boundary=([^;]+)/.exec(req.headers['content-type'] || ''); if (!bm) return send(400, { result: 'Failure', message: 'not multipart' });
+        const parts = multipart(raw, bm[1].trim());
+        const file = parts.find(p => p.name === 'file'), desc = parts.find(p => p.name === 'description');
+        if (!file) return send(400, { result: 'Failure', message: 'no file' });
+        const ext = (file.filename.split('.').pop() || '').toLowerCase();
+        const a = { itemId: randomUUID(), extension: ext, name: file.filename, link: `PatientCareRecords/${rec.id}/Attachments/`, hicCsvLink: null, m2MLink: null, description: desc && desc.text ? desc.text : null, bytes: file.data.length, contentType: file.contentType };
+        a.link += a.itemId;
+        rec.attachments.push(a);
+        return send(200, { result: 'Success', data: { ...a, bytes: undefined, contentType: undefined } });
+      }
+      const da = /^Attachments\/([^/]+)$/.exec(tail);
+      if (da && req.method === 'DELETE') { const before = rec.attachments.length; rec.attachments = rec.attachments.filter(a => a.itemId !== da[1]); return before === rec.attachments.length ? send(404, { result: 'Failure', message: 'no such attachment' }) : send(200, { result: 'Success', data: null }); }
       if (tail.startsWith('Validate')) return send(200, { issues: [] });
       if (/^lock$/i.test(tail) && req.method === 'POST') { rec.state = 'locked'; rec.locked = true; return send(200, { result: 'Success', data: null }); }
       if (/^unlock$/i.test(tail) && req.method === 'POST') { rec.state = 'draft'; rec.locked = false; return send(200, { result: 'Success', data: null }); }

@@ -43,7 +43,7 @@
   const sget = (keys) => new Promise(res => storage.get(keys, (v) => res(v || {})));
   const sset = (obj) => new Promise(res => storage.set(obj, () => res()));
   const sremove = (keys) => new Promise(res => storage.remove(keys, () => res()));
-  const DEFAULT_SETTINGS = { purgeHoursAfterLock: 0, probeSec: 20, heldProbeSec: 8, warmTabs: true, cardCollapsed: false, showTimes: true, sendPrompt: true, unsentList: true, quickHistory: true, quickMeds: true, quickAllergies: true, quickAcuity: true, quickDelays: true, quickTransport: true, quickAssess: true, quickDisposition: true, autoResponse: true, quickIncident: true, quickMechanism: true, quickFacilities: true, quickNarrative: true, quickPatient: true, quickRefusal: true, autoMileage: true, askBeforeLock: true, cadGate: true, facilitySending: [], facilityDestination: [] };
+  const DEFAULT_SETTINGS = { purgeHoursAfterLock: 0, probeSec: 20, heldProbeSec: 8, warmTabs: true, cardCollapsed: false, showTimes: true, sendPrompt: true, unsentList: true, quickHistory: true, quickMeds: true, quickAllergies: true, quickAcuity: true, quickDelays: true, quickTransport: true, quickAssess: true, quickDisposition: true, autoResponse: true, quickIncident: true, quickMechanism: true, quickFacilities: true, quickNarrative: true, quickPatient: true, quickRefusal: true, autoMileage: true, askBeforeLock: true, cadGate: true, scanDocs: true, facilitySending: [], facilityDestination: [] };
   // The agency's standard facility chips (ids and names from ESO's saved facilities). Every install
   // starts with these; Settings can add or remove per device.
   const FAC = {
@@ -68,7 +68,7 @@
 
   // Settings the crew may change; everything else in Settings is locked (set in the code).
   // Ask the owner whether a new setting is locked or open before adding it (see CLAUDE.md).
-  const OPEN_SETTINGS = ['quickHistory', 'quickMeds', 'quickAllergies', 'quickAcuity', 'quickDelays', 'quickTransport', 'quickAssess', 'quickDisposition', 'autoResponse', 'quickIncident', 'quickMechanism', 'quickFacilities', 'quickNarrative', 'quickPatient', 'quickRefusal', 'autoMileage', 'facilitySending', 'facilityDestination'];
+  const OPEN_SETTINGS = ['quickHistory', 'quickMeds', 'quickAllergies', 'quickAcuity', 'quickDelays', 'quickTransport', 'quickAssess', 'quickDisposition', 'autoResponse', 'quickIncident', 'quickMechanism', 'quickFacilities', 'quickNarrative', 'quickPatient', 'quickRefusal', 'autoMileage', 'scanDocs', 'facilitySending', 'facilityDestination'];
   // The open settings follow the ESO login: one row per login in the agency's table, written when
   // the login is first seen and whenever they change something. Only these settings go there;
   // never a run, nor which runs were worked. The key is the project's public one.
@@ -156,9 +156,13 @@
       onVitalCopied(payload);
     } else if (type === 'facilities' && payload && Array.isArray(payload.items)) {
       facilities = payload;
-      facilityTypes = { locationTypes: payload.locationTypes || [], destinationTypes: payload.destinationTypes || [], crew: payload.crew || [] };
+      facilityTypes = { locationTypes: payload.locationTypes || [], destinationTypes: payload.destinationTypes || [], crew: payload.crew || [], lists: payload.lists || null };
       await sset({ facilityTypes });
       if (panelOpen && settingsOpen) renderPanel(); layoutQuick();
+    } else if (type === 'event' && payload && payload.name === 'attached') {
+      onAttached(payload);
+    } else if (type === 'event' && payload && payload.name === 'facesheetFilled') {
+      onFacesheetFilled(payload);
     } else if (type === 'event' && payload && payload.name === 'sendPrompt') {
       showSendPrompt(payload);
     } else if (type === 'event' && payload && payload.name === 'sent') {
@@ -436,6 +440,7 @@
         `<label class="s"><input type="checkbox" id="qpatient" ${settings.quickPatient === false ? '' : 'checked'}> Patient: Race row (every race, shortened) (Patient tab)</label>` +
         `<label class="s"><input type="checkbox" id="qrefusal" ${settings.quickRefusal === false ? '' : 'checked'}> Refusal form: chips for Legal, Decision-Making, Medical, Check All notifications and the four Patient Refusals inside ESO's Patient Refusal Form (Signatures tab)</label>` +
         `<label class="s"><input type="checkbox" id="qmileage" ${settings.autoMileage === false ? '' : 'checked'}> Loaded mileage: press ESO's Calculate Mileage once the scene and destination both have an address (Incident tab)</label>` +
+        `<label class="s"><input type="checkbox" id="qscan" ${settings.scanDocs === false ? '' : 'checked'}> Paperwork scanner: when you press Camera or Add Attachment in ESO's Attachments dialog, ESO Save first asks what the paperwork is (Facesheet, Physician Certification, Med List, Monitor Printout or Other) and names the attachment after it, for example "260918-021:Facesheet". A run keeps one Facesheet and one Physician Certification: adding a second asks whether to replace the first. On an iPad with the ESO Save app, Camera opens the app's document scanner, which straightens and crops each page; the pages come back and attach themselves. A facesheet, scanned or uploaded, is read and offered to fill the Patient and Billing pages. Off: ESO's own camera and Add Attachment work as they always have.</label>` +
         facilityPicker('facilitySending', 'Sending facility chips (Scene)') + facilityPicker('facilityDestination', 'Destination facility chips') +
         `<div class="actions"><button class="a" data-act="save-settings">Save</button></div></div>`);
     }
@@ -585,6 +590,7 @@
       settings.quickPatient = !!panel.querySelector('#qpatient').checked;
       settings.quickRefusal = !!panel.querySelector('#qrefusal').checked;
       settings.autoMileage = !!panel.querySelector('#qmileage').checked;
+      settings.scanDocs = !!panel.querySelector('#qscan').checked;
       layoutQuick();
       await sset({ settings }); toPage('settings', settings); settingsOpen = false; renderPanel(); renderTimes();
       pushUser();
@@ -2201,6 +2207,361 @@
     }
     endVeil();
     cadApproved = true; btn.click(); cadApproved = false;
+  }
+  // ---- paperwork: the Camera and Add Attachment presses in ESO's Attachments dialog are caught
+  // on the way down and the type of paperwork asked first. The chosen label becomes ESO's
+  // description for the upload (ESO's own camera or Add Attachment dialog does the rest, as it
+  // always did). On an iPad carrying the ESO Save app, Camera hops to the app's document scanner
+  // instead; the scanned pages come back through the app and are uploaded exactly as ESO's
+  // dialog would upload them.
+  const DOC_TYPES = [['Facesheet', true], ['Physician Certification', true], ['Med List', false], ['Monitor Printout', false], ['Other', false]]; // [type, only one per run]
+  const docLabel = (run, type) => `${run.incidentNumber || 'run'}:${type}`;
+  const NATIVE_APP = 'com.ruralmedems.esosave';
+  let nativeScanner = false; // the ESO Save app is reachable and has a scanner (iPad)
+  let pendingScan = null;    // { recordId, label, type, replace, at } while the app is scanning
+  let scanPoll = null;
+  async function nativeCall(msg) {
+    try {
+      if (!ON_ESO) { const r = await fetch(location.origin + '/__native', { method: 'POST', body: JSON.stringify(msg) }); return r.ok ? r.json() : null; }
+      return await new Promise(res => { try { api.runtime.sendMessage({ type: 'native', app: NATIVE_APP, msg }, (r) => { void api.runtime.lastError; res(r || null); }); } catch (e) { res(null); } });
+    } catch (e) { return null; }
+  }
+  async function probeNative() {
+    const r = await nativeCall({ type: 'ping' });
+    nativeScanner = !!(r && r.native && r.scanner);
+  }
+  probeNative();
+  let attachApproved = false;
+  const attachmentsDialog = (btn) => {
+    const dlg = btn.closest('eso-modal-dialog'); if (!dlg) return null;
+    const head = dlg.querySelector('header, h1');
+    return head && /^Attachments$/i.test(norm(head.textContent)) ? dlg : null;
+  };
+  guardTap((btn) => {
+    const mode = norm(btn.textContent);
+    if (!/^(Camera|Add Attachment)$/i.test(mode) || settings.scanDocs === false || !attachmentsDialog(btn)) return null;
+    const run = currentRun(); if (!run || run.locked) return null;
+    if (attachApproved) { attachApproved = false; return 'through'; }
+    return /^Camera$/i.test(mode) ? 'camera' : 'file';
+  }, (btn, mode) => askDocType(btn, mode));
+  const askChoice = (title, text, buttons) => new Promise(res => askBox(title, text, buttons, res));
+  async function askDocType(btn, mode) {
+    const run = currentRun(); if (!run) return;
+    const type = await askChoice('What is this paperwork?', mode === 'camera' && nativeScanner ? 'The ESO Save scanner opens next; the pages attach themselves when you come back.' : 'The attachment is named after your answer.', DOC_TYPES.map(([t]) => [t, t]).concat([['Cancel', null]]));
+    if (!type) return;
+    const single = DOC_TYPES.find(d => d[0] === type)[1];
+    const label = docLabel(run, type);
+    let replace = false;
+    if (single && (run.attachments || []).some(a => a.description === label)) {
+      const c = await askChoice(`A ${type} is already attached`, `This run already has an attachment named ${label}. Replace it with the new one, or keep both?`, [['Replace it', 'replace'], ['Keep both', 'keep'], ['Cancel', null]]);
+      if (!c) return;
+      replace = c === 'replace';
+    }
+    if (mode === 'camera' && nativeScanner) { await startScan(run, type, label, replace, single ? 1 : 12); return; }
+    toPage('action', { name: 'attachTag', recordId: run.recordId, label, type, replace });
+    attachApproved = true; btn.click(); attachApproved = false;
+  }
+  async function startScan(run, type, label, replace, pages) {
+    pendingScan = { recordId: run.recordId, label, type, replace, at: Date.now() };
+    await sset({ pendingScan });
+    const url = `esosave://scan?type=${encodeURIComponent(type)}&record=${encodeURIComponent(run.recordId)}&incident=${encodeURIComponent(run.incidentNumber || '')}&pages=${pages}`;
+    if (ON_ESO) location.href = url; else nativeCall({ type: 'open', url });
+    watchScans();
+  }
+  function watchScans() {
+    if (scanPoll) return;
+    scanPoll = setInterval(pollScans, 4000);
+    pollScans();
+  }
+  let pollingScans = false;
+  async function pollScans() {
+    if (pollingScans) return;
+    if (!pendingScan) { clearInterval(scanPoll); scanPoll = null; return; }
+    if (Date.now() - pendingScan.at > 30 * 60 * 1000) { pendingScan = null; sset({ pendingScan: null }); clearInterval(scanPoll); scanPoll = null; return; }
+    pollingScans = true;
+    try {
+      const r = await nativeCall({ type: 'scans' });
+      const scans = r && Array.isArray(r.scans) ? r.scans : [];
+      for (const sc of scans) {
+        if (!sc || !sc.id || !Array.isArray(sc.pages) || !sc.pages.length) { if (sc && sc.id) nativeCall({ type: 'consume', id: sc.id }); continue; }
+        const p = pendingScan && (!sc.record || sc.record === pendingScan.recordId) ? pendingScan : null;
+        const type = sc.type || (p && p.type) || 'Other';
+        const run = p ? currentRun() : null;
+        const recordId = sc.record || (p && p.recordId);
+        if (!recordId) { nativeCall({ type: 'consume', id: sc.id }); continue; }
+        const label = (p && p.label) || `${(run && run.incidentNumber) || sc.incident || 'run'}:${type}`;
+        const pagesBlobs = sc.pages.map(b64 => { try { const bin = atob(b64); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return new Blob([u], { type: 'image/jpeg' }); } catch (e) { return null; } }).filter(Boolean);
+        lateVeil('Attaching…', `${label}${pagesBlobs.length > 1 ? ` (${pagesBlobs.length} pages)` : ''}`, 0);
+        toPage('action', { name: 'attachUpload', recordId, label, type, replace: !!(p && p.replace), pages: pagesBlobs, text: sc.text || null, ext: 'jpg', scanId: sc.id });
+        if (p) { pendingScan = null; sset({ pendingScan: null }); }
+      }
+    } finally { pollingScans = false; }
+    if (!pendingScan) { clearInterval(scanPoll); scanPoll = null; }
+  }
+  for (const ev of ['visibilitychange', 'focus', 'pageshow']) addEventListener(ev, () => { if (pendingScan && (document.visibilityState !== 'hidden')) pollScans(); });
+  (async () => { const st = await sget('pendingScan'); if (st.pendingScan && Date.now() - st.pendingScan.at < 30 * 60 * 1000) { pendingScan = st.pendingScan; watchScans(); } })();
+  function onAttached(p) {
+    endVeil();
+    if (p.scanId) nativeCall({ type: 'consume', id: p.scanId });
+    if (!p.ok) { alert(`ESO Save: could not attach ${p.label}. ${p.error || ''}`); return; }
+    if (p.source === 'scan') notice(`${p.label} attached`, `${p.pages > 1 ? p.pages + ' pages are' : 'It is'} on the run. Reopen Attachments to see ${p.pages > 1 ? 'them' : 'it'}.`);
+    if (p.type === 'Facesheet' && p.file) onFacesheet(p);
+  }
+  // ---- the facesheet: read (the app's text recognition on an iPad: a scan carries its text, an
+  // uploaded picture is read on request), the labels on it mapped to ESO's fields, and the crew
+  // asked before the Patient and Billing pages are written.
+  async function onFacesheet(p) {
+    let text = p.text || null;
+    if (!text && p.file && nativeScanner) {
+      lateVeil('Reading the facesheet…', p.label, 0);
+      try {
+        const b64 = await blobBase64(p.file);
+        const r = await nativeCall({ type: 'ocr', image: b64 });
+        text = r && r.text ? r.text : null;
+      } catch (e) { text = null; }
+      endVeil();
+    }
+    if (!text) { if (p.source === 'scan') notice('Facesheet attached', 'It could not be read, so the Patient and Billing pages were left alone.', 4000); return; }
+    const parsed = parseFacesheet(text);
+    const plan = facesheetPlan(parsed, (facilityTypes && facilityTypes.lists) || null);
+    if (!plan.patient.length && !plan.billing.length) { notice('Facesheet attached', 'Nothing on it could be read into the Patient or Billing page.', 4000); return; }
+    const run = currentRun(); if (!run) return;
+    askFill(run, plan);
+  }
+  const blobBase64 = (blob) => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1] || ''); r.onerror = () => rej(new Error('read failed')); r.readAsDataURL(blob); });
+  function askFill(run, plan) {
+    hideVeil();
+    if (!shadow) return;
+    veil = document.createElement('div');
+    veil.className = 'veil';
+    veil.style.cursor = 'default';
+    veil.innerHTML = `<div class="box askbox fillask" style="max-width:560px;text-align:left"><h2>Fill from the facesheet?</h2>
+      <div class="why" style="font-size:14px;margin:8px 0 4px">These go onto the Patient and Billing pages, replacing what is there for these fields:</div>
+      <ul style="margin:4px 0 10px 18px;padding:0;font-size:14px;line-height:1.45">${plan.lines.map(l => `<li>${esc(l)}</li>`).join('')}</ul>
+      ${plan.skipped.length ? `<div class="why" style="font-size:13px;margin:0 0 10px">Left blank: ${esc(plan.skipped.join('; '))}.</div>` : ''}
+      <div class="actions"><button class="a" data-act="fill-yes">Fill both pages</button><button class="a sec" data-act="fill-no">Not now</button></div></div>`;
+    veil.querySelector('[data-act=fill-no]').addEventListener('click', () => hideVeil());
+    veil.querySelector('[data-act=fill-yes]').addEventListener('click', () => {
+      showVeilMessage('Filling the Patient and Billing pages…', `${plan.patient.length + plan.billing.length} fields`);
+      toPage('action', { name: 'fillFacesheet', recordId: run.recordId, patient: plan.patient, billing: plan.billing, places: plan.places });
+    });
+    shadow.appendChild(veil);
+  }
+  async function onFacesheetFilled(p) {
+    hideVeil();
+    if (!p.ok) { alert('ESO Save: could not fill from the facesheet. ' + (p.error || '')); return; }
+    // the app only shows what it has loaded: step off the tab and back so it re-reads the page
+    const id = lastStatus && lastStatus.currentRecordId;
+    const here = ['Patient', 'Billing'].find(v => onTab(v));
+    if (here && id) {
+      const away = tabElement('INCIDENT'), back = tabElement(TAB_LABELS[here]);
+      if (away && back) { away.click(); await waitViewLoaded('Incident', id, 1500).catch(() => {}); back.click(); await waitViewLoaded(here, id, 3000).catch(() => {}); }
+    }
+    notice('Patient and Billing pages filled', `${p.patient} patient fields and ${p.billing} billing fields${p.held ? ', held until ESO answers' : ''}. Check them over.`, 4000);
+  }
+  // Facesheets come in two shapes around here: "Patient Information / Guarantor Information /
+  // Primary Insurance / Secondary Insurance" blocks with "Label: value" pairs in two columns, and
+  // "PATIENT / GUARANTOR / COVERAGE" blocks with the label right-aligned before its value. The
+  // text arrives one recognised row per line, the cells of a row separated by " | ". Every value
+  // is taken from a label; an unlabelled row right after an address is the city line, and an
+  // unlabelled row naming a race is the race.
+  const RACES = [[/white|caucasian/i, 'White'], [/black|african/i, 'Black or African American'], [/asian/i, 'Asian'], [/indian|alaska|native american/i, 'American Indian or Alaska Native'], [/hispanic|latino/i, 'Hispanic or Latino'], [/middle eastern|north african/i, 'Middle Eastern or North African'], [/hawaiian|pacific/i, 'Native Hawaiian or Other Pacific Islander']];
+  const RELS = [[/^self|patient$/i, 'Self'], [/spouse|husband|wife/i, 'Spouse'], [/child|son|daughter|dependent/i, 'Child/Dependent'], [/parent|mother|father/i, 'Parent'], [/partner/i, 'Life/Domestic Partner'], [/employee/i, 'Employee']];
+  function parseFacesheet(text) {
+    const out = { patient: {}, guarantor: {}, primary: {}, secondary: {}, contact: {}, encounter: {}, head: {} };
+    const key = (t) => String(t || '').toLowerCase().replace(/[^a-z]/g, '');
+    let section = 'head', lastAddressRow = -1, lastAddressSection = null;
+    const rows = String(text).split(/\r?\n/);
+    const set = (sec, k, v) => { if (v && out[sec] && !(k in out[sec])) out[sec][k] = v; };
+    rows.forEach((row, r) => {
+      const cells = row.split(/\s\|\s|\t/).map(c => c.trim()).filter(Boolean);
+      let pending = null;
+      for (const cell of cells) {
+        const k = key(cell);
+        if (!/:/.test(cell)) {
+          if (/^(patientinformation|patient)$/.test(k)) { section = 'patient'; continue; }
+          if (/^(guarantorinformation|guarantor)$/.test(k)) { section = 'guarantor'; continue; }
+          if (/^(guarantoremployer)$/.test(k)) { section = 'other'; continue; }
+          if (/^(contactinformation|emergencycontact|nextofkin)$/.test(k)) { section = 'contact'; continue; }
+          if (/^primaryinsurance$/.test(k)) { section = 'primary'; continue; }
+          if (/^secondaryinsurance$/.test(k)) { section = 'secondary'; continue; }
+          if (/^(tertiaryinsurance|coverage)$/.test(k)) { section = 'other'; continue; }
+          if (/^(encounterinformation|encounter)$/.test(k)) { section = 'encounter'; continue; }
+        }
+        const m = /^([^:]{1,40}):\s*(.*)$/.exec(cell);
+        if (m && key(m[1])) {
+          const label = key(m[1]), value = m[2].trim();
+          if (value) { take(section, label, value, r); pending = null; } else pending = label;
+          continue;
+        }
+        if (pending) { take(section, pending, cell, r); pending = null; continue; }
+        // an unlabelled cell: the city line under an address, or the race
+        const city = cityLine(cell);
+        if (city && lastAddressSection === section && r - lastAddressRow <= 2) { take(section, 'city', cell, r); continue; }
+        if ((section === 'patient' || section === 'head') && RACES.some(([re]) => re.test(cell)) && cell.length < 45) set('patient', 'race', cell);
+      }
+    });
+    function take(sec, label, value, r) {
+      const s = out[sec] ? sec : 'other';
+      const is = (...names) => names.includes(label);
+      if (is('pcp', 'primarycareprovider', 'primarycarephysician', 'primaryphysician', 'pcpname')) { set('patient', 'pcp', value); return; }
+      if (sec === 'patient' || sec === 'head') {
+        if (is('patientname', 'name', 'patient')) set('patient', 'name', value);
+        else if (is('homeaddress', 'address', 'address1', 'streetaddress', 'street')) { set('patient', 'address', value); lastAddressRow = r; lastAddressSection = sec; }
+        else if (is('city', 'citystatezip', 'citystzip')) set('patient', 'city', value);
+        else if (is('sex', 'gender')) set('patient', 'sex', value);
+        else if (is('dob', 'dateofbirth', 'birthdate', 'birthdate')) set('patient', 'dob', value);
+        else if (is('ssn', 'socialsecurity', 'socialsecuritynumber', 'ss')) set('patient', 'ssn', value);
+        else if (is('race', 'raceethnicity')) set('patient', 'race', value);
+        else if (is('homephone', 'primaryphone', 'phone', 'phonenumber', 'homephonenumber')) set('patient', 'phoneHome', value);
+        else if (is('mobilephone', 'cellphone', 'cell', 'mobile')) set('patient', 'phoneMobile', value);
+        else if (is('workphone', 'businessphone')) set('patient', 'phoneWork', value);
+      } else if (sec === 'guarantor') {
+        if (is('guarantorname', 'guarantor', 'name')) set('guarantor', 'name', value);
+        else if (is('patientsreltn', 'relationtopatient', 'relationship', 'reltn', 'relationshiptopatient', 'relationtothepatient', 'patientrelationship', 'relation')) set('guarantor', 'rel', value);
+        else if (is('billingaddress', 'address', 'homeaddress', 'address1')) { set('guarantor', 'address', value); lastAddressRow = r; lastAddressSection = sec; }
+        else if (is('city', 'citystatezip')) set('guarantor', 'city', value);
+        else if (is('dob', 'dateofbirth', 'birthdate')) set('guarantor', 'dob', value);
+        else if (is('ssn', 'socialsecurity', 'socialsecuritynumber')) set('guarantor', 'ssn', value);
+      } else if (sec === 'primary' || sec === 'secondary') {
+        if (is('insurancename', 'payor', 'payer', 'insurance', 'carrier', 'company', 'insurancecompany', 'planname', 'payorname', 'payername')) set(sec, 'company', value);
+        else if (is('plan', 'insuranceplan', 'product')) set(sec, 'plan', value);
+        else if (is('policynumber', 'policy', 'subscriberid', 'memberid', 'idnumber', 'policyid', 'memberno', 'policyno', 'insuranceid', 'id', 'subscribernumber', 'membernumber')) set(sec, 'policy', value);
+        else if (is('groupnumber', 'group', 'groupno', 'groupid')) set(sec, 'group', value);
+        else if (is('insurancephone', 'phone', 'phonenumber', 'payorphone')) set(sec, 'phone', value);
+        else if (is('subscribername', 'subscriber', 'insuredname', 'insured', 'policyholder')) set(sec, 'subscriber', value);
+        else if (is('patientsreltn', 'patreltosubscriber', 'relationship', 'relationtosubscriber', 'reltn', 'relationshiptosubscriber', 'patientrelationship', 'relationtoinsured', 'relationshiptoinsured')) set(sec, 'rel', value);
+        else if (is('financialclass', 'finclass', 'payorclass')) set(sec, 'fin', value);
+      }
+    }
+    return out;
+  }
+  function cityLine(t) {
+    const m = /^([A-Za-z .'-]{2,}?),?\s+([A-Za-z]{2})\.?\s+(\d{5})(?:\s*-?\s*(\d{1,4}))?\s*$/.exec(String(t || '').trim());
+    return m ? { city: m[1].trim(), state: m[2].toUpperCase(), zip: m[3] } : null;
+  }
+  const splitName = (t) => {
+    const clean = String(t || '').replace(/[*"]/g, '').replace(/\s+/g, ' ').trim();
+    if (!clean) return null;
+    let last, rest;
+    if (clean.includes(',')) { [last, rest] = clean.split(',').map(x => x.trim()); }
+    else { const w = clean.split(' '); last = w.pop(); rest = w.join(' '); }
+    const parts = (rest || '').split(' ').filter(Boolean);
+    return { last, first: parts.shift() || '', middle: parts.join(' ') };
+  };
+  const dateOf = (t) => { const m = /(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(String(t || '')); return m ? `${m[1].padStart(2, '0')}/${m[2].padStart(2, '0')}/${m[3]}` : null; };
+  const phoneOf = (t) => { const d = String(t || '').replace(/\D/g, ''); return d.length >= 10 ? d.slice(-10) : null; };
+  const fmtPhone = (d) => `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}`;
+  // What goes where: the ops for the Patient page and the Billing page, the place lookups, a line
+  // per item for the question, and what was left blank and why.
+  function facesheetPlan(f, lists) {
+    const L = lists || {};
+    const byName = (list, re) => { const x = (list || []).find(i => re.test(i.name || '')); return x ? x.id : null; };
+    const patient = [], billing = [], places = [], lines = [], skipped = [];
+    const ed = (arr, address, fieldRef, value, dataType) => { if (value !== null && value !== undefined && value !== '') arr.push({ verb: 'EDIT', address, fieldRef, value, dataType: dataType || 'string' }); };
+    const phoneOps = (arr, base, refs, typeId, number) => {
+      const k = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+      arr.push({ verb: 'ADD', address: `${base}.items.['${k}']`, fieldRef: refs[0], value: {}, dataType: 'collection', isComplexType: true });
+      if (typeId) arr.push({ verb: 'EDIT', address: `${base}.items.['${k}'].phoneTypeId`, fieldRef: refs[1], value: typeId, dataType: 'singleselect' });
+      arr.push({ verb: 'EDIT', address: `${base}.items.['${k}'].phoneNumber`, fieldRef: refs[2], value: number, dataType: 'phone' });
+    };
+    const P = f.patient, G = f.guarantor;
+    // ---- Patient page
+    const name = splitName(P.name);
+    if (name && name.last) {
+      ed(patient, 'patient.demographics.lastName', 'PATIENTLASTNAME', name.last); ed(patient, 'patient.demographics.firstName', 'PATIENTFIRSTNAME', name.first); ed(patient, 'patient.demographics.middleName', 'PATIENTMIDDLENAME', name.middle);
+      lines.push(`Name: ${name.last}, ${name.first}${name.middle ? ' ' + name.middle : ''}`);
+    }
+    const sex = /^f/i.test(P.sex || '') ? 'Female' : /^m/i.test(P.sex || '') ? 'Male' : null;
+    if (sex) {
+      const sid = byName(L.sex, new RegExp('^' + sex + '$', 'i')), gid = byName(L.gender, new RegExp('^' + sex + '$', 'i'));
+      if (sid) ed(patient, 'patient.demographics.sexId', 'PATIENTSEXID', sid, 'singleselect');
+      if (gid) ed(patient, 'patient.demographics.genderId', 'PATIENTGENDERID', gid, 'singleselect');
+      if (sid || gid) lines.push(`Sex: ${sex}`); else skipped.push('sex (list not seen yet)');
+    }
+    const dob = dateOf(P.dob);
+    if (dob) { ed(patient, 'patient.demographics.dob', 'PATIENTDOB', dob + ' 00:00:00', 'date'); lines.push(`DOB: ${dob}`); }
+    if (P.ssn) { const d = P.ssn.replace(/\D/g, ''); if (/x|\*/i.test(P.ssn) || d.length !== 9) skipped.push('SSN (masked on the facesheet)'); else { ed(patient, 'patient.demographics.ssn', 'PATIENTSSN', d, 'ssn'); lines.push('SSN: ***-**-' + d.slice(-4)); } }
+    if (P.race) {
+      const hit = RACES.find(([re]) => re.test(P.race));
+      const rid = hit ? byName(L.race, new RegExp('^' + hit[1].replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i')) : null;
+      if (rid) { patient.push({ verb: 'ADD', address: `patient.demographics.raceIds.['${rid}']`, fieldRef: 'PATIENTRACEIDS', value: rid, dataType: 'multiselect' }); lines.push(`Race: ${hit[1]}`); }
+      else skipped.push(`race "${P.race}" (not one of ESO's)`);
+    }
+    const addr = (src) => { const c = src.city ? cityLine(src.city) : null; const st = c ? (L.states || []).find(s => s.abbr === c.state) : null; return { line1: src.address || null, city: c ? c.city : null, stateId: st ? st.id : null, state: c ? c.state : null, zip: c ? c.zip : null }; };
+    const pa = addr(P);
+    if (pa.line1 || pa.city) {
+      ed(patient, 'patient.contact.address.address1', 'PATIENTADDRESS1', pa.line1); ed(patient, 'patient.contact.address.city', 'PATIENTCITY', pa.city);
+      if (pa.stateId) ed(patient, 'patient.contact.address.stateId', 'PATIENTSTATE', pa.stateId, 'singleselect'); else if (pa.state) skipped.push(`state ${pa.state} (not in ESO's list)`);
+      ed(patient, 'patient.contact.address.zip', 'PATIENTZIP', pa.zip);
+      if (pa.city && pa.stateId && pa.zip) places.push({ scope: 'patient', city: pa.city, stateId: pa.stateId, zip: pa.zip });
+      lines.push(`Address: ${[pa.line1, pa.city, pa.state, pa.zip].filter(Boolean).join(', ')}`);
+    }
+    const ptype = (re) => byName(L.phoneTypes, re);
+    for (const [k, re, what] of [['phoneHome', /^home$/i, 'Home'], ['phoneMobile', /^home mobile$/i, 'Mobile'], ['phoneWork', /^work$/i, 'Work']]) {
+      const n = phoneOf(P[k]); if (!n) continue;
+      phoneOps(patient, 'patient.contact.patientPhoneNumbers', ['PATIENTPHONENUMBERS', 'PATIENTPHONETYPEID', 'PATIENTPHONENUMBER'], ptype(re), n);
+      lines.push(`${what} phone: ${fmtPhone(n)}`);
+    }
+    if (P.pcp) {
+      const doc = P.pcp.split(',')[0].replace(/^\s*dr\.?\s+/i, '').trim().split(/\s+/).filter(Boolean);
+      if (doc.length >= 2) { ed(patient, 'patient.contact.physicianFirstName', 'PATIENTPHYSICIANFIRSTNAME', doc[0]); ed(patient, 'patient.contact.physicianLastName', 'PATIENTPHYSICIANLASTNAME', doc[doc.length - 1]); lines.push(`Physician: ${doc[0]} ${doc[doc.length - 1]}`); }
+    }
+    // ---- Billing page: who pays, and the insured
+    const ins = (src, which, refs) => {
+      if (!src.company) return null;
+      if (L.insuranceOther) ed(billing, `billing.payment.${which}InsuranceId`, refs.id, L.insuranceOther, 'singleselect'); else skipped.push(`${which} insurance company (list not seen yet)`);
+      ed(billing, `billing.payment.${which}CompanyName`, refs.company, src.company);
+      ed(billing, `billing.payment.${which}PolicyNumber`, refs.policy, src.policy || null);
+      ed(billing, `billing.payment.${which}GroupNumber`, refs.group, src.group || null);
+      ed(billing, `billing.payment.${which}InsuranceGroupName`, refs.groupName, src.plan || null);
+      const n = phoneOf(src.phone);
+      if (n) phoneOps(billing, `billing.payment.${which}InsurancePhoneNumbers`, [refs.phones, refs.phoneType, refs.phone], ptype(/^work$/i), n);
+      lines.push(`${which === 'primary' ? 'Primary' : 'Secondary'} insurance: ${src.company}${src.plan ? ' (' + src.plan + ')' : ''}${src.policy ? ', policy ' + src.policy : ''}${src.group ? ', group ' + src.group : ''}${n ? ', ' + fmtPhone(n) : ''}`);
+      return src;
+    };
+    const pri = ins(f.primary, 'primary', { id: 'PRIMARYINSURANCEID', company: 'PRIMARYCOMPANYNAME', policy: 'PRIMARYPOLICYNUMBER', group: 'PRIMARYGROUPNUMBER', groupName: 'BILLINGPRIMARYINSURANCEGROUPNAME', phones: 'BILLINGPRIMARYINSURANCEPHONENUMBERS', phoneType: 'BILLINGPRIMARYINSURANCEPHONETYPEID', phone: 'BILLINGPRIMARYINSURANCEPHONENUMBER' });
+    const sec = ins(f.secondary, 'secondary', { id: 'SECONDARYINSURANCEID', company: 'SECONDARYCOMPANYNAME', policy: 'SECONDARYPOLICYNUMBER', group: 'SECONDARYGROUPNUMBER', groupName: 'BILLINGSECONDARYINSURANCEGROUPNAME', phones: 'BILLINGSECONDARYINSURANCEPHONENUMBERS', phoneType: 'BILLINGSECONDARYINSURANCEPHONETYPEID', phone: 'BILLINGSECONDARYINSURANCEPHONENUMBER' });
+    const words = (src) => src ? [src.company, src.plan, src.fin].filter(Boolean).join(' ') : '';
+    const method = /medicare/i.test(words(pri)) ? 'Medicare' : /medicaid/i.test(words(pri)) ? 'Medicaid' : pri ? 'Insurance' : null;
+    if (method) { const mid = byName(L.payment, new RegExp('^' + method + '$', 'i')); if (mid) { ed(billing, 'billing.payment.methodOfPaymentId', 'METHODOFPAYMENTID', mid, 'singleselect'); lines.push(`Method of payment: ${method}`); } }
+    const MBI = /^[1-9][AC-HJKMNP-RT-Y][AC-HJKMNP-RT-Y0-9]\d[AC-HJKMNP-RT-Y][AC-HJKMNP-RT-Y0-9]\d[AC-HJKMNP-RT-Y]{2}\d{2}$/;
+    for (const src of [pri, sec]) {
+      if (!src || !src.policy) continue;
+      const w = words(src), id = src.policy.replace(/\s/g, '').toUpperCase();
+      if (/medicare/i.test(w) && !/advantage|hmo|ppo/i.test(w) && MBI.test(id) && !billing.some(o => o.fieldRef === 'MEDICARENAME')) { ed(billing, 'billing.payment.medicareName', 'MEDICARENAME', id); lines.push(`Medicare number: ${id}`); }
+      if (/medicaid/i.test(w) && !billing.some(o => o.fieldRef === 'MEDICAIDNAME')) { ed(billing, 'billing.payment.medicaidName', 'MEDICAIDNAME', src.policy); lines.push(`Medicaid number: ${src.policy}`); }
+    }
+    const relText = G.rel || (pri && pri.rel) || (sec && sec.rel) || null;
+    const rel = relText ? (RELS.find(([re]) => re.test(relText.trim())) || [])[1] : null;
+    const gname = splitName(G.name || (pri && pri.subscriber) || null);
+    const self = rel === 'Self' || (!rel && gname && name && gname.last === name.last && gname.first === name.first);
+    if (gname || self) {
+      const who = self && name ? name : gname;
+      if (who) { ed(billing, 'billing.contactForPayment.insuredLastName', 'INSUREDLASTNAME', who.last); ed(billing, 'billing.contactForPayment.insuredFirstName', 'INSUREDFIRSTNAME', who.first); ed(billing, 'billing.contactForPayment.insuredMiddleName', 'INSUREDMIDDLENAME', who.middle); }
+      const rid = rel ? byName(L.relationship, new RegExp('^' + rel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i')) : (self ? byName(L.relationship, /^Self$/i) : null);
+      if (rid) ed(billing, 'billing.contactForPayment.relationshipToTheInsuredId', 'RELATIONSHIPTOTHEINSUREDID', rid, 'singleselect');
+      else if (relText) skipped.push(`relationship to the insured "${relText}"`);
+      const gd = dateOf(G.dob) || (self ? dob : null);
+      if (gd) ed(billing, 'billing.contactForPayment.dob', 'BILLINGDOB', gd + ' 00:00:00', 'datetime');
+      const ga = G.address || G.city ? addr(G) : (self ? pa : null);
+      if (ga && (ga.line1 || ga.city)) {
+        ed(billing, 'billing.contactForPayment.address.address1', 'BILLINGCONTACTADDRESS1', ga.line1); ed(billing, 'billing.contactForPayment.address.city', 'BILLINGCONTACTCITY', ga.city);
+        if (ga.stateId) ed(billing, 'billing.contactForPayment.address.stateId', 'BILLINGCONTACTSTATEID', ga.stateId, 'singleselect');
+        ed(billing, 'billing.contactForPayment.address.zip', 'BILLINGCONTACTZIP', ga.zip);
+        if (ga.city && ga.stateId && ga.zip) places.push({ scope: 'billing', city: ga.city, stateId: ga.stateId, zip: ga.zip });
+      }
+      if (who) lines.push(`Insured: ${who.last}, ${who.first}${rel || self ? ' (' + (rel || 'Self') + ')' : ''}${gd ? ', DOB ' + gd : ''}`);
+      if (G.ssn && /x|\*/i.test(G.ssn)) skipped.push('insured SSN (masked on the facesheet)');
+    }
+    return { patient, billing, places, lines, skipped };
+  }
+  // a short notice in our overlay that goes by itself
+  function notice(title, text, ms = 3000) {
+    showVeilMessage(title, text);
+    if (veil) { const sp = veil.querySelector('.spin'); if (sp) sp.remove(); veil.style.cursor = 'default'; veil.addEventListener('click', hideVeil); }
+    const mine = veil;
+    setTimeout(() => { if (veil === mine) hideVeil(); }, ms);
   }
   // ---- the unit's level, from ESO itself: the crew on the run and their certifications (the
   // agency's people in ESO's configuration bundle). A paramedic on the crew makes the unit ALS,

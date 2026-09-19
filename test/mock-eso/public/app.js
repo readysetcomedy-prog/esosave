@@ -440,6 +440,68 @@
     });
     document.body.appendChild(m);
   });
+  // ---- the Attachments dialog, as ESO draws it: a row per attachment (file name, description
+  // underneath), Close / Camera / Add Attachment. Camera takes a photo at once and uploads it with
+  // an empty description; Add Attachment opens ESO's second dialog (file, Description, Attach).
+  app.cameraClicks = 0; app.attachClicks = 0; app.uploads = 0;
+  function photoBlob() {
+    return new Promise((res) => { const c = document.createElement('canvas'); c.width = 40; c.height = 30; const g = c.getContext('2d'); g.fillStyle = '#ccc'; g.fillRect(0, 0, 40, 30); c.toBlob(res, 'image/jpeg', 0.8); });
+  }
+  function upload(file, name, description) {
+    return new Promise((resolve) => {
+      const fd = new FormData(); fd.append('description', description || ''); fd.append('file', file, name);
+      const x = new XMLHttpRequest();
+      x.open('POST', `/ehr/api/PatientCareRecords/${app.recordId}/Attachments`, true);
+      x.setRequestHeader('accept', 'application/json, text/plain, */*');
+      x.setRequestHeader('x-custom-xsrf-token', XSRF);
+      x.onloadend = () => { app.uploads++; resolve({ status: x.status, text: x.responseText }); };
+      x.send(fd);
+    });
+  }
+  document.getElementById('attachments').addEventListener('click', async () => {
+    const m = document.createElement('eso-modal'); m.setAttribute('modal-type', 'modal');
+    const dlg = document.createElement('eso-modal-dialog'); dlg.className = 'eso-modal-dialog'; m.appendChild(dlg);
+    const render = async () => {
+      const got = (await app.attachments()).data.model;
+      const list = got.attachments; app.incidentNumber = () => got.incidentNumber;
+      dlg.innerHTML = `<header>Attachments</header><div class="content"><div class="content-container"><div class="attachments-grid">
+        ${list.map(a => `<grid-row class="noselect"><grid-cell class="icon-cell file-icon-cell"><div class="file-icon">.${a.extension}</div></grid-cell><grid-cell class="detail-cell"><strong>${a.name}</strong><aside class="ellipsify${a.description ? '' : ' nodata'}">${a.description || ''}</aside></grid-cell></grid-row>`).join('')}
+        </div>${list.length ? '' : '<div class="no-selections-msg"><p>No attachments for this record<br><small>Click below to add one</small></p></div>'}</div>
+        <div class="button-set"><button class="btn close">Close</button><button class="btn green-btn camera">Camera</button><button class="btn green-btn add">Add Attachment</button></div></div>`;
+      dlg.querySelector('.close').addEventListener('click', () => m.remove());
+      dlg.querySelector('.camera').addEventListener('click', async () => {
+        app.cameraClicks++;
+        const n = list.length + 1;
+        await upload(await photoBlob(), `${app.incidentNumber()}Photo${n}.jpg`, '');
+        render();
+      });
+      dlg.querySelector('.add').addEventListener('click', () => {
+        app.attachClicks++;
+        const d = document.createElement('eso-modal-dialog'); d.className = 'eso-modal-dialog';
+        d.innerHTML = `<header>Add Attachment</header><div class="content"><div class="content-container"><grid-row class="field-with-button"><grid-cell><eso-display-field label="File" class="file-field eso-field"><div class="label-container"><label>File</label></div><eso-control class="underline"><div class="filename">Browse to select a file</div></eso-control></eso-display-field></grid-cell><grid-cell class="button-cell"><input type="file"><button class="btn browse">Browse</button></grid-cell></grid-row>
+          <eso-field class="eso-field" data-field-ref="ATTACHMENTDESCRIPTION"><div class="label-container"><label>Description</label></div><eso-control class="underline"><eso-text><input type="text" class="input" maxlength="255"></eso-text></eso-control></eso-field>
+          <footer class="button-set"><button class="btn cancel">Cancel</button><button type="submit" class="btn green-btn attach">Attach</button></footer></div></div>`;
+        const input = d.querySelector('input[type=file]');
+        input.addEventListener('change', () => { d.querySelector('.filename').textContent = input.files[0] ? input.files[0].name : 'Browse to select a file'; });
+        d.querySelector('.cancel').addEventListener('click', () => d.remove());
+        d.querySelector('.attach').addEventListener('click', async () => {
+          const f = input.files[0]; if (!f) return;
+          const n = list.length + 1;
+          await upload(f, `${app.incidentNumber()}Photo${n}.${(f.name.split('.').pop() || 'jpg')}`, d.querySelector('eso-text input').value);
+          d.remove(); render();
+        });
+        m.appendChild(d);
+      });
+    };
+    await render();
+    document.body.appendChild(m);
+  });
+  // a test stands in for the medic browsing to a file
+  app.pickFile = (name, text) => {
+    const input = document.querySelector('eso-modal-dialog input[type=file]'); if (!input) return false;
+    const dt = new DataTransfer(); dt.items.add(new File([text || 'x'], name, { type: /pdf$/i.test(name) ? 'application/pdf' : 'image/jpeg' }));
+    input.files = dt.files; input.dispatchEvent(new Event('change', { bubbles: true })); return true;
+  };
   // ---- loaded mileage, the way ESO does it: only with both addresses; a Calculating dialog, then
   // the three mileage fields are saved and the button goes; otherwise an alert dialog
   app.lockClicks = 0;

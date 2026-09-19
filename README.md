@@ -110,6 +110,24 @@ to bad signal or a hung page.
   once for the crew, and again only if an address changes. A complaint ESO raises about it is
   closed; nothing else is touched. A setting, on by default. Every quick button also hides while
   one of ESO's dialogs (CAD import, a confirmation) is up.
+- **Paperwork scanner.** Pressing Camera or Add Attachment in ESO's Attachments dialog first asks
+  what the paperwork is: Facesheet, Physician Certification, Med List, Monitor Printout or Other.
+  The answer becomes the attachment's description, `260918-021:Facesheet`, so the billing office
+  can tell them apart. A run keeps one Facesheet and one Physician Certification: a second one asks
+  whether to replace the first (the old one is deleted through ESO's own call) or keep both. On a
+  desktop, ESO's own camera or file dialog then runs exactly as before, only the description is
+  filled in. On an iPad carrying the ESO Save app, Camera hops to the app's document scanner
+  (VisionKit: the page is found, straightened and cropped; several pages for a med list or a
+  printout), the crew taps "‹ Safari" to come back, and the pages upload themselves with the same
+  request ESO's dialog sends, named `…Photo1.jpg`, `…Photo2.jpg` as ESO names them. A facesheet
+  (scanned, or a picture uploaded on the iPad) is read by the iPad's own text recognition and the
+  crew shown what was found, name, sex, DOB, race, address, phones, physician, primary and
+  secondary insurance, Medicare or Medicaid number, the insured and their relationship, before
+  anything is written; "Fill both pages" writes the Patient page and the Billing page with the same
+  saves ESO's app makes (the address is looked up in ESO's places table first, so the county comes
+  too). A masked SSN and anything not on ESO's lists is left blank and named. A setting, on by
+  default; off, ESO's camera and Add Attachment work untouched. On a desktop the facesheet is
+  attached and named but not read (no text recognition there).
 - **Copy a vital.** A small copy button floats just left of each saved vital's time in the Vitals
   tab; tapping it re-enters that vital as a new one with the current time, every other value the
   same. Only fields the app itself has been seen saving are copied, and the run log names any that
@@ -224,6 +242,12 @@ Notes:
 - Safari ignores the `world: "MAIN"` manifest entry; the extension detects that and loads the same
   script from its bundle instead (tested).
 - Use the Safari app itself, not a home-screen shortcut: extensions do not run in home-screen web apps.
+
+The app also carries the paperwork scanner. It needs the camera (asked once) and the
+`group.com.ruralmedems.esosave` App Group, which the EAS build sets up from `app.json` and
+`targets/esosave/expo-target.config.js`: the app writes each scan into that shared container and
+the extension's native handler (`SafariWebExtensionHandler.swift`) hands it, with the text read
+off a facesheet by Vision, to the extension through native messaging.
 
 ## Using it
 

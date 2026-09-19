@@ -4,6 +4,20 @@
  */
 const api = (typeof browser !== 'undefined' && browser.storage) ? browser : chrome;
 
+// The page side cannot talk to the ESO Save app itself; native messages (the iPad scanner) are
+// relayed from here. Where there is no app (Chrome, a Mac), the answer says so.
+api.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (!msg || msg.type !== 'native') return;
+  const done = (r) => { try { sendResponse(r); } catch (e) { /* gone */ } };
+  try {
+    const p = api.runtime.sendNativeMessage(msg.app || 'application.id', msg.msg || {}, (r) => {
+      if (api.runtime.lastError) { done({ native: false, error: String(api.runtime.lastError.message || api.runtime.lastError) }); return; }
+      done(r && typeof r === 'object' ? { native: true, ...r } : { native: false });
+    });
+    if (p && typeof p.then === 'function') p.then(r => done(r && typeof r === 'object' ? { native: true, ...r } : { native: false }), e => done({ native: false, error: String(e && e.message || e) }));
+  } catch (e) { done({ native: false, error: String(e && e.message || e) }); }
+  return true;
+});
 api.runtime.onMessage.addListener((msg) => {
   if (!msg || msg.type !== 'badge') return;
   const held = Number(msg.held || 0), rejected = Number(msg.rejected || 0);

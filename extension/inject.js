@@ -27,7 +27,7 @@
   if (ext) return;
   if (window.__esosave) return;
 
-  const VERSION = '0.13.2';
+  const VERSION = '0.14.0';
   const API_PREFIX_RE = /^\/ehr\/api\/+/i;
   const FAKE_OK_TEXT = '{"result":"Success","data":[]}';
   const PROBE_PATH = '/ehr/api/thirdpartydata/partners';
@@ -91,6 +91,7 @@
     pushing: false,
     ready: false,                // stored state has been merged in
     xsrf: null,                  // last x-custom-xsrf-token seen on a live request
+    attachTag: null,             // the label the next attachment upload gets (chosen in the type question)
     currentRecordId: null,
     lastEvent: null,
     lastView: null,              // { view, recordId, ts } of the most recent live tab load
@@ -774,6 +775,17 @@
       destinationTypes: vals('SL.DESTINATIONTYPE').map(x => ({ id: x.itemId, name: x.itemName, locationTypeId: x.parentItemId || null })),
       // the agency's people and their credentials (a run's crew entry names one by personCredentialID)
       crew: vals('UDL.CREW').filter(x => x && x.itemId).map(x => ({ id: x.itemId, creds: (Array.isArray(x.credentials) ? x.credentials : []).map(c => ({ id: c.personCredentialID || c.credentialId || null, name: c.credentialName || '' })) })),
+      // the lists a facesheet fill needs on the Patient and Billing pages
+      lists: {
+        states: vals('UDL.PLACESSTATES').map(x => ({ id: x.itemId, abbr: x.stateAbbr || '', name: x.stateName || x.itemName || '' })),
+        phoneTypes: vals('SL.PHONETYPES').map(x => ({ id: x.itemId, name: x.itemName })),
+        sex: vals('SL.SEX').map(x => ({ id: x.itemId, name: x.itemName })),
+        gender: vals('SL.GENDER').map(x => ({ id: x.itemId, name: x.itemName })),
+        race: vals('SL.RACE').map(x => ({ id: x.itemId, name: x.itemName })),
+        payment: vals('UDL.BILLINGINSURANCEPRIMARYPAYER').map(x => ({ id: x.itemId, name: x.itemName })),
+        relationship: vals('SL.BILLING_INSURANCE_RELATIONSHIP').map(x => ({ id: x.itemId, name: x.itemName })),
+        insuranceOther: (vals('UDL.INSURANCECOMPANY').find(x => x && x.isOtherInsurance) || {}).itemId || null,
+      },
     };
     post('facilities', S.facilities);
   }
@@ -1108,6 +1120,7 @@
       setOnline(true); setLoggedOut(false);
       observeMeta(run, tryJSON(res.text));
       cachePut(req.method, req.url, req.body, res);
+      observeAttachments(run, kind, res.text);
       if (kind.method !== 'GET' && /^unlock$/i.test(kind.tail)) { setLocked(run, false); persist(run); }
       else if (kind.method !== 'GET' && /lock|final|submit/i.test(kind.tail)) { setLocked(run, true); persist(run); afterLock(run); }
       if (kind.method === 'POST' && /^Email\/Send$/i.test(kind.tail)) { run.emailedAt = Date.now(); persist(run); post('persistEmailed', { pcrId: run.realId || run.recordId, ts: run.emailedAt }); scheduleUnsentScan(5000); }
@@ -1119,6 +1132,130 @@
     }
     else if (o === 'auth') setLoggedOut(true);
     return res;
+  }
+
+  // ------------------------------------------------------------------ attachments
+  // The list ESO shows in its Attachments dialog is remembered per run (item id and the
+  // description under the file name), so the type question knows what is already there.
+  function observeAttachments(run, kind, text) {
+    if (kind.method === 'GET' && /^Attachments$/i.test(kind.tail)) {
+      const j = tryJSON(text); const list = j && j.data && j.data.model && j.data.model.attachments;
+      if (Array.isArray(list)) { run.attachments = list.map(a => ({ itemId: a.itemId, name: a.name, description: a.description || '' })); emit(); }
+    } else if (kind.method === 'DELETE') {
+      const m = /^Attachments\/([^/?]+)/i.exec(kind.tail);
+      if (m && run.attachments) { run.attachments = run.attachments.filter(a => a.itemId !== m[1]); emit(); }
+    }
+  }
+  function noteAttached(run, text) {
+    const j = tryJSON(text); const a = j && j.data && j.data.itemId ? j.data : null;
+    if (!a) return null;
+    run.attachments = (run.attachments || []).filter(x => x.itemId !== a.itemId).concat([{ itemId: a.itemId, name: a.name, description: a.description || '' }]);
+    emit();
+    return a;
+  }
+  function deleteAttachment(run, itemId) {
+    const id = run.realId || run.recordId;
+    return rawRequest({ method: 'DELETE', url: apiUrl(`/PatientCareRecords/${id}/Attachments/${itemId}`), headers: headersFor(false), timeout: 30000 })
+      .then(res => { if (outcome(res) === 'ok' && run.attachments) { run.attachments = run.attachments.filter(a => a.itemId !== itemId); emit(); } return outcome(res) === 'ok'; });
+  }
+  // "Replace it": the one already carrying this label goes before the new one arrives.
+  async function replaceOld(run, label, keepId) {
+    for (const a of (run.attachments || []).filter(a => a.description === label && a.itemId !== keepId)) await deleteAttachment(run, a.itemId);
+  }
+  const takeTag = (recordId) => {
+    const t = S.attachTag; if (!t || t.recordId !== recordId || Date.now() - t.at > 15 * 60 * 1000) return null;
+    S.attachTag = null; return t;
+  };
+  // ESO's own upload (its camera, or the Add Attachment dialog) carries the chosen label as its
+  // description, exactly as if it had been typed into ESO's Description box.
+  async function sendAttachment(xhr, body, kind) {
+    const run = getRun(kind.recordId);
+    const tag = takeTag(kind.recordId);
+    if (tag) {
+      try { body.set('description', tag.label); } catch (e) { /* not a FormData */ }
+      if (tag.replace) await replaceOld(run, tag.label, null);
+    }
+    xhr.addEventListener('loadend', () => {
+      if (xhr.status === 0) { setOnline(false, 'request failed'); return; }
+      const a = xhr.status >= 200 && xhr.status < 300 ? noteAttached(run, xhr.responseText) : null;
+      if (!tag) return;
+      let file = null; try { file = body.get('file'); } catch (e) { /* ignore */ }
+      post('event', { name: 'attached', recordId: kind.recordId, ok: !!a, label: tag.label, type: tag.type, itemId: a ? a.itemId : null, error: a ? null : `ESO answered ${xhr.status}`, file: a && file instanceof Blob ? file : null, source: 'eso' });
+      if (a) log(run, `Attached ${tag.label}.`, 'info');
+    });
+    return RealXHR.prototype.send.call(xhr, body);
+  }
+  // Pages scanned in the ESO Save app are uploaded the way ESO's own dialog does it: the same
+  // request, the same file naming (incident number, "Photo", the next number), one per page.
+  async function uploadScan(a) {
+    const run = getRun(a.recordId);
+    const id = run.realId || run.recordId;
+    const pages = Array.isArray(a.pages) ? a.pages.filter(p => p instanceof Blob) : [];
+    if (!pages.length) { post('event', { name: 'attached', recordId: a.recordId, ok: false, label: a.label, type: a.type, error: 'no pages', source: 'scan', scanId: a.scanId }); return; }
+    if (!S.xsrf) { post('event', { name: 'attached', recordId: a.recordId, ok: false, label: a.label, type: a.type, error: 'Open any ESO page first so the extension can see your session.', source: 'scan', scanId: a.scanId }); return; }
+    if (a.replace) await replaceOld(run, a.label, null);
+    let n = (run.attachments || []).length, done = 0, error = null;
+    for (const page of pages) {
+      const fd = new FormData();
+      fd.append('description', a.label);
+      fd.append('file', page, `${run.incidentNumber || 'run'}Photo${++n}.${a.ext || 'jpg'}`);
+      const res = await rawRequest({ method: 'POST', url: apiUrl(`/PatientCareRecords/${id}/Attachments`), headers: headersFor(false), body: fd, timeout: 120000 });
+      const o = outcome(res);
+      if (o === 'ok' && noteAttached(run, res.text)) { done++; continue; }
+      error = o === 'net' ? 'ESO did not answer. Check the signal and try again.' : `ESO refused the upload: ${summarize(res)}`;
+      break;
+    }
+    if (done) log(run, `Attached ${a.label}${pages.length > 1 ? ` (${done} page${done === 1 ? '' : 's'})` : ''} from the scanner.`, error ? 'warn' : 'info');
+    post('event', { name: 'attached', recordId: a.recordId, ok: !error, label: a.label, type: a.type, pages: done, error, file: !error && a.type === 'Facesheet' ? pages[0] : null, text: a.text || null, source: 'scan', scanId: a.scanId });
+  }
+
+  // ------------------------------------------------------------------ facesheet fill
+  // The Patient and Billing pages are written the way the app writes them: one autosave per
+  // scope with the same ops the app would send (recorded from it), held like any other save when
+  // there is no signal. The address is looked up in ESO's places table first, as the app does
+  // after a zip is typed, so the place (and its county) rides along.
+  async function placeLookup(city, stateId, zip) {
+    const q = `city=${encodeURIComponent(city || '')}&stateId=${encodeURIComponent(stateId || '')}&zip=${encodeURIComponent(zip || '')}`;
+    const res = await rawRequest({ method: 'GET', url: apiUrl('/placesSearch?' + q), headers: headersFor(false), timeout: 15000 });
+    if (outcome(res) !== 'ok') return null;
+    const j = tryJSON(res.text); const list = j && Array.isArray(j.data) ? j.data : [];
+    return list.find(p => p && String(p.zip) === String(zip)) || (list.length === 1 ? list[0] : null);
+  }
+  async function saveOps(run, scope, ops, what) {
+    if (!ops.length) return { ok: true, skipped: true };
+    const batch = { seq: run.nextSeq++, ts: Date.now(), scope, ops, status: 'pending', attempts: 0, synthetic: 'facesheet' };
+    if (!S.online || S.loggedOut || run.pendingCreate || run.pushing || hasHeld(run)) {
+      batch.status = 'held'; run.batches.push(batch); persist(run, true); emit(); kick(300);
+      return { ok: true, held: true };
+    }
+    const id = run.realId || run.recordId;
+    const res = await rawRequest({ method: 'POST', url: apiUrl(`/PatientCareRecords/${id}/autosave${scope === 'none' ? '' : '?scope=' + scope}`), headers: headersFor(true), body: rewriteKeys(JSON.stringify(ops), run.keyMap), timeout: 30000 });
+    const o = outcome(res);
+    if (o === 'ok') { run.batches.push(batch); ack(run, batch, res); setOnline(true); setLoggedOut(false); persist(run); emit(); return { ok: true }; }
+    if (o === 'auth') setLoggedOut(true);
+    return { ok: false, error: o === 'net' ? 'ESO did not answer. Check the signal and try again.' : `ESO refused the ${what}: ${summarize(res)}` };
+  }
+  async function fillFacesheet(a) {
+    const run = S.runs[a.recordId];
+    const fail = (error) => post('event', { name: 'facesheetFilled', recordId: a.recordId, ok: false, error });
+    if (!run) return fail('Run not found.');
+    const patient = Array.isArray(a.patient) ? a.patient.slice() : [], billing = Array.isArray(a.billing) ? a.billing.slice() : [];
+    const placeOps = [];
+    for (const pl of (Array.isArray(a.places) ? a.places : [])) {
+      let place = null;
+      try { place = await placeLookup(pl.city, pl.stateId, pl.zip); } catch (e) { place = null; }
+      if (!place) continue;
+      if (pl.scope === 'patient') placeOps.push({ verb: 'EDIT', address: 'patient.contact.address.placeId', fieldRef: 'PATIENTPLACEID', value: place, dataType: 'string', isComplexType: true });
+      if (pl.scope === 'billing' && place.county) billing.push({ verb: 'EDIT', address: 'billing.contactForPayment.address.county', fieldRef: 'BILLINGCONTACTCOUNTY', value: place.county, dataType: 'string' });
+    }
+    let held = false;
+    for (const [scope, ops, what] of [['patient', patient, 'Patient page'], ['none', placeOps, 'place'], ['billing', billing, 'Billing page']]) {
+      const r = await saveOps(run, scope, ops, what);
+      if (!r.ok) { log(run, `Facesheet: could not fill the ${what}. ${r.error}`, 'error'); return fail(r.error); }
+      if (r.held) held = true;
+    }
+    log(run, `Facesheet: filled the Patient page (${patient.length} fields) and the Billing page (${billing.length} fields)${held ? '; held until ESO answers' : ''}.`, held ? 'warn' : 'good');
+    post('event', { name: 'facesheetFilled', recordId: a.recordId, ok: true, held, patient: patient.length, billing: billing.length });
   }
 
   // Blank views of a freshly created run, kept so a run can be started with no signal at all.
@@ -1202,6 +1339,9 @@
       const kind = es.kind;
       const virtualizable = kind && es.async && (rt === '' || rt === 'text' || rt === 'json') && (body == null || typeof body === 'string');
       if (!virtualizable) {
+        if (kind && kind.type === 'record' && kind.method === 'POST' && /^Attachments$/i.test(kind.tail) && typeof FormData !== 'undefined' && body instanceof FormData) {
+          sendAttachment(this, body, kind); return;
+        }
         if (kind) {
           this.addEventListener('loadend', () => {
             if (this.status === 0) setOnline(false, 'request failed');
@@ -1298,6 +1438,7 @@
       lists: run.lists || null, owner: run.owner || null, crewIds: (run.crew || []).map(c => c && c.personnelId).filter(Boolean),
       crewCerts: (run.crew || []).filter(c => c && c.personnelId).map(c => ({ id: c.personnelId, cert: c.certification || null })),
       hasViews: Object.keys(run.views).length, hasCrew: !!(run.crew && run.crew.length),
+      attachments: (run.attachments || []).map(a => ({ itemId: a.itemId, name: a.name, description: a.description })),
     };
   }
   function buildStatus() {
@@ -1370,6 +1511,9 @@
         else if (a.name === 'send') { sendRecord(a.recordId, a.kind === 'email' ? 'email' : 'fax'); }
         else if (a.name === 'scanUnsent') { scheduleUnsentScan(0); }
         else if (a.name === 'facilities') { if (S.facilities) post('facilities', S.facilities); }
+        else if (a.name === 'attachTag') { S.attachTag = a.recordId && a.label ? { recordId: a.recordId, label: String(a.label), type: a.type || null, replace: !!a.replace, at: Date.now() } : null; }
+        else if (a.name === 'attachUpload') { uploadScan(a); }
+        else if (a.name === 'fillFacesheet') { fillFacesheet(a); }
       }
     } catch (e) { log(null, 'ESO Save internal error: ' + (e && e.message), 'error'); }
   });
