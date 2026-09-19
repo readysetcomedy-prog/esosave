@@ -1004,6 +1004,11 @@ test('every quick button scrolls under ESO\'s banner: the layers are clipped at 
   await app(() => window.scrollTo(0, 400));
   await sleep(300);
   assert.equal(await layer(), 'inset(64px 0px 0px)', 'still clipped after a scroll');
+  // after the scroll settles, and after the regular re-layout ticks, a row still sits under its label
+  const under = () => T.page.evaluate(() => { const f = document.querySelector('eso-field[data-field-ref=PRIMARYIMPRESSIONID]'); const lab = f.querySelector('label').getBoundingClientRect(); const c = document.getElementById('esosave-host').shadowRoot.querySelector('.quick [data-group=sr-primary]').getBoundingClientRect(); return Math.round(c.top - lab.bottom); });
+  await sleep(900);
+  const d1 = await under(); await sleep(800); const d2 = await under();
+  assert.ok(d1 >= 2 && d1 <= 12 && d1 === d2, `row stays put under its label: ${d1} then ${d2}`);
   await app(() => window.scrollTo(0, 0));
 });
 

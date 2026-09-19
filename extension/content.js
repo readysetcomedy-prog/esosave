@@ -1977,7 +1977,15 @@
     }
     endVeil(); quickBusy = false; crewBusy = null; layoutCrew();
   }
+  // A full layout places everything at its true spot, so the slid sheet must be put back first
+  // and the slide measured from here on; otherwise a layout in the middle of a scroll jumps.
+  function rebaseLayers() {
+    if (!scrollRaf) return;
+    for (const s of [quickLayer, copyLayer].map(l => l && l.firstElementChild).filter(Boolean)) s.style.transform = '';
+    if (scroller) scrollBase = scrollPos(scroller);
+  }
   function layoutQuick() {
+    try { rebaseLayers(); } catch (e) { /* keep going */ }
     try { clipLayers(); } catch (e) { /* keep going */ }
     try { layoutCrew(); } catch (e) { /* keep going */ }
     try { watchMileage(); } catch (e) { /* keep going */ }
@@ -1997,6 +2005,8 @@
   // just left of that cell; tapping it re-enters the vital's values as a new row with the current
   // time. The buttons live in this extension's own layer, never inside ESO's page, so the cell is
   // not pushed about and the app's own rendering is untouched.
+  let scroller = null, scrollBase = null, scrollUntil = 0, scrollRaf = 0;
+  const scrollPos = (el) => el === document || el === document.documentElement || el === document.body ? { x: scrollX, y: scrollY } : { x: el.scrollLeft, y: el.scrollTop };
   const TIME_RE = /^\d{1,2}:\d{2}:\d{2}$/;
   const NOT_A_ROW = '[role="dialog"], [aria-modal="true"], [class*="modal" i], [class*="dialog" i], [class*="popover" i], [class*="dropdown" i], [class*="picker" i], [class*="menu" i], [class*="overlay" i], label';
   let copyBusy = false;
@@ -2063,6 +2073,7 @@
     return btn;
   }
   function decorateVitalRows() {
+    rebaseLayers();
     const cells = vitalTimeCells();
     if (!cells.length && !copyButtons.size) return;
     const layer = ensureCopyLayer();
@@ -2305,8 +2316,6 @@
   // While the page scrolls, the layers slide with it by exactly the scrolled distance, one
   // transform per frame (Safari delivers scroll events unevenly; laying everything out on each
   // one made the buttons bounce). A full layout follows once the scrolling settles.
-  let scroller = null, scrollBase = null, scrollUntil = 0, scrollRaf = 0;
-  const scrollPos = (el) => el === document || el === document.documentElement || el === document.body ? { x: scrollX, y: scrollY } : { x: el.scrollLeft, y: el.scrollTop };
   function slideLayers() {
     const sheets = [quickLayer, copyLayer].map(l => l && l.firstElementChild).filter(Boolean);
     if (scroller && scrollBase) {
