@@ -1134,7 +1134,10 @@
   // any dialog). Our own layers do not count.
   function onTop(el) {
     const r = el.getBoundingClientRect();
-    const x = r.left + Math.min(24, r.width / 2), y = r.top + Math.min(12, r.height / 2);
+    // Probe below the top banner: a field sliding under it is not covered, it is clipped (the
+    // rows go under the banner with it); only something drawn over the field's visible part counts.
+    const x = r.left + Math.min(24, r.width / 2), y = Math.max(r.top + Math.min(12, r.height / 2), bannerBottom() + 4);
+    if (y >= r.bottom) return true; // wholly under the banner: the clip hides its rows anyway
     if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) return true; // off screen for now: nothing to say
     const top = document.elementsFromPoint(x, y).find(e => !(host && host.contains(e)));
     return !top || el.contains(top) || top.contains(el);

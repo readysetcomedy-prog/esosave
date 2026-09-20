@@ -1009,6 +1009,12 @@ test('every quick button scrolls under ESO\'s banner: the layers are clipped at 
   await sleep(900);
   const d1 = await under(); await sleep(800); const d2 = await under();
   assert.ok(d1 >= 2 && d1 <= 12 && d1 === d2, `row stays put under its label: ${d1} then ${d2}`);
+  // the field's top edge slides under the bar: its row is still drawn (clipped), not dropped as "covered"
+  await app(() => { const f = document.querySelector('eso-field[data-field-ref=PRIMARYIMPRESSIONID]'); window.scrollTo(0, window.scrollY + f.getBoundingClientRect().top - 40); });
+  await sleep(1200);
+  const fieldTop = await T.page.evaluate(() => Math.round(document.querySelector('eso-field[data-field-ref=PRIMARYIMPRESSIONID]').getBoundingClientRect().top));
+  assert.ok(fieldTop < 64 && fieldTop > 0, `field partly under the bar: top at ${fieldTop}`);
+  assert.ok(await T.page.evaluate(() => !!document.getElementById('esosave-host').shadowRoot.querySelector('.quick [data-group=sr-primary]')), 'the row is still there while its field is half under the bar');
   await app(() => window.scrollTo(0, 0));
 });
 
