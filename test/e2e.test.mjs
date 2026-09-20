@@ -1917,6 +1917,23 @@ test('templates: shared to everyone or to named people show up for them, named a
   assert.equal(await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin [data-name]').value), 'Chest pain (copy)');
   await twClick('[data-act=save]');
   await waitFor(async () => (await tplDb()).templates.some(x => x.owner_id === 'person-j' && x.name === 'Chest pain (copy)'), { label: 'her own copy' });
+  // her own can be copied too, for a call that differs only a little: the copy is a new private one, named so it does not collide
+  await waitFor(() => tw('[data-act=new]'), { label: 'list' });
+  await T.page.evaluate(() => { const row = Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.tplwin .tpl')).find(r => /^Chest pain \(copy\)/.test(r.querySelector('.tn').textContent)); row.querySelector('[data-act=copy]').click(); });
+  await waitFor(() => T.page.evaluate(() => !!document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin [data-name]')), { label: 'editor' });
+  assert.equal(await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin [data-name]').value), 'Chest pain (copy 2)');
+  assert.equal(await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin input[name=share]:checked').value), 'private');
+  await twClick('[data-page=narrative]');
+  await waitFor(() => T.page.evaluate((s) => !!document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin ' + s), rowSel('narrative.narrative.narrativeText')), { label: 'the copied narrative' });
+  assert.match(await T.page.evaluate((s) => document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin ' + s + ' [data-in]').value, rowSel('narrative.narrative.narrativeText')), /chest pain/, 'the copy carries everything the original had');
+  await twClick('[data-act=save]');
+  await waitFor(async () => (await tplDb()).templates.some(x => x.owner_id === 'person-j' && x.name === 'Chest pain (copy 2)' && x.share === 'private'), { label: 'her second copy' });
+  await waitFor(() => tw('[data-act=new]'), { label: 'list' });
+  const okDialog = (d) => d.accept().catch(() => {}); T.page.on('dialog', okDialog);
+  try {
+    await T.page.evaluate(() => { const row = Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.tplwin .tpl')).find(r => /^Chest pain \(copy 2\)/.test(r.querySelector('.tn').textContent)); row.querySelector('[data-act=delete]').click(); });
+    await waitFor(async () => !(await tplDb()).templates.some(x => x.name === 'Chest pain (copy 2)'), { label: 'second copy deleted again' });
+  } finally { T.page.off('dialog', okDialog); }
   // she tries to share her copy to everyone under his name: refused until she changes it
   await twClickText('.tpl [data-act=edit]', 'Edit');
   await waitFor(() => T.page.evaluate(() => !!document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin input[name=share]')), { label: 'editor' });

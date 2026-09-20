@@ -2821,7 +2821,9 @@
     const held = (t) => { const nf = Object.keys((t.body && t.body.fields) || {}).length, its = (t.body && t.body.items) || []; const kinds = {}; for (const it of its) kinds[it.kind] = (kinds[it.kind] || 0) + 1; return [`${nf} field${nf === 1 ? '' : 's'}`].concat(Object.entries(kinds).map(([k, n]) => `${n} ${n === 1 ? (ITEM_ONE[k] || k).replace(/^(a|an) /, '') : (ITEM_NAMES[k] || k).toLowerCase()}`)).join(' · '); };
     const row = (t, kind) => `<div class="tpl" data-id="${esc(t.id)}"><div><div class="tn">${esc(t.name)}</div><div class="by">${kind !== 'mine' ? `shared by ${esc(t.owner_name || '')}` : (t.share === 'everyone' ? 'shared with everyone' : t.share === 'some' ? 'shared with some people' : 'private')} · ${esc(held(t))}</div></div>
       <button class="tb pri" data-act="fill" ${canFill ? '' : 'disabled title="Open an unlocked run first"'}>Fill this run</button>
-      ${kind === 'mine' ? '<button class="tb sec" data-act="edit">Edit</button><button class="tb danger" data-act="delete">Delete</button>' : '<button class="tb sec" data-act="copy">Copy to mine</button>'}</div>`;
+      ${kind === 'mine' ? '<button class="tb sec" data-act="edit">Edit</button><button class="tb sec" data-act="copy" title="A new template of your own, starting from this one">Copy</button><button class="tb danger" data-act="delete">Delete</button>' : '<button class="tb sec" data-act="copy" title="A new template of your own, starting from this one">Copy to mine</button>'}</div>`;
+    // a copy's name: "(copy)", then "(copy 2)", "(copy 3)"... among the person's own
+    const copyName = (name) => { const base = name.replace(/ \(copy( \d+)?\)$/, ''); const taken = new Set(tpls.mine.map(x => x.name.toLowerCase())); let n = 1, cand = `${base} (copy)`; while (taken.has(cand.toLowerCase())) { n++; cand = `${base} (copy ${n})`; } return cand; };
     tplWin.innerHTML = `<div class="tophead"><h1>Templates</h1><button class="tb" data-act="new">New template</button><button class="tb sec" data-act="close">Close</button></div>
       <div class="body">
         ${note ? `<div class="muted">${esc(note)}</div>` : ''}
@@ -2836,7 +2838,8 @@
       if (act === 'close') closeTemplates();
       else if (act === 'new') startEditor(null);
       else if (act === 'edit' && t) startEditor(t);
-      else if (act === 'copy' && t) startEditor({ ...t, id: null, name: t.name + ' (copy)', share: 'private', owner_id: userId, owner_name: user });
+      // any template, one's own or another's, copied becomes a new private one of one's own, to change and share
+      else if (act === 'copy' && t) startEditor({ ...t, id: null, name: copyName(t.name), share: 'private', owner_id: userId, owner_name: user });
       else if (act === 'delete' && t) { if (!confirm(`Delete the template "${t.name}"? People it was shared with lose it too.`)) return; try { await tplDelete(t.id); await tplLoad(); } catch (err) { alert('ESO Save: could not delete it. ' + err.message); } renderTemplates(); }
       else if (act === 'fill' && t) fillWithTemplate(t);
     }));

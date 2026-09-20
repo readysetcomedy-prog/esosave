@@ -157,8 +157,10 @@ to bad signal or a hung page.
   never offered. Templates are kept in the agency's table under the person's ESO id (so a name
   change loses nothing), private, or shared with everyone or with named people; the list shows
   My templates, Templates shared with you and Templates shared to everyone, each with who
-  shared it, and a shared one can be copied to make it yours; only its maker can change or delete
-  it. A name is used once per shared category across the agency (one "Refusal" shared to
+  shared it. Any template, your own or one shared with you, can be copied: the copy is a new
+  private one of your own, named "(copy)", "(copy 2)"..., to change and share as you like, so a
+  call that differs only a little from a saved one starts from that one; only a template's maker
+  can change or delete it. A name is used once per shared category across the agency (one "Refusal" shared to
   everyone and one shared with named people may both exist, two shared to everyone may not) and
   once among a person's own private ones; the editor says so and asks for a change, "Refusal2"
   say, and the table's own unique indexes hold the line. The agency owner can lock any field, any
