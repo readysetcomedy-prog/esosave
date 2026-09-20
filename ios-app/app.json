@@ -25,6 +25,11 @@
       "@bacons/apple-targets",
       "react-native-document-scanner-plugin"
     ],
-    "scheme": "esosave"
+    "scheme": "esosave",
+    "extra": {
+      "eas": {
+        "projectId": "bb6a1ca8-eb4c-43d7-8c18-dabbe88d6a81"
+      }
+    }
   }
 }
