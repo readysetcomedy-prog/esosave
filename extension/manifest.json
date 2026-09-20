@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ESO Save",
-  "version": "0.14.5",
+  "version": "0.15.0",
   "description": "Keeps every ESO EHR change on this device until ESO confirms it saved. Warns on lost signal and restores runs.",
   "permissions": [
     "storage",
@@ -34,6 +34,7 @@
         "https://www.esosuite.net/*"
       ],
       "js": [
+        "assess-catalog.js",
         "content.js"
       ],
       "run_at": "document_start",

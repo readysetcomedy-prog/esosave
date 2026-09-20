@@ -27,7 +27,7 @@
   if (ext) return;
   if (window.__esosave) return;
 
-  const VERSION = '0.14.5';
+  const VERSION = '0.15.0';
   const API_PREFIX_RE = /^\/ehr\/api\/+/i;
   const FAKE_OK_TEXT = '{"result":"Success","data":[]}';
   const PROBE_PATH = '/ehr/api/thirdpartydata/partners';
@@ -92,6 +92,7 @@
     ready: false,                // stored state has been merged in
     xsrf: null,                  // last x-custom-xsrf-token seen on a live request
     attachTag: null,             // the label the next attachment upload gets (chosen in the type question)
+    catalog: null,               // every templatable field, from the bundle (Templates)
     currentRecordId: null,
     lastEvent: null,
     lastView: null,              // { view, recordId, ts } of the most recent live tab load
@@ -774,7 +775,7 @@
       locationTypes: vals('SL.LOCATIONTYPE').map(x => ({ id: x.itemId, name: x.itemName })),
       destinationTypes: vals('SL.DESTINATIONTYPE').map(x => ({ id: x.itemId, name: x.itemName, locationTypeId: x.parentItemId || null })),
       // the agency's people and their credentials (a run's crew entry names one by personCredentialID)
-      crew: vals('UDL.CREW').filter(x => x && x.itemId).map(x => ({ id: x.itemId, creds: (Array.isArray(x.credentials) ? x.credentials : []).map(c => ({ id: c.personCredentialID || c.credentialId || null, name: c.credentialName || '' })) })),
+      crew: vals('UDL.CREW').filter(x => x && x.itemId).map(x => ({ id: x.itemId, name: `${x.lastName || ''}, ${x.firstName || ''}`.replace(/^, |, $/g, '').trim(), creds: (Array.isArray(x.credentials) ? x.credentials : []).map(c => ({ id: c.personCredentialID || c.credentialId || null, name: c.credentialName || '' })) })),
       // the lists a facesheet fill needs on the Patient and Billing pages
       lists: {
         states: vals('UDL.PLACESSTATES').map(x => ({ id: x.itemId, abbr: x.stateAbbr || '', name: x.stateName || x.itemName || '' })),
@@ -788,6 +789,63 @@
       },
     };
     post('facilities', S.facilities);
+    try { learnCatalog(j); } catch (e) { /* the catalog is a nicety */ }
+  }
+  // ------------------------------------------------------------------ the field catalog (Templates)
+  // Every field ESO's app can save, from the bundle's own field configs: its address, field ref,
+  // type, name and pick list. What is the call's own (incident number, unit, crew, times, the
+  // addresses, the patient's identity) is left out; templates carry only what a crew would set
+  // the same way every time. Sent to the extension side once per bundle version and kept there.
+  const CATALOG_SKIP = [
+    /^(search|faxHistory|positiveIdProviderConfirm|m2m|pcrHeader|imports|demFilesGenerate|attachments|quickTreats)\./,
+    /^incident\.(crew|incidentTimes|mileage|otherPersonnel|nfirsIncident|scene|destination)\b/,
+    /^incident\.response\.(incidentNumber|runNumber|unitId|vehicleId|shiftId|stationId|callNature|callNatureDescription|emdCardNumber|respondingFromZoneID)$/,
+    /^patient\.demographics\.(lastName|firstName|middleName|dob|ssn|patientNameSuffixId|estimatedAge|estimatedAgeUnitId|ageEstimated)$/,
+    /^patient\.demographics\.patient(LastName|FirstName|MiddleName|Ssn)PertinentNegativeId$/,
+    /^patient\.(contact|incident)\b/,
+    /^billing\.(patient|contactForPayment|nextOfKin)\b/,
+    /^signatures\.(?!standardSignatures\.standardRefusal\b)/,
+    /\.(itemId|mobileToMobile|softDeleted|fileId|imageType|version)$/,
+  ];
+  const CATALOG_ITEMS = {
+    'vitals.vitalSigns': 'vital', 'flowchartTreatments.treatments': 'treatment', 'assessments.assessmentsV2': 'assessment',
+    'patient.patientMedicalHistories': 'history', 'patient.patientAllergies': 'allergy', 'patient.patientMedications': 'medication', 'patient.patientPersonalItems': 'belonging',
+    'narrative.supportingSignsAndSymptomsEnhanced.signsAndSymptomsEnhanced': 'sign', 'narrative.clinicalImpression.protocolsUsed.items': 'protocol', 'patient.patientImmunizations.items': 'immunization',
+  };
+  function learnCatalog(j) {
+    const fc = j && j.fieldConfigs, lists = j && j.lists;
+    if (!fc || typeof fc !== 'object') return;
+    const version = String(j.bundleVersion || j.configVersion || '');
+    if (S.catalog && S.catalog.version === version) return;
+    const roots = Object.keys(CATALOG_ITEMS);
+    const fields = [], need = new Set();
+    for (const [a, c] of Object.entries(fc)) {
+      if (!c || !c.fieldRef || !c.dataType || c.showField === false) continue;
+      const root = roots.find(r => a === r || a.startsWith(r + '.'));
+      // itemId is bookkeeping everywhere except on a history, allergy, medication or belonging
+      // entry, where it is the entry's own pick
+      const keyed = root && ['history', 'allergy', 'medication', 'belonging'].includes(CATALOG_ITEMS[root]) && a === root + '.itemId';
+      if (!keyed && CATALOG_SKIP.some(re => re.test(a))) continue;
+      if (['fieldGroup', 'strokes', 'binary', 'collection', 'collectionWithData'].includes(c.dataType) && !roots.includes(a)) continue;
+      if (root && a === root) continue; // the item itself is added, not edited
+      const f = { a, r: c.fieldRef, t: c.dataType, n: c.displayName || a.split('.').pop() };
+      if (c.listRef) { f.l = c.listRef; need.add(c.listRef); }
+      if (root) f.i = root;
+      fields.push(f);
+    }
+    const out = {};
+    for (const ref of need) {
+      const l = lists[ref]; if (!l || !Array.isArray(l.values)) continue;
+      out[ref] = l.values.filter(x => x && x.itemId != null).map(x => {
+        const e = { id: x.itemId, n: x.itemName || (x.lastName || x.firstName ? `${x.lastName || ''}, ${x.firstName || ''}`.replace(/^, |, $/g, '') : String(x.itemId)) };
+        if (x.parentItemId != null) e.p = x.parentItemId;
+        if (x.isMedication) e.med = true;
+        return e;
+      });
+    }
+    // the assessment sections' names, for the assessment item
+    S.catalog = { version, at: Date.now(), fields, lists: out, items: CATALOG_ITEMS };
+    post('catalog', S.catalog);
   }
   // ------------------------------------------------------------------ fax / email after lock
   // ESO's own calls, recorded from the app: GET .../Fax/CanSend and .../Email/canSend answer
@@ -1225,9 +1283,9 @@
     const j = tryJSON(res.text); const list = j && Array.isArray(j.data) ? j.data : [];
     return list.find(p => p && String(p.zip) === String(zip)) || (list.length === 1 ? list[0] : null);
   }
-  async function saveOps(run, scope, ops, what) {
+  async function saveOps(run, scope, ops, what, kind) {
     if (!ops.length) return { ok: true, skipped: true };
-    const batch = { seq: run.nextSeq++, ts: Date.now(), scope, ops, status: 'pending', attempts: 0, synthetic: 'facesheet' };
+    const batch = { seq: run.nextSeq++, ts: Date.now(), scope, ops, status: 'pending', attempts: 0, synthetic: kind || 'facesheet' };
     if (!S.online || S.loggedOut || run.pendingCreate || run.pushing || hasHeld(run)) {
       batch.status = 'held'; run.batches.push(batch); persist(run, true); emit(); kick(300);
       return { ok: true, held: true };
@@ -1236,8 +1294,13 @@
     const res = await rawRequest({ method: 'POST', url: apiUrl(`/PatientCareRecords/${id}/autosave${scope === 'none' ? '' : '?scope=' + scope}`), headers: headersFor(true), body: rewriteKeys(JSON.stringify(ops), run.keyMap), timeout: 30000 });
     const o = outcome(res);
     if (o === 'ok') { run.batches.push(batch); ack(run, batch, res); setOnline(true); setLoggedOut(false); persist(run); emit(); return { ok: true }; }
+    if (o === 'net') { // the signal went while we were not looking: held, like any save
+      setOnline(false, 'request failed');
+      batch.status = 'held'; run.batches.push(batch); persist(run, true); emit(); kick(2000);
+      return { ok: true, held: true };
+    }
     if (o === 'auth') setLoggedOut(true);
-    return { ok: false, error: o === 'net' ? 'ESO did not answer. Check the signal and try again.' : `ESO refused the ${what}: ${summarize(res)}` };
+    return { ok: false, error: `ESO refused the ${what}: ${summarize(res)}` };
   }
   async function fillFacesheet(a) {
     const run = S.runs[a.recordId];
@@ -1260,6 +1323,79 @@
     }
     log(run, `Facesheet: filled the Patient page (${patient.length} fields) and the Billing page (${billing.length} fields)${held ? '; held until ESO answers' : ''}.`, held ? 'warn' : 'good');
     post('event', { name: 'facesheetFilled', recordId: a.recordId, ok: true, held, patient: patient.length, billing: billing.length });
+  }
+
+  // ------------------------------------------------------------------ Templates: the fill
+  // A template is fields (address -> ref, type, value) and items (a vital, a treatment, an
+  // assessment, a history entry...) to add. It is written the way the app writes: one autosave
+  // per tab with the app's own ops, held when there is no signal, with a progress event per tab.
+  const pad2 = (n) => String(n).padStart(2, '0');
+  const esoNow = () => { const d = new Date(); return `${pad2(d.getMonth() + 1)}/${pad2(d.getDate())}/${d.getFullYear()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`; };
+  function templateValue(t, v) {
+    if (v === null || v === undefined || v === '') return null;
+    if (t === 'integer') return typeof v === 'number' ? v : (String(v).trim() !== '' && !isNaN(Number(v)) ? Number(v) : v);
+    if (t === 'boolean') return v === true || v === 'true' || v === 1;
+    if (t === 'string' || t === 'number' || t === 'phone' || t === 'ssn') return String(v);
+    return v;
+  }
+  function templateOps(body) {
+    const byScope = {};
+    const push = (op) => { const sc = op.address.split('.')[0]; (byScope[sc] = byScope[sc] || []).push(op); };
+    for (const [a, f] of Object.entries(body.fields || {})) {
+      if (!f || !f.r) continue;
+      if (f.t === 'multiselect') { for (const v of (Array.isArray(f.v) ? f.v : [f.v])) if (v !== null && v !== '') push({ verb: 'ADD', address: `${a}.['${v}']`, fieldRef: f.r, value: v, dataType: 'multiselect' }); continue; }
+      const v = templateValue(f.t, f.v); if (v === null) continue;
+      push({ verb: 'EDIT', address: a, fieldRef: f.r, value: v, dataType: f.t });
+    }
+    for (const it of (body.items || [])) {
+      if (!it || !it.root || !it.r) continue;
+      const k = uuid(), base = `${it.root}.['${k}']`, F = it.fields || {}, used = new Set();
+      const val = (rel) => { const f = F[rel]; used.add(rel); return f ? templateValue(f.t, f.v) : null; };
+      let init = {};
+      switch (it.kind) {
+        case 'vital': init = { vitalSignDateTime: esoNow() }; break;
+        case 'treatment': init = { flowchartTreatmentRegistryId: val('flowchartTreatmentRegistryId'), treatmentDate: esoNow() }; break;
+        case 'assessment': init = { assessmentDate: esoNow(), assessmentTime: esoNow() }; break;
+        case 'history': case 'allergy': case 'medication': case 'belonging': init = { itemId: val('itemId') }; break;
+        case 'sign': init = { primaryId: val('primaryId'), signId: val('signId'), isPrimary: F.isPrimary ? !!templateValue('boolean', F.isPrimary.v) : true }; used.add('isPrimary'); break;
+        default: init = {};
+      }
+      if (Object.values(init).some(v => v === null)) continue; // an item without its key (a treatment with no treatment)
+      push({ verb: 'ADD', address: base, fieldRef: it.r, value: init, dataType: it.t || 'collectionWithData', isComplexType: true });
+      for (const [rel, f] of Object.entries(F)) {
+        if (used.has(rel) || !f || !f.r) continue;
+        if (f.t === 'multiselect') { for (const v of (Array.isArray(f.v) ? f.v : [f.v])) if (v !== null && v !== '') push({ verb: 'ADD', address: `${base}.${rel}.['${v}']`, fieldRef: f.r, value: v, dataType: 'multiselect' }); continue; }
+        const v = templateValue(f.t, f.v); if (v === null) continue;
+        push({ verb: 'EDIT', address: `${base}.${rel}`, fieldRef: f.r, value: v, dataType: f.t });
+      }
+      for (const fd of (it.findings || [])) {
+        if (!fd || !fd.loc || !fd.id) continue;
+        push({ verb: 'ADD', address: `${base}.findings.['${uuid()}']`, fieldRef: 'ASSESSMENT2FINDINGS', value: { findingId: fd.id, findingLocationId: fd.loc, present: true }, dataType: 'binary', isComplexType: true });
+      }
+    }
+    return byScope;
+  }
+  const SCOPE_ORDER = ['incident', 'patient', 'vitals', 'flowchartTreatments', 'assessments', 'narrative', 'forms', 'billing', 'signatures'];
+  async function fillTemplate(a) {
+    const run = S.runs[a.recordId];
+    const fail = (error) => post('event', { name: 'templateFilled', recordId: a.recordId, ok: false, error });
+    if (!run) return fail('Run not found.');
+    if (run.locked) return fail('The run is locked.');
+    const byScope = templateOps(a.body || {});
+    const scopes = Object.keys(byScope).sort((x, y) => SCOPE_ORDER.indexOf(x) - SCOPE_ORDER.indexOf(y));
+    const total = scopes.reduce((n, sc) => n + byScope[sc].length, 0);
+    if (!total) return fail('The template is empty.');
+    let done = 0, held = false;
+    post('event', { name: 'templateProgress', recordId: a.recordId, done, total, scope: scopes[0] });
+    for (const sc of scopes) {
+      const r = await saveOps(run, sc, byScope[sc], sc + ' tab', 'template');
+      if (!r.ok) { log(run, `Template "${a.tplName || ''}": could not fill the ${sc} tab. ${r.error}`, 'error'); return fail(r.error); }
+      if (r.held) held = true;
+      done += byScope[sc].length;
+      post('event', { name: 'templateProgress', recordId: a.recordId, done, total, scope: sc, held });
+    }
+    log(run, `Template "${a.tplName || ''}": filled ${total} fields across ${scopes.length} tab${scopes.length === 1 ? '' : 's'}${held ? '; held until ESO answers' : ''}.`, held ? 'warn' : 'good');
+    post('event', { name: 'templateFilled', recordId: a.recordId, ok: true, held, total, scopes });
   }
 
   // Blank views of a freshly created run, kept so a run can be started with no signal at all.
@@ -1515,9 +1651,11 @@
         else if (a.name === 'send') { sendRecord(a.recordId, a.kind === 'email' ? 'email' : 'fax'); }
         else if (a.name === 'scanUnsent') { scheduleUnsentScan(0); }
         else if (a.name === 'facilities') { if (S.facilities) post('facilities', S.facilities); }
+        else if (a.name === 'catalog') { if (S.catalog) post('catalog', S.catalog); }
         else if (a.name === 'attachTag') { S.attachTag = a.recordId && a.label ? { recordId: a.recordId, label: String(a.label), type: a.type || null, replace: !!a.replace, at: Date.now() } : null; }
         else if (a.name === 'attachUpload') { uploadScan(a); }
         else if (a.name === 'fillFacesheet') { fillFacesheet(a); }
+        else if (a.name === 'fillTemplate') { fillTemplate(a); }
       }
     } catch (e) { log(null, 'ESO Save internal error: ' + (e && e.message), 'error'); }
   });

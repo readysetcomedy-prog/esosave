@@ -1228,7 +1228,8 @@ test('settings follow the ESO login: a row per login in the agency table; locked
   const row = await waitFor(async () => (await db()).find(r => r.name === 'JONES, ALEX'), { label: 'row written' });
   assert.equal(row.settings.quickHistory, true);
   assert.ok(!('purgeHoursAfterLock' in row.settings) && !('warmTabs' in row.settings), 'locked settings never go to the table');
-  for (const k of Object.keys(row)) assert.ok(['name', 'settings', 'updated_at'].includes(k), 'nothing else leaves the device: ' + k);
+  for (const k of Object.keys(row)) assert.ok(['name', 'person_id', 'settings', 'updated_at'].includes(k), 'nothing else leaves the device: ' + k);
+  assert.equal(row.person_id, 'person-m', 'the row carries the permanent ESO id');
   // Settings: the agency block is locked, the quick buttons are theirs; a change goes to the row
   await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.bar [data-act=open]').click());
   await waitFor(() => T.page.evaluate(() => !!document.getElementById('esosave-host').shadowRoot.querySelector('.panel [data-act=settings]')), { label: 'panel' });
@@ -1276,6 +1277,18 @@ test('settings follow the ESO login: a row per login in the agency table; locked
   assert.equal((await T.storage()).settings.quickMeds, true, 'kept on the tablet');
   await T.control({ dbDown: false });
   await waitFor(async () => (await db()).find(r => r.name === 'SMITH, JANE').settings.quickMeds === true, { label: 'written once the table is back', timeout: 40000 });
+  await T.control({ userName: 'TEST, MEDIC', userId: 'person-1' });
+  // her name changes in ESO (a marriage): the same person id finds her row, it is renamed, her settings stay
+  await fetch(T.base + '/__db_set', { method: 'POST', body: JSON.stringify({ name: 'SMITH, JANE', person_id: 'person-j', settings: { quickMeds: false, quickAcuity: false } }) });
+  await T.control({ userName: 'BROWN, JANE', userId: 'person-j' });
+  await freshRun();
+  await app(() => window.app.edit('incident', 'incident.scene.manualAddress.locationName', 'New St'));
+  await waitFor(() => T.page.evaluate(() => (document.getElementById('esosave-host').shadowRoot.querySelector('.bar .who') || {}).textContent === 'BROWN, JANE'), { label: 'new name on the card' });
+  await waitFor(async () => (await db()).some(r => r.name === 'BROWN, JANE' && r.person_id === 'person-j'), { label: 'row renamed' });
+  assert.ok(!(await db()).some(r => r.name === 'SMITH, JANE'), 'no second row under the old name');
+  assert.equal((await db()).find(r => r.name === 'BROWN, JANE').settings.quickMeds, false, 'her settings came with her');
+  await waitFor(async () => (await T.storage()).settings.quickMeds === false, { label: 'the tablet carries them' });
+  await T.setStorage({ settings: { ...(await T.storage()).settings, quickMeds: true, quickAcuity: true } });
   await T.control({ userName: 'TEST, MEDIC', userId: 'person-1' });
 });
 
@@ -1703,4 +1716,170 @@ test('vitals copy: the groups the crew unticks in Settings are left out of the c
   assert.ok(!rec.ops.some(o => o.address.includes(c.itemId) && /bloodPressure|glasgowComaScale/.test(o.address)), 'never sent');
   await T.setStorage({ settings: { ...(await T.storage()).settings, vitalCopySkip: [] } });
   await fetch(T.base + '/__db_set', { method: 'POST', body: JSON.stringify({ name: 'TEST, MEDIC', settings: {} }) });
+});
+
+// ---- Templates: a crew member's own fill-ins, kept under their ESO id, shared or private
+const tw = (sel) => T.page.evaluate((s) => { const el = document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin ' + s); return el ? el.textContent : null; }, sel);
+const twClick = (sel) => T.page.evaluate((s) => { const el = document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin ' + s); if (!el) throw new Error('no ' + s); el.click(); }, sel);
+const twClickText = (sel, text) => T.page.evaluate(([s, t]) => { const el = Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.tplwin ' + s)).find(x => x.textContent.trim() === t); if (!el) throw new Error('no ' + s + ' ' + t); el.click(); }, [sel, text]);
+const twType = (sel, text) => T.page.evaluate(([s, t]) => { const el = document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin ' + s); if (!el) throw new Error('no ' + s); el.focus(); el.value = t; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); }, [sel, text]);
+// the field row for a catalog field (or an item member: "<item index>|<rel>")
+const rowSel = (key) => `.tf[data-key="${key}"]`;
+const pick = async (key, text) => { await twType(rowSel(key) + ' [data-pick]', text); await waitFor(() => T.page.evaluate((s) => !!document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin ' + s + ' .picklist button'), rowSel(key)), { label: 'list for ' + key }); await twClickText(rowSel(key) + ' .picklist button', text); };
+const tplDb = () => fetch(T.base + '/__db_tpl_dump').then(r => r.json());
+
+test('templates: made from ESO\'s own field catalog, saved under the person\'s id, and filled into a run tab by tab with a progress bar', async () => {
+  await fetch(T.base + '/__db_tpl_reset', { method: 'POST' });
+  await T.control({ userName: 'TEST, MEDIC', userId: 'person-1' });
+  const id = await freshRun();
+  await app(() => window.app.openTab('Incident'));
+  await waitFor(async () => !!(await T.storage()).catalog, { label: 'the field catalog kept on the device' });
+  const cat = (await T.storage()).catalog;
+  assert.ok(cat.fields.some(f => f.a === 'incident.response.runTypeId' && f.l === 'SL.RUNTYPE'), 'a field with its list');
+  assert.ok(!cat.fields.some(f => /incidentNumber|unitId|lastName|roleIds|strokes|locationName/.test(f.a)), "the call's own fields are not in it");
+  assert.ok(cat.fields.some(f => f.a === 'flowchartTreatments.treatments.dose' && f.i === 'flowchartTreatments.treatments'), 'item members know their item');
+  await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.bar [data-act=templates]').click());
+  await waitFor(() => tw('h1'), { label: 'the Templates window' });
+  assert.match(await tw('.body'), /None yet/);
+  await twClick('[data-act=new]');
+  await waitFor(() => T.page.evaluate(() => !!document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin [data-name]')), { label: 'editor' });
+  await twType('[data-name]', 'Chest pain');
+  // Incident: two pick lists
+  await twClick('[data-page=incident]');
+  await pick('incident.response.runTypeId', '911 Response (Scene)');
+  await pick('incident.response.priorityId', 'Emergent');
+  assert.match(await tw(rowSel('incident.response.runTypeId') + ' .chosen'), /911 Response/);
+  // Patient: a number, a multiselect, a history item
+  await twClick('[data-page=patient]');
+  await twType(rowSel('patient.demographics.weight') + ' [data-in]', '180');
+  await pick('patient.demographics.raceIds', 'White');
+  await twClick('[data-additem="patient.patientMedicalHistories"]');
+  await pick('0|itemId', 'Hypertension');
+  // Vitals: a vital with two values
+  await twClick('[data-page=vitals]');
+  await twClick('[data-additem="vitals.vitalSigns"]');
+  await twType(rowSel('1|bloodPressure.bloodPressureSystolic') + ' [data-in]', '120');
+  await twType(rowSel('1|pulse.pulseRate') + ' [data-in]', '80');
+  // Flowchart: a treatment; its measure list narrows to the treatment's own
+  await twClick('[data-page=flowchartTreatments]');
+  await twClick('[data-additem="flowchartTreatments.treatments"]');
+  await pick('2|flowchartTreatmentRegistryId', 'Oxygen');
+  await twType(rowSel('2|dose') + ' [data-in]', '15');
+  await twType(rowSel('2|doseUnitId') + ' [data-pick]', '');
+  await waitFor(() => T.page.evaluate((s) => !!document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin ' + s + ' .picklist button'), rowSel('2|doseUnitId')), { label: 'measure list' });
+  assert.deepEqual(await T.page.evaluate((s) => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.tplwin ' + s + ' .picklist button')).map(b => b.textContent), rowSel('2|doseUnitId')), ['L/min'], 'only the measures of the chosen treatment');
+  await twClickText(rowSel('2|doseUnitId') + ' .picklist button', 'L/min');
+  // Assessments: one assessment, all normal, with a comment
+  await twClick('[data-page=assessments]');
+  await twClick('[data-additem="assessments.assessmentsV2"]');
+  await twClick('.item [data-allnormal]');
+  await twType(rowSel('3|abdomenSection.comments') + ' [data-in]', 'Soft, non-tender');
+  
+  // Narrative: an impression and text
+  await twClick('[data-page=narrative]');
+  await pick('narrative.clinicalImpression.primaryImpressionId', 'Chest Pain');
+  await twType(rowSel('narrative.narrative.narrativeText') + ' [data-in]', 'Pt c/o chest pain.');
+  assert.match(await tw('.pages'), /Incident2/);
+  await twClick('[data-act=save]');
+  await waitFor(async () => (await tplDb()).templates.length === 1, { label: 'saved to the table' });
+  const saved = (await tplDb()).templates[0];
+  assert.equal(saved.owner_id, 'person-1'); assert.equal(saved.owner_name, 'TEST, MEDIC'); assert.equal(saved.name, 'Chest pain'); assert.equal(saved.share, 'private');
+  assert.deepEqual(saved.body.fields['incident.response.runTypeId'], { r: 'RUNTYPEID', t: 'singleselect', v: 326, l: 'SL.RUNTYPE' });
+  assert.deepEqual(saved.body.fields['patient.demographics.raceIds'].v, [319]);
+  assert.equal(saved.body.items.length, 4);
+  assert.equal(saved.body.items.find(i => i.kind === 'treatment').fields.doseUnitId.v, 9001);
+  const ax = saved.body.items.find(i => i.kind === 'assessment');
+  assert.ok(ax.findings.length > 100 && ax.findings.every(f => f.id === 'No_Abnormalities'), 'every location marked no abnormalities');
+  await waitFor(() => tw('h2'), { label: 'back on the list' });
+  assert.match(await tw('.body'), /Chest pain[\s\S]*private/);
+  // fill the run from it: a question, then a progress bar, then the run carries it all
+  await twClickText('.tpl [data-act=fill]', 'Fill this run');
+  await waitFor(async () => /Fill this run from "Chest pain"/.test(await T.page.evaluate(() => (document.getElementById('esosave-host').shadowRoot.querySelector('.veil .askbox') || {}).textContent || '')), { label: 'the question' });
+  assert.match(await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.veil .askbox').textContent), /replaced/);
+  await T.page.evaluate(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.askbox button')).find(b => /Yes, fill it/.test(b.textContent)).click());
+  const tree = async () => (await T.record(id)).tree;
+  await waitFor(async () => { const t = await tree(); return t.narrative?.narrative?.narrativeText === 'Pt c/o chest pain.' && t.incident?.response?.runTypeId === 326; }, { label: 'filled', timeout: 30000 });
+  await waitFor(() => T.page.evaluate(() => /Filled from "Chest pain"/.test((document.getElementById('esosave-host').shadowRoot.querySelector('.veil') || {}).textContent || '')), { label: 'the notice', timeout: 15000 });
+  const t = await tree();
+  assert.equal(t.incident.response.priorityId, 330);
+  assert.equal(t.patient.demographics.weight, '180'); assert.deepEqual(t.patient.demographics.raceIds, [319]);
+  assert.equal(Object.values(t.patient.patientMedicalHistories)[0].itemId, 1337168);
+  const v = t.vitals.vitalSigns[0]; assert.equal(v.bloodPressure.bloodPressureSystolic, '120'); assert.equal(v.pulse.pulseRate, '80'); assert.match(v.vitalSignDateTime, /^\d\d\/\d\d\/\d{4} \d\d:\d\d:\d\d$/);
+  const tr = t.flowchartTreatments.treatments[0]; assert.equal(tr.flowchartTreatmentRegistryId, 1416); assert.equal(tr.dose, '15'); assert.equal(tr.doseUnitId, 9001); assert.ok(tr.treatmentDate);
+  const a = t.assessments.assessmentsV2[0]; assert.equal(a.abdomenSection.comments, 'Soft, non-tender'); assert.equal(Object.values(a.findings).length, ax.findings.length); assert.ok(Object.values(a.findings).every(f => f.findingId === 'No_Abnormalities' && f.present === true));
+  assert.equal(t.narrative.clinicalImpression.primaryImpressionId, 500);
+  const run = await T.run(id);
+  assert.ok(run.batches.filter(b => b.synthetic === 'facesheet' || b.synthetic === 'template').length >= 6, 'one batch per tab');
+  assert.ok(run.log.some(l => /Template "Chest pain": filled/.test(l.msg)));
+});
+
+test('templates: shared to everyone or to named people show up for them, named after who shared them; a copy becomes theirs', async () => {
+  await T.control({ userName: 'TEST, MEDIC', userId: 'person-1' });
+  await freshRun();
+  await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.bar [data-act=templates]').click());
+  await waitFor(async () => /Chest pain/.test((await tw('.body')) || ''), { label: 'his template listed' });
+  // share it with everyone
+  await twClickText('.tpl [data-act=edit]', 'Edit');
+  await waitFor(() => T.page.evaluate(() => !!document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin input[name=share]')), { label: 'editor' });
+  await T.page.evaluate(() => { const r = document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin input[name=share][value=everyone]'); r.checked = true; r.dispatchEvent(new Event('change', { bubbles: true })); });
+  await twClick('[data-act=save]');
+  await waitFor(async () => (await tplDb()).templates[0].share === 'everyone', { label: 'shared' });
+  await waitFor(() => tw('[data-act=new]'), { label: 'back on the list' });
+  // a second, shared with one named person
+  await twClick('[data-act=new]');
+  await waitFor(() => T.page.evaluate(() => !!document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin [data-name]')), { label: 'editor' });
+  await twType('[data-name]', 'For Alex');
+  await twClick('[data-page=incident]');
+  await pick('incident.response.priorityId', 'Non-Emergent');
+  await T.page.evaluate(() => { const r = document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin input[name=share][value=some]'); r.checked = true; r.dispatchEvent(new Event('change', { bubbles: true })); });
+  await waitFor(() => T.page.evaluate(() => !!document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin [data-people]')), { label: 'people search' });
+  await twType('[data-people]', 'jones');
+  await waitFor(() => T.page.evaluate(() => !!document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin [data-peoplelist] button')), { label: 'names' });
+  await twClickText('[data-peoplelist] button', 'JONES, ALEX');
+  await waitFor(async () => /JONES, ALEX/.test((await tw('.share .chosen')) || ''), { label: 'chosen' });
+  await twClick('[data-act=save]');
+  await waitFor(async () => (await tplDb()).shares.some(s => s.person_id === 'person-m'), { label: 'share row' });
+  await waitFor(() => tw('[data-act=new]'), { label: 'back on the list' });
+  // Jane sees the everyone template, not the one for Alex; a copy is hers
+  await T.control({ userName: 'SMITH, JANE', userId: 'person-j' });
+  await freshRun();
+  await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.bar [data-act=templates]').click());
+  await waitFor(async () => /shared by TEST, MEDIC/.test((await tw('.body')) || ''), { label: 'listed for her with who shared it' });
+  const body = await tw('.body');
+  assert.match(body, /Templates shared to everyone[\s\S]*Chest pain[\s\S]*shared by TEST, MEDIC/);
+  assert.doesNotMatch(body, /For Alex/);
+  assert.match(body.split('Templates shared with you')[1].split('Templates shared to everyone')[0], /None/);
+  await twClickText('.tpl [data-act=copy]', 'Copy to mine');
+  await waitFor(() => T.page.evaluate(() => !!document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin [data-name]')), { label: 'editor' });
+  assert.equal(await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin [data-name]').value), 'Chest pain (copy)');
+  await twClick('[data-act=save]');
+  await waitFor(async () => (await tplDb()).templates.some(x => x.owner_id === 'person-j' && x.name === 'Chest pain (copy)'), { label: 'her own copy' });
+  // Alex sees the one shared with him
+  await T.control({ userName: 'JONES, ALEX', userId: 'person-m' });
+  await freshRun();
+  await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.bar [data-act=templates]').click());
+  await waitFor(async () => /For Alex/.test((await tw('.body')) || ''), { label: 'listed for him' });
+  assert.match((await tw('.body')).split('Templates shared with you')[1].split('Templates shared to everyone')[0], /For Alex[\s\S]*shared by TEST, MEDIC/);
+  await twClick('[data-act=close]');
+  await T.control({ userName: 'TEST, MEDIC', userId: 'person-1' });
+});
+
+test('templates: with no signal the fill is held and pushed when signal returns', async () => {
+  const id = await freshRun();
+  await app(() => window.app.openTab('Narrative'));
+  // the list was seen once with signal: it is kept on the device for this login
+  await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.bar [data-act=templates]').click());
+  await waitFor(async () => (await T.storage()).tpls?.who === 'person-1' && /Chest pain/.test((await tw('.body')) || ''), { label: 'templates loaded' });
+  await twClick('[data-act=close]');
+  await T.context.setOffline(true);
+  await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.bar [data-act=templates]').click());
+  await waitFor(async () => /Chest pain/.test((await tw('.body')) || ''), { label: 'templates from the device' });
+  await T.page.evaluate(() => { const row = Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.tplwin .tpl')).find(r => /^Chest pain/.test(r.querySelector('.tn').textContent)); row.querySelector('[data-act=fill]').click(); });
+  await waitFor(async () => /Fill this run from/.test(await T.page.evaluate(() => (document.getElementById('esosave-host').shadowRoot.querySelector('.veil .askbox') || {}).textContent || '')), { label: 'question' });
+  await T.page.evaluate(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.askbox button')).find(b => /Yes, fill it/.test(b.textContent)).click());
+  await waitFor(async () => { const r = await T.run(id); return r && r.batches.filter(b => b.status === 'held').length >= 6; }, { label: 'held', timeout: 20000 });
+  await waitFor(() => T.page.evaluate(() => /held until ESO answers/.test((document.getElementById('esosave-host').shadowRoot.querySelector('.veil') || {}).textContent || '')), { label: 'the notice says held', timeout: 15000 });
+  await T.context.setOffline(false);
+  await waitFor(async () => (await T.record(id)).tree.narrative?.clinicalImpression?.primaryImpressionId === 500, { label: 'pushed once signal is back', timeout: 40000 });
+  await waitFor(async () => (await T.run(id)).batches.every(b => b.status === 'acked' || b.status === 'dropped'), { label: 'all acked', timeout: 30000 });
 });

@@ -67,6 +67,7 @@ export function createMockEso() {
   // a stand-in for the extension's settings table (Supabase's REST shape): one row per ESO login
   const dbUsers = new Map();
   const dbTables = { call_log_entries: [], users: [], ambulances: [] }; // the agency's own tables, seeded by tests
+  const dbTpl = { esosave_templates: new Map(), esosave_template_shares: [] }; // the crew's templates
   const faxHistory = []; // agency-wide, like ESO's Fax History
   const emails = [];
   let faxSeq = 7370000;
@@ -201,6 +202,67 @@ export function createMockEso() {
     }
     return out;
   }
+  // a slice of ESO's field catalog (address -> field ref, type, name, list), enough for Templates
+  const F = (fieldRef, dataType, displayName, listRef) => ({ fieldRef, dataType, displayName, listRef, associatedListRefs: [], constraints: {}, showField: true, tags: ['PCR_TAB'] });
+  const FIELD_CONFIGS = {
+    'incident.response.incidentNumber': F('INCIDENTNUMBER', 'string', 'Incident Number'),
+    'incident.response.unitId': F('UNITID', 'singleselect', 'Unit', 'UDL.UNIT'),
+    'incident.response.runTypeId': F('RUNTYPEID', 'singleselect', 'Run Type', 'SL.RUNTYPE'),
+    'incident.response.priorityId': F('PRIORITYID', 'singleselect', 'Priority', 'SL.RESPONSEPRIORITY'),
+    'incident.response.emdPerformedID': F('EMDPERFORMEDID', 'singleselect', 'EMD Performed', 'SL.EMDPERFORMED'),
+    'incident.additionalFactors.dispatchDelays': F('DISPATCHDELAYS', 'multiselect', 'Dispatch Delays', 'SL.DISPATCHDELAY'),
+    'incident.crew.roleIds': F('PERSONNELROLEIDS', 'multiselect', 'Roles', 'SL.CREWROLE'),
+    'incident.scene.manualAddress.locationName': F('SCENELOCATIONNAME', 'string', 'Location Name'),
+    'patient.demographics.lastName': F('PATIENTLASTNAME', 'string', 'Last Name'),
+    'patient.demographics.weight': F('PATIENTWEIGHT', 'number', 'Weight'),
+    'patient.demographics.raceIds': F('PATIENTRACEIDS', 'multiselect', 'Race', 'SL.RACE'),
+    'patient.patientMedicalHistories': F('PATIENTMEDICALHISTORY', 'fieldGroup', 'Patient History'),
+    'patient.patientMedicalHistories.itemId': F('PATIENTMEDICALHISTORYITEMID', 'singleselect', 'Item', 'SL.MEDICALHISTORY'),
+    'patient.patientMedicalHistories.comment': F('PATIENTMEDICALHISTORYCOMMENT', 'string', 'Comments'),
+    'patient.patientHistoriesPertinentNegativeId': F('PATIENTHISTORIESPERTINENTNEGATIVEID', 'pertinentNegative', 'Reason Unable To Obtain', 'SL.PERTINENTNEGATIVEHISTORY'),
+    'vitals.vitalSigns': F('VITALSIGN', 'collectionWithData', 'Vital Signs'),
+    'vitals.vitalSigns.vitalSignDateTime': F('VITALSIGNDATETIME', 'datetime', 'Vital Sign Date Time'),
+    'vitals.vitalSigns.bloodPressure.bloodPressureSystolic': F('BLOODPRESSURESYSTOLIC', 'string', 'Systolic'),
+    'vitals.vitalSigns.bloodPressure.bloodPressureDiastolic': F('BLOODPRESSUREDIASTOLIC', 'string', 'Diastolic'),
+    'vitals.vitalSigns.pulse.pulseRate': F('PULSERATE', 'string', 'Rate'),
+    'vitals.vitalSigns.glasgowComaScale.glascowComaTotalScore': F('GLASCOWCOMATOTALSCORE', 'integer', 'Total Score'),
+    'vitals.vitalSigns.softDeleted': F('VITALSIGNSOFTDELETED', 'boolean', 'Soft Deleted'),
+    'flowchartTreatments.treatments': F('FLOWCHARTTREATMENT', 'collectionWithData', 'Treatments'),
+    'flowchartTreatments.treatments.flowchartTreatmentRegistryId': F('FLOWCHARTTREATMENTREGISTRYID', 'singleselect', 'Treatment', 'UDL.FLOWCHARTTREATMENTREGISTRY'),
+    'flowchartTreatments.treatments.dose': F('FLOWCHARTTREATMENTDOSE', 'number', 'Dose'),
+    'flowchartTreatments.treatments.doseUnitId': F('FLOWCHARTTREATMENTDOSEUNITID', 'singleselect', 'Measure', 'UDL.AGENCYFLOWCHARTMEDICATIONMEASURE'),
+    'flowchartTreatments.treatments.comments': F('FLOWCHARTTREATMENTCOMMENTS', 'string', 'Comments'),
+    'flowchartTreatments.treatments.successful': F('FLOWCHARTTREATMENTSUCCESSFUL', 'boolean', 'Successful'),
+    'assessments.assessmentsV2': F('ASSESSMENT2', 'collectionWithData', 'Assessments'),
+    'assessments.assessmentsV2.findings': F('ASSESSMENT2FINDINGS', 'binary', 'Findings'),
+    'assessments.assessmentsV2.abdomenSection.comments': F('ASSESSMENT2ABDOMENSECTIONCOMMENTS', 'string', 'Abdomen Comments'),
+    'narrative.clinicalImpression.primaryImpressionId': F('PRIMARYIMPRESSIONID', 'singleselect', 'Primary Impression', 'SL.PRIMARYIMPRESSION'),
+    'narrative.narrative.narrativeText': F('NARRATIVETEXT', 'string', 'Narrative'),
+    'narrative.supportingSignsAndSymptomsEnhanced.signsAndSymptomsEnhanced': F('SIGNSANDSYMPTOMSENHANCED', 'collectionWithData', 'Signs/Symptoms'),
+    'narrative.supportingSignsAndSymptomsEnhanced.signsAndSymptomsEnhanced.primaryId': F('SIGNSANDSYMPTOMSENHANCEDPRIMARYID', 'singleselect', 'Category', 'SL.SUPPORTINGPRIMARY'),
+    'narrative.supportingSignsAndSymptomsEnhanced.signsAndSymptomsEnhanced.signId': F('SIGNSANDSYMPTOMSENHANCEDSIGNID', 'singleselect', 'Sign/Symptom', 'SL.SUPPORTINGSIGNSYMPTOM'),
+    'forms.specialtyForms.cpr.witnessedById': F('CPRWITNESSEDBYID', 'singleselect', 'Witnessed By', 'SL.CPRWITNESSEDBY'),
+    'billing.transport.physiciansCertificationStatement': F('BILLINGPHYSICIANSCERTIFICATIONSTATEMENT', 'boolean', "Physician's Certification Statement (PCS)"),
+    'signatures.standardSignatures.standardRefusal.capacityAssessment.legalIds': F('STANDARDREFUSALLEGALIDS', 'multiselect', 'Legal', 'UDL.STANDARDREFUSAL_LEGAL'),
+    'signatures.standardSignatures.patientSignature.strokes': F('PATIENTSIGNATURESTROKES', 'strokes', 'Signature'),
+  };
+  const V = (pairs, extra) => ({ values: pairs.map(([itemId, itemName], i) => ({ itemId, itemName, parentItemId: null, ...(extra ? extra(itemId, i) : {}) })) });
+  const TPL_LISTS = {
+    'SL.RUNTYPE': V([[325, 'Emergency Interfacility Transfer'], [326, '911 Response (Scene)'], [327, 'Mutual Aid']]),
+    'SL.RESPONSEPRIORITY': V([[330, 'Emergent'], [331, 'Non-Emergent']]),
+    'SL.EMDPERFORMED': V([[340, 'Yes'], [341, 'No']]),
+    'SL.DISPATCHDELAY': V([[350, 'None/No Delay'], [351, 'Weather'], [352, 'Traffic']]),
+    'SL.MEDICALHISTORY': V([[1337168, 'Hypertension'], [1337170, 'Diabetes'], [1337172, 'COPD']]),
+    'SL.PERTINENTNEGATIVEHISTORY': V([[360, 'Unable to Obtain'], [361, 'Not Applicable']]),
+    'UDL.FLOWCHARTTREATMENTREGISTRY': { values: [{ itemId: 1416, itemName: 'Oxygen', isMedication: true }, { itemId: 1417, itemName: 'Aspirin', isMedication: true }, { itemId: 1418, itemName: 'IV Therapy', isMedication: false }] },
+    'UDL.AGENCYFLOWCHARTMEDICATIONMEASURE': { values: [{ itemId: 9001, itemName: 'L/min', parentItemId: 1416 }, { itemId: 9002, itemName: 'mg', parentItemId: 1417 }] },
+    'SL.PRIMARYIMPRESSION': V([[500, 'Chest Pain'], [501, 'Abdominal Pain'], [502, 'Weakness']]),
+    'SL.SUPPORTINGPRIMARY': V([[711, 'Cardiovascular'], [712, 'Respiratory']]),
+    'SL.SUPPORTINGSIGNSYMPTOM': V([[791, 'Chest pain'], [792, 'Shortness of breath']]),
+    'SL.CPRWITNESSEDBY': V([[600, 'Bystander'], [601, 'EMS']]),
+    'UDL.STANDARDREFUSAL_LEGAL': V([['aaaa-1', 'Adult'], ['aaaa-2', 'Emancipated minor']]),
+    'UDL.UNIT': V([[3001, '23'], [3002, '16']]),
+  };
   const server = http.createServer((req, res) => {
     const u = new URL(req.url, 'http://x');
     const path = u.pathname.replace(/\/{2,}/g, '/');
@@ -235,6 +297,57 @@ export function createMockEso() {
       }
       if (path === '/__faxes') return send(200, { faxHistory, emails });
       if (path === '/__db_dump') return send(200, [...dbUsers.values()]);
+      if (path === '/__db_tpl_dump') return send(200, { templates: [...dbTpl.esosave_templates.values()], shares: dbTpl.esosave_template_shares });
+      if (path === '/__db_tpl_reset' && req.method === 'POST') { dbTpl.esosave_templates.clear(); dbTpl.esosave_template_shares.length = 0; return send(200, { ok: true }); }
+      // the templates tables, as PostgREST serves them: eq./in.() filters, or=(...), upsert on the id, delete by filter
+      const tm = /^\/__db\/(esosave_templates|esosave_template_shares)$/.exec(path);
+      if (tm) {
+        if (control.dbDown) { res.writeHead(503); return res.end(); }
+        if (req.headers.apikey !== 'test-anon') return send(401, { message: 'No API key found in request' });
+        const table = tm[1];
+        const rowsOf = () => table === 'esosave_templates' ? [...dbTpl.esosave_templates.values()] : dbTpl.esosave_template_shares.slice();
+        const cond = (row, key, expr) => { const m = /^(eq|in)\.(.*)$/.exec(expr); if (!m) return true; if (m[1] === 'eq') return String(row[key]) === m[2]; const set = m[2].replace(/^\(|\)$/g, '').split(',').map(x => x.replace(/^"|"$/g, '')).filter(Boolean); return set.includes(String(row[key])); };
+        const matches = (row) => {
+          for (const [k, v] of u.searchParams) {
+            if (k === 'select' || k === 'order' || k === 'limit') continue;
+            if (k === 'or') { const parts = v.replace(/^\(|\)$/g, '').split(/,(?![^(]*\))/); if (!parts.some(pt => { const i = pt.indexOf('.'); const key = pt.slice(0, i); const expr = pt.slice(i + 1); return cond(row, key, expr); })) return false; continue; }
+            if (!cond(row, k, v)) return false;
+          }
+          return true;
+        };
+        if (req.method === 'GET') return send(200, rowsOf().filter(matches));
+        const b = JSON.parse(body || '{}');
+        if (req.method === 'POST') {
+          const rows = Array.isArray(b) ? b : [b]; const out = [];
+          for (const r of rows) {
+            if (table === 'esosave_templates') {
+              const id = r.id || randomUUID();
+              if (dbTpl.esosave_templates.has(id) && !/merge-duplicates/.test(req.headers.prefer || '')) return send(409, { code: '23505', message: 'duplicate key' });
+              const row = { ...(dbTpl.esosave_templates.get(id) || { created_at: new Date().toISOString(), share: 'private', body: {} }), ...r, id, updated_at: new Date().toISOString() };
+              dbTpl.esosave_templates.set(id, row); out.push(row);
+            } else {
+              if (!dbTpl.esosave_templates.has(r.template_id)) return send(409, { code: '23503', message: 'foreign key' });
+              const i = dbTpl.esosave_template_shares.findIndex(x => x.template_id === r.template_id && x.person_id === r.person_id);
+              if (i >= 0 && !/merge-duplicates/.test(req.headers.prefer || '')) return send(409, { code: '23505', message: 'duplicate key' });
+              if (i >= 0) dbTpl.esosave_template_shares[i] = { ...dbTpl.esosave_template_shares[i], ...r }; else dbTpl.esosave_template_shares.push({ ...r });
+              out.push(r);
+            }
+          }
+          return send(201, /return=representation/.test(req.headers.prefer || '') ? out : '');
+        }
+        if (req.method === 'PATCH') {
+          const hit = rowsOf().filter(matches);
+          for (const row of hit) Object.assign(row, b, table === 'esosave_templates' ? { updated_at: new Date().toISOString() } : {});
+          return send(200, /return=representation/.test(req.headers.prefer || '') ? hit : '');
+        }
+        if (req.method === 'DELETE') {
+          const hit = rowsOf().filter(matches);
+          if (table === 'esosave_templates') { for (const row of hit) { dbTpl.esosave_templates.delete(row.id); dbTpl.esosave_template_shares = dbTpl.esosave_template_shares.filter(x => x.template_id !== row.id); } }
+          else dbTpl.esosave_template_shares = dbTpl.esosave_template_shares.filter(x => !hit.includes(x));
+          return send(200, /return=representation/.test(req.headers.prefer || '') ? hit : '');
+        }
+        return send(405, { error: 'method' });
+      }
       // the ESO Save app's side of the iPad scanner, as the Safari extension handler would answer
       if (path === '/__native' && req.method === 'POST') {
         const m = JSON.parse(body || '{}');
@@ -270,13 +383,22 @@ export function createMockEso() {
         if (control.dbDown) { res.writeHead(503); return res.end(); }
         if (req.headers.apikey !== 'test-anon') return send(401, { message: 'No API key found in request' });
         const eq = /^eq\.(.*)$/.exec(u.searchParams.get('name') || '');
-        if (req.method === 'GET') return send(200, eq ? [dbUsers.get(eq[1])].filter(Boolean) : [...dbUsers.values()]);
+        const pq = /^eq\.(.*)$/.exec(u.searchParams.get('person_id') || '');
+        const byPid = pq ? [...dbUsers.values()].find(r => r.person_id === pq[1]) : null;
+        if (req.method === 'GET') return send(200, pq ? [byPid].filter(Boolean) : eq ? [dbUsers.get(eq[1])].filter(Boolean) : [...dbUsers.values()]);
         const b = JSON.parse(body || '{}');
+        if (req.method === 'PATCH' && pq) {
+          if (!byPid) return send(200, []);
+          if (b.name && b.name !== byPid.name) { dbUsers.delete(byPid.name); byPid.name = b.name; dbUsers.set(b.name, byPid); }
+          Object.assign(byPid, b, { updated_at: new Date().toISOString() });
+          return send(200, /return=representation/.test(req.headers.prefer || '') ? [byPid] : '');
+        }
         if (req.method === 'POST') {
           const rows = Array.isArray(b) ? b : [b];
           const out = [];
           for (const r of rows) {
             if (dbUsers.has(r.name) && !/merge-duplicates/.test(req.headers.prefer || '')) return send(409, { code: '23505', message: 'duplicate key value violates unique constraint' });
+            if (r.person_id && [...dbUsers.values()].some(x => x.person_id === r.person_id && x.name !== r.name)) return send(409, { code: '23505', message: 'duplicate key value violates unique constraint "esosave_users_person_id"' });
             const row = { ...(dbUsers.get(r.name) || { settings: {} }), ...r, updated_at: new Date().toISOString() };
             dbUsers.set(r.name, row); out.push(row);
           }
@@ -300,7 +422,8 @@ export function createMockEso() {
       if (rest === 'thirdpartydata/partners') return send(200, { partners: [] });
       // ESO's configuration bundle: every pick list, including the agency's saved facilities
       if (rest.startsWith('configurationBundle/') && req.method === 'GET') return send(200, {
-        configVersion: '5.3.19', bundleVersion: '5.3.19.1', mdmVersion: '3.3', fieldConfigs: [], lists: {
+        configVersion: '5.3.19', bundleVersion: '5.3.19.1', mdmVersion: '3.3', fieldConfigs: FIELD_CONFIGS, lists: {
+          ...TPL_LISTS,
           'UDL.LOCATIONS': { values: [
             { itemId: 'loc-anderson', itemName: 'Anderson Hospital', locationTypeId: 6540, city: 'Maryville' },
             { itemId: 'loc-stjohns', itemName: "HSHS St. John's", locationTypeId: 6540, city: 'Springfield' },

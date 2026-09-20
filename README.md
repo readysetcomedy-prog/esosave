@@ -132,6 +132,21 @@ to bad signal or a hung page.
   was read" shows what the text recognition produced. A setting, on by
   default; off, ESO's camera and Add Attachment work untouched. On a desktop the facesheet is
   attached and named but not read (no text recognition there).
+- **Templates.** A Templates button on the card. Anyone can make their own fill-ins from ESO's own
+  field list (the configuration bundle names every field on every tab, its type and its pick
+  list): tick a field, give it a value (a search-and-scroll picker for lists, a tick list for
+  multi-picks, a date or time picker, yes/no, text), and add items too: a vital, a treatment
+  (its measure and route narrow to the treatment), an assessment (every Quick Ax location set
+  to No Abnormalities with one button, or any finding), a history entry, an allergy, a home
+  medication, a sign or symptom, a protocol. What is the call's own (incident number, unit,
+  vehicle, shift, crew, times, the addresses, the patient's name, DOB and SSN, signatures) is
+  never offered. Templates are kept in the agency's table under the person's ESO id (so a name
+  change loses nothing), private, or shared with everyone or with named people; the list shows
+  My templates, Templates shared with you and Templates shared to everyone, each with who
+  shared it, and a shared one can be copied to make it yours. Filling needs an open, unlocked
+  run: a question first, then a progress bar as each tab is written with the same saves ESO's
+  app makes, replacing what is there; with no signal it is held like any save and pushed
+  later. The list seen last is kept on the device, so it works with no signal.
 - **Copy a vital.** A small copy button floats just left of each saved vital's time in the Vitals
   tab; tapping it re-enters that vital as a new one with the current time, every other value the
   same. Only fields the app itself has been seen saving are copied, and the run log names any that
@@ -281,7 +296,8 @@ off a facesheet by Vision, to the extension through native messaging.
 ## Privacy
 
 Everything recorded is protected health information and stays in the extension's local storage on
-that device only. It is never sent anywhere but ESO. Locked runs are purged automatically as soon as the lock is seen; a
+that device only. Templates carry no patient: they are the crew member's own fill-ins and go to
+the agency's table (`esosave_templates`, `esosave_template_shares`) under their ESO id. It is never sent anywhere but ESO. Locked runs are purged automatically as soon as the lock is seen; a
 retention window can be set in Settings. Exports are plain JSON files: treat them like a printed chart.
 
 ## Development

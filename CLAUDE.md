@@ -15,6 +15,23 @@ by the crew and follow the ESO login through the `esosave_users` table. The pape
 
 **Before adding any new setting, ask the repo owner whether it is locked or open.** Do not guess.
 
+## The person's row
+
+`esosave_users` is keyed by the login name but carries `person_id` (ESO's agency person id);
+the extension finds the row by id first and renames it when the login name changes. Templates
+(`esosave_templates`, shares in `esosave_template_shares`) are owned by `owner_id`, that same
+id. The Management API does run DDL now (the earlier refusals were the policy statements); the
+SQL for these tables was applied from here.
+
+## Templates
+
+The field catalog comes from ESO's configuration bundle (`fieldConfigs`: address, fieldRef,
+dataType, displayName, listRef) in `learnCatalog` (inject.js); `CATALOG_SKIP` names what is the
+call's own and is never offered. A template body is `{ fields: { address: { r, t, v, l } }, items:
+[{ root, kind, r, t, fields, findings }] }` and is written with the app's own ops (`templateOps`),
+one autosave per tab. Item shapes (the ADD value each needs) were recorded from the app. The
+assessment layout (`extension/assess-catalog.js`) is ESO's own Quick Ax definition, not PHI.
+
 ## Data that may leave the device
 
 Only the open settings go to the table (`supabase/esosave_users.sql`); which runs a login may see

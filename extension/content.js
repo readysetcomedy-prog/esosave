@@ -128,6 +128,8 @@
     const data = await loadAll();
     settings = data.settings;
     facilityTypes = data.all.facilityTypes || null;
+    catalog = data.all.catalog || null;
+    tpls = data.all.tpls || tpls;
     renderBar();
     await purgeLocked(settings);
     await sremove(['fieldDefs', 'knownViews']).catch(() => {}); // superseded keys from earlier versions
@@ -141,7 +143,7 @@
     await booted;
     syncAgency();
     if (document.documentElement.hasAttribute('data-esosave')) await sendInit();
-    setTimeout(() => toPage('action', { name: 'facilities' }), 1500);
+    setTimeout(() => { toPage('action', { name: 'facilities' }); toPage('action', { name: 'catalog' }); }, 1500);
     setInterval(() => purgeLocked(settings), 10 * 60 * 1000);
     // a row that could not be written (no signal, table away) goes when signal is back
     setInterval(() => { if (syncDirty && user && lastStatus && lastStatus.online && Date.now() - syncLastTry > 10000) { if (syncedUser !== user) syncUser(); else pushUser(); } }, 5000);
@@ -166,6 +168,13 @@
       onAttached(payload);
     } else if (type === 'event' && payload && payload.name === 'facesheetFilled') {
       onFacesheetFilled(payload);
+    } else if (type === 'catalog' && payload && Array.isArray(payload.fields)) {
+      catalog = payload; await sset({ catalog });
+      if (tplWin) renderTemplates();
+    } else if (type === 'event' && payload && payload.name === 'templateProgress') {
+      onTemplateProgress(payload);
+    } else if (type === 'event' && payload && payload.name === 'templateFilled') {
+      onTemplateFilled(payload);
     } else if (type === 'event' && payload && payload.name === 'sendPrompt') {
       showSendPrompt(payload);
     } else if (type === 'event' && payload && payload.name === 'sent') {
@@ -307,6 +316,37 @@
     .pick .warn { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; border-radius: 8px; padding: 8px 10px; font-size: 13px; margin: 10px 0 0; line-height: 1.35; }
     .pick .btns { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; flex-wrap: wrap; }
     .pick .sub { text-align: center; color: #555; font-size: 13px; margin-bottom: 8px; }
+    .tplwin { position: fixed; inset: 0; z-index: 2147483647; background: #f8fafc; color: #111; font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; display: flex; flex-direction: column; }
+    .tplwin .tophead { display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: #15803d; color: #fff; flex-wrap: wrap; }
+    .tplwin .tophead h1 { font-size: 20px; margin: 0; flex: 1; }
+    .tplwin .tophead input.name { font-size: 18px; padding: 8px 10px; border-radius: 8px; border: 0; min-width: 260px; }
+    .tplwin .body { flex: 1; overflow: auto; padding: 14px 16px 60px; }
+    .tplwin .tb { background: #fff; color: #111; border: 0; border-radius: 10px; padding: 12px 18px; font: inherit; font-weight: 700; cursor: pointer; min-height: 44px; }
+    .tplwin .tb.pri { background: #1d4ed8; color: #fff; } .tplwin .tb.danger { background: #fee2e2; color: #991b1b; } .tplwin .tb.sec { background: #e2e8f0; }
+    .tplwin h2 { font-size: 17px; margin: 18px 0 8px; color: #334155; }
+    .tplwin .tpl { display: flex; align-items: center; gap: 10px; background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 10px 12px; margin: 6px 0; flex-wrap: wrap; }
+    .tplwin .tpl .tn { font-weight: 700; font-size: 17px; flex: 1; min-width: 160px; } .tplwin .tpl .by { color: #64748b; font-size: 13px; }
+    .tplwin .pages { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0 12px; }
+    .tplwin .pages button { border: 1px solid #cbd5e1; background: #fff; border-radius: 20px; padding: 8px 14px; font: inherit; font-weight: 600; cursor: pointer; min-height: 40px; }
+    .tplwin .pages button.on { background: #1d4ed8; color: #fff; border-color: #1d4ed8; } .tplwin .pages button .cnt { background: #fbbf24; color: #111; border-radius: 10px; padding: 0 7px; margin-left: 6px; font-size: 12px; }
+    .tplwin details.sec { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; margin: 8px 0; padding: 0 12px; }
+    .tplwin details.sec > summary { cursor: pointer; font-weight: 700; padding: 12px 0; font-size: 16px; list-style: none; display: flex; align-items: center; gap: 8px; }
+    .tplwin details.sec > summary::before { content: '▸'; color: #64748b; } .tplwin details.sec[open] > summary::before { content: '▾'; }
+    .tplwin .tf { display: grid; grid-template-columns: 34px minmax(160px, 1fr) minmax(220px, 2fr); gap: 8px; align-items: center; padding: 6px 0; border-top: 1px solid #f1f5f9; }
+    .tplwin .tf input[type=checkbox] { width: 24px; height: 24px; }
+    .tplwin .tf .fl { font-weight: 600; } .tplwin .tf.on .fl { color: #1d4ed8; }
+    .tplwin .tf input[type=text], .tplwin .tf input[type=date], .tplwin .tf input[type=time], .tplwin .tf input[type=datetime-local], .tplwin .tf select, .tplwin .tf textarea { width: 100%; box-sizing: border-box; font: inherit; padding: 9px 10px; border: 1px solid #cbd5e1; border-radius: 8px; min-height: 42px; background: #fff; }
+    .tplwin .pick { position: relative; } .tplwin .pick .chosen { font-size: 14px; color: #1d4ed8; font-weight: 700; margin-top: 3px; min-height: 18px; }
+    .tplwin .pick .chosen span { display: inline-block; background: #dbeafe; border-radius: 12px; padding: 2px 10px; margin: 2px 4px 2px 0; }
+    .tplwin .picklist { position: absolute; left: 0; right: 0; top: 44px; max-height: 300px; overflow: auto; background: #fff; border: 1px solid #94a3b8; border-radius: 8px; z-index: 5; box-shadow: 0 6px 20px rgba(0,0,0,.18); }
+    .tplwin .picklist button { display: block; width: 100%; text-align: left; border: 0; border-bottom: 1px solid #f1f5f9; background: #fff; padding: 11px 12px; font: inherit; cursor: pointer; min-height: 42px; } .tplwin .picklist button.sel { background: #dbeafe; }
+    .tplwin .item { border: 1px solid #cbd5e1; border-radius: 10px; margin: 8px 0; padding: 6px 12px 10px; background: #fafafa; }
+    .tplwin .item .ih { display: flex; align-items: center; gap: 10px; font-weight: 700; padding: 6px 0; }
+    .tplwin .share { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; margin: 8px 0; } .tplwin .share label { display: flex; gap: 6px; align-items: center; font-weight: 600; }
+    .tplwin .muted { color: #64748b; font-size: 13px; }
+    .tplwin .ax { margin: 6px 0; } .tplwin .ax h4 { margin: 10px 0 4px; font-size: 15px; color: #334155; }
+    .tplwin .ax .loc { display: grid; grid-template-columns: minmax(150px, 1fr) minmax(200px, 1fr); gap: 8px; align-items: center; padding: 3px 0; }
+    .tplwin .search { width: 100%; box-sizing: border-box; font: inherit; padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 8px; margin: 6px 0 4px; min-height: 42px; }
     .panel { position: fixed; left: 212px; bottom: 8px; width: min(560px, calc(100vw - 228px)); max-height: min(85vh, 720px); overflow: auto; z-index: 2147483647;
              background: #fff; color: #111; border-radius: 12px; box-shadow: 0 12px 40px rgba(0,0,0,.35); padding: 14px 16px; font-size: 14px; line-height: 1.4; }
     .panel h1 { font-size: 16px; margin: 0 0 6px; display: flex; align-items: center; justify-content: space-between; }
@@ -384,10 +424,11 @@
     bar.innerHTML = `<div class="title"><span class="dot"></span><span>${esc(st.title)}</span><span class="fold" data-act="collapse" title="Collapse to just the logo">–</span></div>` +
       (user ? `<div class="who" title="Signed in to ESO as ${esc(user)}: the runs and settings shown are theirs">${esc(user)}</div>` : '') +
       `<div class="msg">${st.num ? `<span class="num">${esc(st.num)}</span> · ` : ''}${esc(st.msg)}</div>` +
-      `<div class="btns">${st.btn ? `<span class="btn" data-act="${st.btn === 'Push now' ? 'push' : 'open'}">${esc(st.btn)}</span>` : ''}<span class="btn" data-act="open">Runs</span></div>`;
+      `<div class="btns">${st.btn ? `<span class="btn" data-act="${st.btn === 'Push now' ? 'push' : 'open'}">${esc(st.btn)}</span>` : ''}<span class="btn" data-act="templates">Templates</span><span class="btn" data-act="open">Runs</span></div>`;
     bar.querySelectorAll('.btn, .fold').forEach(b => b.addEventListener('click', (e) => {
       e.stopPropagation();
       if (b.dataset.act === 'push') toPage('action', { name: 'pushNow' });
+      else if (b.dataset.act === 'templates') openTemplates();
       else if (b.dataset.act === 'collapse') setCollapsed(true, true);
       else togglePanel(true);
     }));
@@ -504,16 +545,32 @@
   }
   // ---- the login's row: fetched when the login is seen, written when they change something
   const dbHeaders = () => ({ apikey: SYNC.key, Authorization: 'Bearer ' + SYNC.key, 'Content-Type': 'application/json' });
-  async function dbGet(name) {
-    const r = await fetch(`${SYNC.url}?name=eq.${encodeURIComponent(name)}&select=name,settings,updated_at`, { headers: dbHeaders() });
+  async function dbGet(name) { return dbFind('name', name); }
+  // a row by the person's permanent ESO id (survives a name change) or by the login name
+  async function dbFind(key, value) {
+    const r = await fetch(`${SYNC.url}?${key}=eq.${encodeURIComponent(value)}&select=name,person_id,settings,updated_at`, { headers: dbHeaders() });
     if (!r.ok) throw new Error('table ' + r.status);
     const rows = await r.json();
     return rows[0] || null;
+  }
+  async function dbPatch(key, value, body) {
+    const r = await fetch(`${SYNC.url}?${key}=eq.${encodeURIComponent(value)}`, { method: 'PATCH', headers: { ...dbHeaders(), Prefer: 'return=minimal' }, body: JSON.stringify(body) });
+    if (!r.ok) throw new Error('table ' + r.status);
   }
   async function dbPut(row) {
     const r = await fetch(SYNC.url, { method: 'POST', headers: { ...dbHeaders(), Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify(row) });
     if (!r.ok) throw new Error('table ' + r.status);
   }
+  // The person's row: found by their ESO id first, so a name change in ESO (a marriage, say)
+  // keeps their settings and templates; the row is renamed to the new login. A row from before
+  // ids were kept is found by name and given the id.
+  async function findPerson(who, pid) {
+    let row = pid ? await dbFind('person_id', pid) : null;
+    if (row && row.name !== who) { await dbPatch('person_id', pid, { name: who }); row.name = who; }
+    if (!row) { row = await dbFind('name', who); if (row && pid && row.person_id !== pid) { await dbPatch('name', who, { person_id: pid }); row.person_id = pid; } }
+    return row;
+  }
+  const personRow = (who, pid, extra) => ({ name: who, ...(pid ? { person_id: pid } : {}), ...extra });
   // A login just seen on this tablet: take their settings from the table (a new tablet gets what
   // they chose elsewhere); a login not yet in the table gets a row with what this tablet has.
   async function syncUser() {
@@ -521,12 +578,13 @@
     syncLastTry = Date.now();
     await syncAgency();
     try {
-      const row = await dbGet(who);
+      const pid = userId;
+      const row = await findPerson(who, pid);
       // their row, or, for a login the table has never seen, the agency defaults: not whatever the
       // last person on this tablet chose
       Object.assign(settings, openSettings(row && row.settings && typeof row.settings === 'object' ? row.settings : DEFAULT_SETTINGS));
       await sset({ settings }); toPage('settings', settings); layoutQuick();
-      await dbPut({ name: who, settings: openSettings(settings) });
+      await dbPut(personRow(who, pid, { settings: openSettings(settings) }));
       syncedUser = who; syncDirty = false;
     } catch (e) { syncDirty = true; } // no signal or the table is away: this tablet's settings stand, and the row is written later
     renderBar(); if (panelOpen) renderPanel();
@@ -536,7 +594,7 @@
     const who = user; if (!who) return;
     syncLastTry = Date.now();
     try {
-      await dbPut({ name: who, settings: openSettings(settings) });
+      await dbPut(personRow(who, userId, { settings: openSettings(settings) }));
       syncedUser = who; syncDirty = false;
     } catch (e) { syncDirty = true; }
   }
@@ -2687,6 +2745,344 @@
     if (veil) { const sp = veil.querySelector('.spin'); if (sp) sp.remove(); veil.style.cursor = 'default'; veil.addEventListener('click', hideVeil); }
     const mine = veil;
     setTimeout(() => { if (veil === mine) hideVeil(); }, ms);
+  }
+  // ================================================================ Templates
+  // A crew member's own fill-ins: any of ESO's fields (from the bundle's catalog) with a value,
+  // plus items to add (a vital, a treatment, an assessment, a history entry...). Kept in the
+  // agency's table under the person's ESO id, private, shared with everyone, or with named
+  // people. Filling writes the run the way ESO's app writes, one tab at a time, with a progress
+  // bar, and works with no signal (held like any save).
+  let catalog = null;
+  let tpls = { mine: [], shared: [], everyone: [], at: 0 };
+  let tplWin = null, tplView = 'list', ed = null;
+  const TPL_URL = AGENCY_DB.url + '/esosave_templates', SHARE_URL = AGENCY_DB.url + '/esosave_template_shares';
+  const TPL_PAGES = [['incident', 'Incident'], ['patient', 'Patient'], ['vitals', 'Vitals'], ['flowchartTreatments', 'Flowchart'], ['assessments', 'Assessments'], ['narrative', 'Narrative'], ['forms', 'Forms'], ['billing', 'Billing'], ['signatures', 'Signatures']];
+  const ITEM_NAMES = { vital: 'Vital signs', treatment: 'Treatments', assessment: 'Assessments', history: 'Patient history', allergy: 'Allergies', medication: 'Home medications', belonging: 'Belongings', sign: 'Signs and symptoms', protocol: 'Protocols used', immunization: 'Immunizations' };
+  const ITEM_ONE = { vital: 'a vital', treatment: 'a treatment', assessment: 'an assessment', history: 'a history entry', allergy: 'an allergy', medication: 'a medication', belonging: 'a belonging', sign: 'a sign or symptom', protocol: 'a protocol', immunization: 'an immunization' };
+  const ITEM_KEY = { treatment: 'flowchartTreatmentRegistryId', history: 'itemId', allergy: 'itemId', medication: 'itemId', belonging: 'itemId', sign: 'signId', protocol: 'protocolsUsedId', immunization: 'immunizationTypeId' };
+  const humanize = (seg) => String(seg || '').replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/[_.]/g, ' ').replace(/^./, c => c.toUpperCase()).replace(/\bId\b/g, '').trim();
+  const tplHeaders = (extra) => ({ apikey: AGENCY_DB.key, Authorization: 'Bearer ' + AGENCY_DB.key, 'Content-Type': 'application/json', ...(extra || {}) });
+  async function tplReq(url, opts) {
+    const r = await fetch(url, { ...opts, headers: tplHeaders(opts && opts.headers) });
+    if (!r.ok) throw new Error('table ' + r.status);
+    const t = await r.text(); return t ? JSON.parse(t) : null;
+  }
+  // ---- the table
+  async function tplLoad() {
+    if (!userId) return;
+    const shares = await tplReq(`${SHARE_URL}?person_id=eq.${encodeURIComponent(userId)}&select=template_id`);
+    const ids = (shares || []).map(x => x.template_id);
+    const or = [`owner_id.eq.${userId}`, 'share.eq.everyone'].concat(ids.length ? [`id.in.(${ids.join(',')})`] : []);
+    const rows = await tplReq(`${TPL_URL}?or=(${or.join(',')})&select=id,owner_id,owner_name,name,body,share,updated_at&order=name.asc`);
+    const mine = [], shared = [], everyone = [];
+    for (const r of rows || []) { if (r.owner_id === userId) mine.push(r); else if (r.share === 'everyone') everyone.push(r); else shared.push(r); }
+    tpls = { mine, shared, everyone, at: Date.now(), who: userId };
+    await sset({ tpls });
+  }
+  async function tplSave(t) {
+    const row = { owner_id: userId, owner_name: user, name: t.name, body: t.body, share: t.share, updated_at: new Date().toISOString() };
+    if (t.id) row.id = t.id;
+    const out = await tplReq(TPL_URL, { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=representation' }, body: JSON.stringify(row) });
+    const saved = Array.isArray(out) ? out[0] : out;
+    const id = (saved && saved.id) || t.id;
+    if (id) {
+      await tplReq(`${SHARE_URL}?template_id=eq.${encodeURIComponent(id)}`, { method: 'DELETE', headers: { Prefer: 'return=minimal' } });
+      if (t.share === 'some' && t.people.length) await tplReq(SHARE_URL, { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify(t.people.map(p => ({ template_id: id, person_id: p.id, person_name: p.name }))) });
+    }
+    return id;
+  }
+  async function tplPeople(id) { return (await tplReq(`${SHARE_URL}?template_id=eq.${encodeURIComponent(id)}&select=person_id,person_name`)) || []; }
+  async function tplDelete(id) { await tplReq(`${TPL_URL}?id=eq.${encodeURIComponent(id)}`, { method: 'DELETE', headers: { Prefer: 'return=minimal' } }); }
+  // ---- the window
+  function openTemplates() {
+    if (!shadow) return;
+    if (!tplWin) { tplWin = document.createElement('div'); tplWin.className = 'tplwin'; shadow.appendChild(tplWin); }
+    tplView = 'list'; ed = null;
+    renderTemplates();
+    if (!catalog) toPage('action', { name: 'catalog' });
+    tplLoad().then(() => { if (tplWin && tplView === 'list') renderTemplates(); }).catch(() => { if (tplWin && tplView === 'list') renderTemplates('No signal: showing the templates last seen.'); });
+  }
+  function closeTemplates() { if (tplWin) { tplWin.remove(); tplWin = null; } ed = null; }
+  function renderTemplates(note) {
+    if (!tplWin) return;
+    if (tplView === 'edit') return renderEditor();
+    if (tpls.who && userId && tpls.who !== userId) { tpls = { mine: [], shared: [], everyone: [], at: 0, who: userId }; note = note || 'No signal: the templates seen on this tablet were another login\'s.'; }
+    const run = currentRun();
+    const canFill = !!run && !run.locked;
+    const row = (t, kind) => `<div class="tpl" data-id="${esc(t.id)}"><div><div class="tn">${esc(t.name)}</div>${kind !== 'mine' ? `<div class="by">shared by ${esc(t.owner_name || '')}</div>` : `<div class="by">${t.share === 'everyone' ? 'shared with everyone' : t.share === 'some' ? 'shared with some people' : 'private'}</div>`}</div>
+      <button class="tb pri" data-act="fill" ${canFill ? '' : 'disabled title="Open a run first"'}>Fill this run</button>
+      ${kind === 'mine' ? '<button class="tb sec" data-act="edit">Edit</button><button class="tb danger" data-act="delete">Delete</button>' : '<button class="tb sec" data-act="copy">Copy to mine</button>'}</div>`;
+    tplWin.innerHTML = `<div class="tophead"><h1>Templates</h1><button class="tb" data-act="new">New template</button><button class="tb sec" data-act="close">Close</button></div>
+      <div class="body">
+        ${note ? `<div class="muted">${esc(note)}</div>` : ''}
+        ${canFill ? '' : `<div class="muted">Open a run in ESO to fill one; templates can be made at any time.</div>`}
+        <h2>My templates</h2>${tpls.mine.length ? tpls.mine.map(t => row(t, 'mine')).join('') : '<div class="muted">None yet. New template makes one.</div>'}
+        <h2>Templates shared with you</h2>${tpls.shared.length ? tpls.shared.map(t => row(t, 'shared')).join('') : '<div class="muted">None.</div>'}
+        <h2>Templates shared to everyone</h2>${tpls.everyone.length ? tpls.everyone.map(t => row(t, 'everyone')).join('') : '<div class="muted">None.</div>'}
+      </div>`;
+    tplWin.querySelectorAll('[data-act]').forEach(b => b.addEventListener('click', async (e) => {
+      const act = b.dataset.act; const id = b.closest('.tpl') && b.closest('.tpl').dataset.id;
+      const all = [...tpls.mine, ...tpls.shared, ...tpls.everyone]; const t = all.find(x => x.id === id);
+      if (act === 'close') closeTemplates();
+      else if (act === 'new') startEditor(null);
+      else if (act === 'edit' && t) startEditor(t);
+      else if (act === 'copy' && t) startEditor({ ...t, id: null, name: t.name + ' (copy)', share: 'private', owner_id: userId, owner_name: user });
+      else if (act === 'delete' && t) { if (!confirm(`Delete the template "${t.name}"? People it was shared with lose it too.`)) return; try { await tplDelete(t.id); await tplLoad(); } catch (err) { alert('ESO Save: could not delete it. ' + err.message); } renderTemplates(); }
+      else if (act === 'fill' && t) fillWithTemplate(t);
+    }));
+  }
+  // ---- the editor
+  async function startEditor(t) {
+    if (!catalog) { toPage('action', { name: 'catalog' }); alert("ESO Save: ESO's field list has not been seen yet on this device. Open any run once, then try again."); return; }
+    ed = { id: t ? t.id : null, name: t ? t.name : '', share: t ? t.share || 'private' : 'private', people: [], page: 'incident', q: '', fields: {}, items: [] };
+    if (t && t.body) { ed.fields = JSON.parse(JSON.stringify(t.body.fields || {})); ed.items = JSON.parse(JSON.stringify(t.body.items || [])); }
+    if (t && t.id && t.share === 'some') { try { ed.people = (await tplPeople(t.id)).map(p => ({ id: p.person_id, name: p.person_name })); } catch (e) { /* offline */ } }
+    tplView = 'edit'; renderEditor();
+  }
+  const listOf = (ref) => (catalog && catalog.lists && catalog.lists[ref]) || [];
+  const nameOf = (ref, id) => { const x = listOf(ref).find(e => String(e.id) === String(id)); return x ? x.n : String(id); };
+  function fieldsOfPage(page) { return (catalog.fields || []).filter(f => f.a.split('.')[0] === page); }
+  function sectionsOf(page) {
+    const out = new Map();
+    for (const f of fieldsOfPage(page)) {
+      if (f.i) continue;
+      const segs = f.a.split('.');
+      const key = page === 'forms' && segs.length > 3 ? segs.slice(1, 3).join('.') : segs[1];
+      if (!out.has(key)) out.set(key, []);
+      out.get(key).push(f);
+    }
+    return out;
+  }
+  function itemRootsOf(page) { return Object.entries(catalog.items || {}).filter(([root]) => root.split('.')[0] === page); }
+  const memberFields = (root) => (catalog.fields || []).filter(f => f.i === root).map(f => ({ ...f, rel: f.a.slice(root.length + 1) }));
+  function renderEditor() {
+    if (!tplWin || !ed) return;
+    const q = ed.q.trim().toLowerCase();
+    const counts = {}; for (const a of Object.keys(ed.fields)) { const p = a.split('.')[0]; counts[p] = (counts[p] || 0) + 1; } for (const it of ed.items) { const p = it.root.split('.')[0]; counts[p] = (counts[p] || 0) + 1; }
+    const pageBtns = TPL_PAGES.map(([k, l]) => `<button data-page="${k}" class="${ed.page === k ? 'on' : ''}">${l}${counts[k] ? `<span class="cnt">${counts[k]}</span>` : ''}</button>`).join('');
+    const crew = ((facilityTypes && facilityTypes.crew) || []).filter(c => c.name && c.id !== userId);
+    const shareUi = `<div class="share"><span class="muted">Share:</span>
+      <label><input type="radio" name="share" value="private" ${ed.share === 'private' ? 'checked' : ''}> Private</label>
+      <label><input type="radio" name="share" value="everyone" ${ed.share === 'everyone' ? 'checked' : ''}> Everyone</label>
+      <label><input type="radio" name="share" value="some" ${ed.share === 'some' ? 'checked' : ''}> Certain people</label>
+      ${ed.share === 'some' ? `<div class="pick" style="min-width:260px"><input type="text" class="search" data-people placeholder="Search a name…"><div class="picklist" hidden data-peoplelist></div><div class="chosen">${ed.people.map(p => `<span>${esc(p.name)} <a data-unshare="${esc(p.id)}" style="cursor:pointer">✕</a></span>`).join('')}</div></div>` : ''}</div>`;
+    let content = '';
+    const page = ed.page;
+    const secs = sectionsOf(page), roots = itemRootsOf(page);
+    const fieldRow = (f, cur, prefix) => {
+      const on = !!cur; const key = prefix ? `${prefix}|${f.rel}` : f.a;
+      return `<div class="tf ${on ? 'on' : ''}" data-key="${esc(key)}"><input type="checkbox" data-sel ${on ? 'checked' : ''}><div class="fl">${esc(f.n)}<div class="muted" style="font-weight:400">${esc(f.t === 'pertinentNegative' ? 'reason unable to obtain' : '')}</div></div><div>${inputFor(f, cur ? cur.v : null)}</div></div>`;
+    };
+    for (const [sec, fields] of secs) {
+      const shown = q ? fields.filter(f => f.n.toLowerCase().includes(q) || sec.toLowerCase().includes(q)) : fields;
+      if (!shown.length) continue;
+      const n = shown.filter(f => ed.fields[f.a]).length;
+      content += `<details class="sec" ${q || n ? 'open' : ''}><summary>${esc(humanize(sec.includes('.') ? sec.split('.')[1] : sec))}${n ? ` <span class="cnt" style="background:#fbbf24;border-radius:10px;padding:0 7px;font-size:12px">${n}</span>` : ''}</summary>${shown.map(f => fieldRow(f, ed.fields[f.a], null)).join('')}</details>`;
+    }
+    for (const [root, kind] of roots) {
+      const items = ed.items.map((it, i) => ({ it, i })).filter(x => x.it.root === root);
+      const members = memberFields(root);
+      content += `<details class="sec" ${items.length || q ? 'open' : ''}><summary>${esc(ITEM_NAMES[kind] || humanize(root.split('.').pop()))}${items.length ? ` <span class="cnt" style="background:#fbbf24;border-radius:10px;padding:0 7px;font-size:12px">${items.length}</span>` : ''}</summary>
+        ${items.map(({ it, i }) => `<div class="item" data-item="${i}"><div class="ih">${esc(itemTitle(it))}<span style="flex:1"></span>${kind === 'assessment' ? '<button class="tb sec" data-allnormal>All normal</button>' : ''}<button class="tb danger" data-remove>Remove</button></div>
+          ${kind === 'assessment' ? assessmentUi(it) : members.filter(m => !(kind === 'vital' && /vitalSignDateTime|softDeleted/.test(m.rel))).map(m => fieldRow(m, it.fields[m.rel], String(i))).join('')}</div>`).join('')}
+        <button class="tb pri" data-additem="${esc(root)}" data-kind="${esc(kind)}" style="margin:8px 0">Add ${esc(ITEM_ONE[kind] || 'one')}</button></details>`;
+    }
+    if (!content) content = '<div class="muted">Nothing on this tab can be templated.</div>';
+    tplWin.innerHTML = `<div class="tophead"><input class="name" type="text" placeholder="Template name" value="${esc(ed.name)}" data-name><span style="flex:1"></span><button class="tb pri" data-act="save">Save</button><button class="tb sec" data-act="cancel">Cancel</button></div>
+      <div class="body">${shareUi}<input type="text" class="search" placeholder="Find a field on this tab…" value="${esc(ed.q)}" data-q><div class="pages">${pageBtns}</div>${content}</div>`;
+    wireEditor();
+  }
+  const itemTitle = (it) => { const k = ITEM_KEY[it.kind]; const f = k && it.fields[k]; if (it.kind === 'assessment') return `Assessment (${(it.findings || []).length} findings)`; if (it.kind === 'vital') return 'Vital'; return f && f.v != null ? nameOf(f.l, f.v) : humanize(it.kind); };
+  function inputFor(f, v) {
+    const val = v == null ? '' : v;
+    if (f.t === 'boolean') return `<select data-in><option value="">—</option><option value="true" ${val === true || val === 'true' ? 'selected' : ''}>Yes</option><option value="false" ${val === false || val === 'false' ? 'selected' : ''}>No</option></select>`;
+    if (f.t === 'date') return `<input type="date" data-in value="${esc(esoToInput(val, 'date'))}">`;
+    if (f.t === 'datetime') return `<input type="datetime-local" data-in value="${esc(esoToInput(val, 'datetime'))}">`;
+    if (f.t === 'time') return `<input type="time" data-in step="1" value="${esc(esoToInput(val, 'time'))}">`;
+    if (f.l && (f.t === 'singleselect' || f.t === 'pertinentNegative')) return `<div class="pick"><input type="text" data-pick placeholder="Search or scroll…"><div class="picklist" hidden></div><div class="chosen">${val !== '' ? esc(nameOf(f.l, val)) : ''}</div></div>`;
+    if (f.l && f.t === 'multiselect') { const arr = Array.isArray(val) ? val : (val === '' ? [] : [val]); return `<div class="pick"><input type="text" data-pick data-multi placeholder="Search or scroll…"><div class="picklist" hidden></div><div class="chosen">${arr.map(x => `<span>${esc(nameOf(f.l, x))} <a data-unpick="${esc(x)}" style="cursor:pointer">✕</a></span>`).join('')}</div></div>`; }
+    if (f.t === 'string' && /narrative|comment|note|description|statement/i.test(f.n + f.a)) return `<textarea data-in rows="3">${esc(val)}</textarea>`;
+    return `<input type="text" data-in ${/number|integer|phone|ssn/.test(f.t) ? 'inputmode="decimal"' : ''} value="${esc(val)}">`;
+  }
+  function esoToInput(v, t) {
+    const m = /^(\d{2})\/(\d{2})\/(\d{4}) (\d{2}):(\d{2}):(\d{2})/.exec(String(v || ''));
+    if (!m) return '';
+    if (t === 'date') return `${m[3]}-${m[1]}-${m[2]}`;
+    if (t === 'time') return `${m[4]}:${m[5]}:${m[6]}`;
+    return `${m[3]}-${m[1]}-${m[2]}T${m[4]}:${m[5]}`;
+  }
+  function inputToEso(v, t) {
+    if (!v) return null;
+    if (t === 'date') { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(v); return m ? `${m[2]}/${m[3]}/${m[1]} 00:00:00` : null; }
+    if (t === 'time') { const m = /^(\d{2}):(\d{2})(?::(\d{2}))?/.exec(v); return m ? `01/01/1890 ${m[1]}:${m[2]}:${m[3] || '00'}` : null; }
+    if (t === 'datetime') { const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/.exec(v); return m ? `${m[2]}/${m[3]}/${m[1]} ${m[4]}:${m[5]}:${m[6] || '00'}` : null; }
+    return v;
+  }
+  function assessmentUi(it) {
+    const A = typeof ESOSAVE_ASSESS !== 'undefined' ? ESOSAVE_ASSESS : null;
+    if (!A) return '<div class="muted">The assessment layout is not available.</div>';
+    const find = (loc) => (it.findings || []).find(f => f.loc === loc);
+    const opts = (loc) => { const cur = find(loc); const basic = [['', '—'], ['No_Abnormalities', 'No Abnormalities'], ['Not_Assessed', 'Not Assessed']]; const extra = cur && !basic.some(b => b[0] === cur.id) ? [[cur.id, (A.findings.find(f => f.id === cur.id) || {}).n || cur.id]] : []; return basic.concat(extra).map(([id, n]) => `<option value="${esc(id)}" ${cur && cur.id === id ? 'selected' : ''}>${esc(n)}</option>`).join('') + `<option value="__other">Other finding…</option>`; };
+    let html = '<div class="ax">';
+    for (const c of A.categories) {
+      const subs = A.subCategories.filter(s => s.categoryId === c.id);
+      const locs = A.locations.filter(l => subs.some(s => s.id === l.sub));
+      if (!locs.length) continue;
+      html += `<h4>${esc(c.name)}</h4>` + locs.map(l => `<div class="loc"><span>${esc(l.n)}</span><select data-loc="${esc(l.id)}">${opts(l.id)}</select></div>`).join('');
+    }
+    const cm = memberFields('assessments.assessmentsV2').filter(m => /comments$/i.test(m.rel));
+    if (cm.length) html += '<h4>Comments</h4>' + cm.map(m => `<div class="tf ${it.fields[m.rel] ? 'on' : ''}" data-key="${esc(String(ed.items.indexOf(it)))}|${esc(m.rel)}"><input type="checkbox" data-sel ${it.fields[m.rel] ? 'checked' : ''}><div class="fl">${esc(humanize(m.rel.split('.')[0]))}</div><div>${inputFor(m, it.fields[m.rel] ? it.fields[m.rel].v : null)}</div></div>`).join('');
+    return html + '</div>';
+  }
+  function fieldDef(key) {
+    // key: an address, or "<item index>|<member rel>"
+    const bar = key.indexOf('|');
+    if (bar < 0) { const f = (catalog.fields || []).find(x => x.a === key); return f ? { f, get: () => ed.fields[key], set: (v) => { if (v == null) delete ed.fields[key]; else ed.fields[key] = v; } } : null; }
+    const i = Number(key.slice(0, bar)), rel = key.slice(bar + 1); const it = ed.items[i]; if (!it) return null;
+    const f = memberFields(it.root).find(x => x.rel === rel); if (!f) return null;
+    return { f, get: () => it.fields[rel], set: (v) => { if (v == null) delete it.fields[rel]; else it.fields[rel] = v; } };
+  }
+  function wireEditor() {
+    const W = tplWin;
+    W.querySelector('[data-name]').addEventListener('input', (e) => { ed.name = e.target.value; });
+    W.querySelector('[data-q]').addEventListener('input', (e) => { ed.q = e.target.value; clearTimeout(W._qt); W._qt = setTimeout(() => { const el = W.querySelector('[data-q]'); const pos = el.selectionStart; renderEditor(); const n = tplWin.querySelector('[data-q]'); n.focus(); try { n.setSelectionRange(pos, pos); } catch (x) { /* ignore */ } }, 250); });
+    W.querySelectorAll('[data-page]').forEach(b => b.addEventListener('click', () => { ed.page = b.dataset.page; renderEditor(); }));
+    W.querySelectorAll('input[name=share]').forEach(r => r.addEventListener('change', () => { ed.share = r.value; renderEditor(); }));
+    W.querySelectorAll('[data-unshare]').forEach(a => a.addEventListener('click', () => { ed.people = ed.people.filter(p => p.id !== a.dataset.unshare); renderEditor(); }));
+    const pp = W.querySelector('[data-people]');
+    if (pp) {
+      const list = W.querySelector('[data-peoplelist]');
+      const crew = ((facilityTypes && facilityTypes.crew) || []).filter(c => c.name && c.id !== userId);
+      const show = () => { const q = pp.value.trim().toLowerCase(); const hits = crew.filter(c => !ed.people.some(p => p.id === c.id) && (!q || c.name.toLowerCase().includes(q))).slice(0, 60); list.innerHTML = hits.map(c => `<button type="button" data-pid="${esc(c.id)}">${esc(c.name)}</button>`).join('') || '<div class="muted" style="padding:8px">No one matches.</div>'; list.hidden = false; list.querySelectorAll('[data-pid]').forEach(b => b.addEventListener('click', () => { ed.people.push({ id: b.dataset.pid, name: crew.find(c => c.id === b.dataset.pid).name }); renderEditor(); const n = tplWin.querySelector('[data-people]'); if (n) n.focus(); })); };
+      pp.addEventListener('focus', show); pp.addEventListener('input', show);
+    }
+    W.querySelector('[data-act=cancel]').addEventListener('click', () => { tplView = 'list'; ed = null; renderTemplates(); });
+    W.querySelector('[data-act=save]').addEventListener('click', saveEditor);
+    W.querySelectorAll('[data-additem]').forEach(b => b.addEventListener('click', () => {
+      const root = b.dataset.additem, kind = b.dataset.kind, rootField = null;
+      const rootDef = { r: rootRef(root), t: rootType(kind) };
+      ed.items.push({ root, kind, r: rootDef.r, t: rootDef.t, fields: {}, findings: [] });
+      renderEditor();
+      const last = tplWin.querySelectorAll('.item'); if (last.length) last[last.length - 1].scrollIntoView({ block: 'nearest' });
+    }));
+    W.querySelectorAll('[data-remove]').forEach(b => b.addEventListener('click', () => { const i = Number(b.closest('.item').dataset.item); ed.items.splice(i, 1); renderEditor(); }));
+    W.querySelectorAll('[data-allnormal]').forEach(b => b.addEventListener('click', () => { const it = ed.items[Number(b.closest('.item').dataset.item)]; const A = ESOSAVE_ASSESS; it.findings = A.locations.map(l => ({ loc: l.id, id: 'No_Abnormalities' })); renderEditor(); }));
+    W.querySelectorAll('select[data-loc]').forEach(sel => sel.addEventListener('change', () => {
+      const it = ed.items[Number(sel.closest('.item').dataset.item)]; const loc = sel.dataset.loc;
+      it.findings = (it.findings || []).filter(f => f.loc !== loc);
+      if (sel.value === '__other') { pickFinding(it, loc); return; }
+      if (sel.value) it.findings.push({ loc, id: sel.value });
+      updateItemTitle(sel.closest('.item'), it);
+    }));
+    // field rows
+    W.querySelectorAll('.tf').forEach(row => {
+      const key = row.dataset.key; const d = fieldDef(key); if (!d) return;
+      const box = row.querySelector('[data-sel]');
+      const setVal = (v) => { const has = v !== null && v !== undefined && v !== '' && !(Array.isArray(v) && !v.length); if (has) d.set({ r: d.f.r, t: d.f.t, v, ...(d.f.l ? { l: d.f.l } : {}) }); else d.set(null); box.checked = has; row.classList.toggle('on', has); };
+      const inp = row.querySelector('[data-in]');
+      if (inp) {
+        inp.addEventListener('change', () => { let v = inp.value; if (d.f.t === 'boolean') v = v === '' ? null : v === 'true'; else if (['date', 'time', 'datetime'].includes(d.f.t)) v = inputToEso(v, d.f.t); setVal(v); });
+        box.addEventListener('change', () => { if (!box.checked) { inp.value = ''; setVal(null); } else if (!inp.value) { box.checked = false; inp.focus(); } });
+      }
+      const pk = row.querySelector('[data-pick]');
+      if (pk) {
+        const list = row.querySelector('.picklist'); const multi = pk.hasAttribute('data-multi');
+        const cur = () => { const c = d.get(); return c ? (Array.isArray(c.v) ? c.v : [c.v]) : []; };
+        const show = () => {
+          const q = pk.value.trim().toLowerCase();
+          let entries = listOf(d.f.l);
+          // a list with parents (a medication's measures) narrows to the item's other choices
+          if (entries.some(e => e.p != null) && key.includes('|')) { const it = ed.items[Number(key.split('|')[0])]; const parents = new Set(Object.values(it.fields).map(x => String(x.v))); const narrowed = entries.filter(e => parents.has(String(e.p))); if (narrowed.length) entries = narrowed; }
+          const chosen = cur().map(String);
+          const hits = entries.filter(e => !q || e.n.toLowerCase().includes(q)).slice(0, 200);
+          list.innerHTML = hits.map(e => `<button type="button" data-id="${esc(e.id)}" class="${chosen.includes(String(e.id)) ? 'sel' : ''}">${esc(e.n)}</button>`).join('') || '<div class="muted" style="padding:8px">Nothing matches.</div>';
+          list.hidden = false;
+          list.querySelectorAll('[data-id]').forEach(b => b.addEventListener('click', () => {
+            const raw = b.dataset.id; const e = entries.find(x => String(x.id) === raw); const id = e ? e.id : raw;
+            if (multi) { const now = cur(); const has = now.map(String).includes(String(id)); setVal(has ? now.filter(x => String(x) !== String(id)) : now.concat([id])); }
+            else { setVal(id); list.hidden = true; pk.value = ''; }
+            row.querySelector('.chosen').innerHTML = multi ? cur().map(x => `<span>${esc(nameOf(d.f.l, x))} <a data-unpick="${esc(x)}" style="cursor:pointer">✕</a></span>`).join('') : esc(nameOf(d.f.l, id));
+            wireUnpick(row, d, setVal, cur);
+            if (multi) show();
+            if (key.includes('|')) updateItemTitle(row.closest('.item'), ed.items[Number(key.split('|')[0])]);
+          }));
+        };
+        pk.addEventListener('focus', show); pk.addEventListener('input', show);
+        pk.addEventListener('blur', () => setTimeout(() => { if (!list.contains(shadow.activeElement)) list.hidden = true; }, 250));
+        box.addEventListener('change', () => { if (!box.checked) { setVal(null); row.querySelector('.chosen').innerHTML = ''; } else { box.checked = !!cur().length; pk.focus(); } });
+        wireUnpick(row, d, setVal, cur);
+      }
+    });
+  }
+  function wireUnpick(row, d, setVal, cur) { row.querySelectorAll('[data-unpick]').forEach(a => a.addEventListener('click', () => { setVal(cur().filter(x => String(x) !== a.dataset.unpick)); a.parentElement.remove(); })); }
+  function updateItemTitle(card, it) { const h = card && card.querySelector('.ih'); if (h) h.firstChild.textContent = itemTitle(it); }
+  function pickFinding(it, loc) {
+    const A = ESOSAVE_ASSESS;
+    askBox('Which finding?', 'Type to search ESO\'s findings.', [['Cancel', null]]);
+    const box = veil && veil.querySelector('.askbox'); if (!box) return;
+    const wrap = document.createElement('div'); wrap.className = 'pick'; wrap.style.cssText = 'text-align:left;margin:6px 0 12px;position:relative';
+    wrap.innerHTML = '<input type="text" class="search" placeholder="Search…" style="width:100%;box-sizing:border-box;font:inherit;padding:10px;border:1px solid #cbd5e1;border-radius:8px"><div class="picklist" style="position:static;max-height:260px;overflow:auto;border:1px solid #cbd5e1;border-radius:8px;margin-top:6px"></div>';
+    box.insertBefore(wrap, box.querySelector('.actions'));
+    const inp = wrap.querySelector('input'), list = wrap.querySelector('.picklist');
+    const show = () => { const q = inp.value.trim().toLowerCase(); list.innerHTML = A.findings.filter(f => !q || f.n.toLowerCase().includes(q)).slice(0, 150).map(f => `<button type="button" data-fid="${esc(f.id)}" style="display:block;width:100%;text-align:left;border:0;border-bottom:1px solid #f1f5f9;background:#fff;padding:10px;font:inherit;cursor:pointer">${esc(f.n)}</button>`).join(''); list.querySelectorAll('[data-fid]').forEach(b => b.addEventListener('click', () => { it.findings.push({ loc, id: b.dataset.fid }); hideVeil(); renderEditor(); })); };
+    inp.addEventListener('input', show); show(); inp.focus();
+  }
+  const rootRef = (root) => { const f = (catalog.fields || []).find(x => x.i === root); return ({ 'vitals.vitalSigns': 'VITALSIGN', 'flowchartTreatments.treatments': 'FLOWCHARTTREATMENT', 'assessments.assessmentsV2': 'ASSESSMENT2', 'patient.patientMedicalHistories': 'PATIENTMEDICALHISTORY', 'patient.patientAllergies': 'PATIENTALLERGIES', 'patient.patientMedications': 'PATIENTMEDICATIONS', 'patient.patientPersonalItems': 'PATIENTPERSONALITEMS', 'narrative.supportingSignsAndSymptomsEnhanced.signsAndSymptomsEnhanced': 'SIGNSANDSYMPTOMSENHANCED', 'narrative.clinicalImpression.protocolsUsed.items': 'PROTOCOLSUSED', 'patient.patientImmunizations.items': 'PATIENTIMMUNIZATIONS' })[root] || (f ? f.r : root.toUpperCase()); };
+  const rootType = (kind) => ['history', 'allergy', 'medication', 'belonging'].includes(kind) ? 'fieldGroup' : ['protocol', 'immunization'].includes(kind) ? 'collection' : 'collectionWithData';
+  async function saveEditor() {
+    if (!ed) return;
+    const name = ed.name.trim();
+    if (!name) { alert('ESO Save: give the template a name first.'); tplWin.querySelector('[data-name]').focus(); return; }
+    // drop items missing their key (a treatment with no treatment picked)
+    const items = ed.items.filter(it => it.kind === 'vital' || it.kind === 'assessment' ? (it.kind === 'assessment' ? (it.findings || []).length || Object.keys(it.fields).length : Object.keys(it.fields).length) : it.fields[ITEM_KEY[it.kind]]);
+    const body = { v: 1, fields: ed.fields, items };
+    if (!Object.keys(body.fields).length && !items.length) { alert('ESO Save: the template is empty. Tick at least one field.'); return; }
+    if (!userId) { alert('ESO Save: ESO has not said who is signed in yet. Open a run, then save.'); return; }
+    const btn = tplWin.querySelector('[data-act=save]'); btn.disabled = true; btn.textContent = 'Saving…';
+    try {
+      const id = await tplSave({ id: ed.id, name, body, share: ed.share, people: ed.people });
+      ed.id = id; await tplLoad();
+      tplView = 'list'; ed = null; renderTemplates();
+    } catch (e) { btn.disabled = false; btn.textContent = 'Save'; alert('ESO Save: could not save the template (no signal, or the table is away). ' + e.message); }
+  }
+  // ---- the fill
+  let tplFilling = null;
+  function fillWithTemplate(t) {
+    const run = currentRun();
+    if (!run || run.locked) { alert('ESO Save: open an unlocked run first.'); return; }
+    const nf = Object.keys((t.body && t.body.fields) || {}).length, ni = ((t.body && t.body.items) || []).length;
+    closeTemplates();
+    askBox(`Fill this run from "${t.name}"?`, `${run.incidentNumber || 'This run'} gets ${nf} field${nf === 1 ? '' : 's'}${ni ? ` and ${ni} item${ni === 1 ? '' : 's'}` : ''} from the template. Anything already on the run for those fields is replaced.`, [['Yes, fill it', true], ['No', false]], (yes) => {
+      if (!yes) return;
+      tplFilling = { name: t.name, at: Date.now() };
+      showProgress(`Filling from "${t.name}"…`, 'Starting', 0);
+      toPage('action', { name: 'fillTemplate', recordId: run.recordId, body: t.body, tplName: t.name });
+    });
+  }
+  function showProgress(title, text, frac) {
+    if (veil && veil.querySelector('.track')) { veil.querySelector('.prog').textContent = text; veil.querySelector('.fill').style.width = Math.round(frac * 100) + '%'; return; }
+    hideVeil(); if (!shadow) return;
+    veil = document.createElement('div'); veil.className = 'veil';
+    veil.innerHTML = `<div class="box"><div class="spin"></div><h2>${esc(title)}</h2><div class="prog">${esc(text)}</div><div class="track"><div class="fill" style="width:${Math.round(frac * 100)}%"></div></div><div class="why">Every tab is written the way ESO's app saves it; with no signal it is held and pushed later.</div></div>`;
+    shadow.appendChild(veil);
+  }
+  function onTemplateProgress(p) {
+    if (!tplFilling) return;
+    const label = (TPL_PAGES.find(([k]) => k === p.scope) || [])[1] || p.scope;
+    showProgress(`Filling from "${tplFilling.name}"…`, `${label}: ${p.done} of ${p.total} fields${p.held ? ' (held, no signal)' : ''}`, p.total ? p.done / p.total : 0);
+  }
+  async function onTemplateFilled(p) {
+    const name = tplFilling ? tplFilling.name : 'the template'; tplFilling = null;
+    hideVeil();
+    if (!p.ok) { alert(`ESO Save: could not fill from ${name}. ${p.error || ''}`); return; }
+    // the app shows what it has loaded: step off the open tab and back so it re-reads it
+    const id = lastStatus && lastStatus.currentRecordId;
+    const here = lastStatus && lastStatus.lastView && lastStatus.lastView.recordId === id ? lastStatus.lastView.view : null;
+    if (here && id && TAB_LABELS[here]) {
+      const away = tabElement(here === 'Incident' ? 'PATIENT' : 'INCIDENT'), back = tabElement(TAB_LABELS[here]);
+      if (away && back) { away.click(); await waitViewLoaded(here === 'Incident' ? 'Patient' : 'Incident', id, 1500).catch(() => {}); back.click(); await waitViewLoaded(here, id, 3000).catch(() => {}); }
+    }
+    notice(`Filled from "${name}"`, `${p.total} fields across ${(p.scopes || []).length} tab${(p.scopes || []).length === 1 ? '' : 's'}${p.held ? ', held until ESO answers' : ''}. Check them over.`, 4500);
   }
   // ---- the unit's level, from ESO itself: the crew on the run and their certifications (the
   // agency's people in ESO's configuration bundle). A paramedic on the crew makes the unit ALS,
