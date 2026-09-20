@@ -1856,6 +1856,21 @@ test('templates: shared to everyone or to named people show up for them, named a
   assert.equal(await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin [data-name]').value), 'Chest pain (copy)');
   await twClick('[data-act=save]');
   await waitFor(async () => (await tplDb()).templates.some(x => x.owner_id === 'person-j' && x.name === 'Chest pain (copy)'), { label: 'her own copy' });
+  // she tries to share her copy to everyone under his name: refused until she changes it
+  await twClickText('.tpl [data-act=edit]', 'Edit');
+  await waitFor(() => T.page.evaluate(() => !!document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin input[name=share]')), { label: 'editor' });
+  await twType('[data-name]', 'chest PAIN');
+  await T.page.evaluate(() => { const r = document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin input[name=share][value=everyone]'); r.checked = true; r.dispatchEvent(new Event('change', { bubbles: true })); });
+  const said = []; const onDialog = (d) => { said.push(d.message()); d.accept(); }; T.page.on('dialog', onDialog);
+  await twClick('[data-act=save]');
+  await waitFor(() => said.length, { label: 'told' });
+  T.page.off('dialog', onDialog);
+  assert.match(said[0], /already a template called "Chest pain" shared to everyone \(made by TEST, MEDIC\)/);
+  assert.ok(!(await tplDb()).templates.some(t => t.owner_id === 'person-j' && t.share === 'everyone'), 'not saved');
+  await twType('[data-name]', 'Chest pain 2');
+  await twClick('[data-act=save]');
+  await waitFor(async () => (await tplDb()).templates.some(t => t.owner_id === 'person-j' && t.name === 'Chest pain 2' && t.share === 'everyone'), { label: 'saved under the new name' });
+  await waitFor(() => tw('[data-act=new]'), { label: 'back on the list' });
   // Alex sees the one shared with him
   await T.control({ userName: 'JONES, ALEX', userId: 'person-m' });
   await freshRun();

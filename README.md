@@ -143,7 +143,11 @@ to bad signal or a hung page.
   never offered. Templates are kept in the agency's table under the person's ESO id (so a name
   change loses nothing), private, or shared with everyone or with named people; the list shows
   My templates, Templates shared with you and Templates shared to everyone, each with who
-  shared it, and a shared one can be copied to make it yours. Filling needs an open, unlocked
+  shared it, and a shared one can be copied to make it yours; only its maker can change or delete
+  it. A name is used once per shared category across the agency (one "Refusal" shared to
+  everyone and one shared with named people may both exist, two shared to everyone may not) and
+  once among a person's own private ones; the editor says so and asks for a change, "Refusal2"
+  say, and the table's own unique indexes hold the line. Filling needs an open, unlocked
   run: a question first, then a progress bar as each tab is written with the same saves ESO's
   app makes, replacing what is there; with no signal it is held like any save and pushed
   later. The list seen last is kept on the device, so it works with no signal.

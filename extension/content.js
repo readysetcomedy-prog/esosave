@@ -2791,6 +2791,11 @@
     }
     return id;
   }
+  async function tplNameTaken(name, share, ownId) {
+    const filt = share === 'private' ? `owner_id=eq.${encodeURIComponent(userId)}&share=eq.private` : `share=eq.${encodeURIComponent(share)}`;
+    const rows = await tplReq(`${TPL_URL}?${filt}&name=ilike.${encodeURIComponent(name.replace(/[%_\\]/g, '\\$&'))}&select=id,name,owner_id,owner_name`);
+    return (rows || []).find(r => r.id !== ownId) || null;
+  }
   async function tplPeople(id) { return (await tplReq(`${SHARE_URL}?template_id=eq.${encodeURIComponent(id)}&select=person_id,person_name`)) || []; }
   async function tplDelete(id) { await tplReq(`${TPL_URL}?id=eq.${encodeURIComponent(id)}`, { method: 'DELETE', headers: { Prefer: 'return=minimal' } }); }
   // ---- the window
@@ -3040,10 +3045,19 @@
     if (!userId) { alert('ESO Save: ESO has not said who is signed in yet. Open a run, then save.'); return; }
     const btn = tplWin.querySelector('[data-act=save]'); btn.disabled = true; btn.textContent = 'Saving…';
     try {
+      // one name per shared category across the agency (a "Refusal" shared to everyone and one
+      // shared with named people may both exist; two shared to everyone may not); one name per
+      // person among their private ones
+      const clash = await tplNameTaken(name, ed.share, ed.id);
+      if (clash) {
+        btn.disabled = false; btn.textContent = 'Save';
+        alert(`ESO Save: there is already a template called "${clash.name}" ${ed.share === 'everyone' ? 'shared to everyone' : ed.share === 'some' ? 'shared with named people' : 'of yours'}${clash.owner_id !== userId ? ` (made by ${clash.owner_name})` : ''}. Change the name a little, "${name}2" for instance.`);
+        tplWin.querySelector('[data-name]').focus(); return;
+      }
       const id = await tplSave({ id: ed.id, name, body, share: ed.share, people: ed.people });
       ed.id = id; await tplLoad();
       tplView = 'list'; ed = null; renderTemplates();
-    } catch (e) { btn.disabled = false; btn.textContent = 'Save'; alert('ESO Save: could not save the template (no signal, or the table is away). ' + e.message); }
+    } catch (e) { btn.disabled = false; btn.textContent = 'Save'; alert(/409/.test(e.message) ? `ESO Save: that name is already taken in this sharing. Change it a little, "${name}2" for instance.` : 'ESO Save: could not save the template (no signal, or the table is away). ' + e.message); }
   }
   // ---- the fill
   let tplFilling = null;
