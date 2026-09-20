@@ -31,7 +31,11 @@ dataType, displayName, listRef) in `learnCatalog` (inject.js); `CATALOG_SKIP` na
 call's own and is never offered. A template body is `{ fields: { address: { r, t, v, l } }, items:
 [{ root, kind, r, t, fields, findings }] }` and is written with the app's own ops (`templateOps`),
 one autosave per tab. Item shapes (the ADD value each needs) were recorded from the app. The
-assessment layout (`extension/assess-catalog.js`) is ESO's own Quick Ax definition, not PHI.
+assessment layout (`extension/assess-catalog.js`, `layout`: category → sections → locations with
+their findings, `na` where a section's No Abnormalities / Not Assessed is written, `one` for
+pick-one rows, `top` what ESO seeds Not Assessed) is taken from ESO's own Assessments code, not
+PHI; findings are written per location exactly as ESO's screen writes them (recorded 2026-09-20).
+ESO's retired `assessments.assessments` form is in `CATALOG_SKIP`.
 
 ## Data that may leave the device
 

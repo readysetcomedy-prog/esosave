@@ -142,10 +142,15 @@ to bad signal or a hung page.
   shown and filled the same way, only once that answer is picked; and add items too: a vital
   laid out as ESO's vitals card (Blood Pressure, Pulse, Respirations, SpO2, GCS with its total
   worked out, and the rest), a treatment (its measure and route quick picks narrow to the
-  treatment), an assessment laid out like ESO's own
-  Assessments screen (the categories down the side, each section with No Abnormalities and Not
-  Assessed, its findings each with a check or an X, the category's comments; everything starts
-  No Abnormalities, one button does all of it, one does Alert and Oriented x4), a history entry,
+  treatment), an assessment laid out as ESO's own Assessments screen, from ESO's own layout
+  code (the categories down the side; each category's sections, Head, Face, Eyes and Neck under
+  HEENT say; each section's locations, each eye, each lung field, each side of each spinal
+  level, each finger and toe, with only the findings ESO offers there, each a check or an X, a
+  pupil size, a pulse or a capillary refill picked one at a time; No Abnormalities and Not
+  Assessed per section written where ESO writes them; the category's comments; everything
+  starts No Abnormalities on the areas ESO seeds, one button does all of it, one does Alert and
+  Oriented x4; ESO's retired one-field-per-finding assessment form, still in its field list, is
+  never offered), a history entry,
   an allergy, a home
   medication, a sign or symptom, a protocol. What is the call's own (incident number, unit,
   vehicle, shift, crew, times, the addresses, the patient's name, DOB and SSN, signatures) is
@@ -157,7 +162,7 @@ to bad signal or a hung page.
   everyone and one shared with named people may both exist, two shared to everyone may not) and
   once among a person's own private ones; the editor says so and asks for a change, "Refusal2"
   say, and the table's own unique indexes hold the line. The agency owner can lock any field, any
-  kind of item (vitals as a whole) or a part of one (blood pressure) from any template's editor
+  kind of item (vitals as a whole) or a part of one (blood pressure, the skin of an assessment) from any template's editor
   (Lock fields): the crew sees the lock, cannot set it, and a fill leaves it out, so a template
   can never make up what the crew must measure themselves. A narrative can be prewritten per
   call type with blanks (____) to fill on the run; {incident}, {unit}, {date} and {time} are

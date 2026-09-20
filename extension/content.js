@@ -2894,7 +2894,10 @@
       if (tplLocked(it.root)) { dropped++; continue; }
       const copy = { ...it, fields: {} };
       for (const [rel, f] of Object.entries(it.fields || {})) { if (tplLocked(it.root + '.' + rel)) dropped++; else copy.fields[rel] = f; }
-      if (it.kind === 'assessment' && tplLocked(it.root + '.findings')) { copy.findings = []; dropped++; }
+      if (it.kind === 'assessment') {
+        if (tplLocked(it.root + '.findings')) { copy.findings = []; dropped++; }
+        else { const before = (it.findings || []).length; copy.findings = (it.findings || []).filter(f => { const c = axCatOf(f.loc); return !(c && tplLocked(`${it.root}.findings.${c.id}`)); }); if (copy.findings.length < before) dropped++; }
+      }
       out.items.push(copy);
     }
     return { body: out, dropped };
@@ -2921,6 +2924,7 @@
     // a redraw keeps the place on the page (and the open folds) the crew was at
     const oldBody = tplWin.querySelector('.body'); const keepTop = oldBody ? oldBody.scrollTop : 0;
     const openFolds = new Set(Array.from(tplWin.querySelectorAll('details.sec[open]')).map(d => d.querySelector('summary') && d.querySelector('summary').textContent.trim()));
+    const openLocs = new Set(Array.from(tplWin.querySelectorAll('details.axg[open]')).map(d => d.dataset.axg));
     const q = ed.q.trim().toLowerCase();
     const counts = {}; for (const a of Object.keys(ed.fields)) { const p = a.split('.')[0]; counts[p] = (counts[p] || 0) + 1; } for (const it of ed.items) { const p = it.root.split('.')[0]; counts[p] = (counts[p] || 0) + 1; }
     const pageBtns = TPL_PAGES.map(([k, l]) => `<button data-page="${k}" class="${ed.page === k ? 'on' : ''}">${l}${counts[k] ? `<span class="cnt">${counts[k]}</span>` : ''}</button>`).join('');
@@ -2966,6 +2970,7 @@
       <div class="body">${shareUi}<input type="text" class="search" placeholder="Find a field on this tab…" value="${esc(ed.q)}" data-q><div class="pages">${pageBtns}</div>${content}</div>`;
     if (tplWin._page === page) {
       for (const d of tplWin.querySelectorAll('details.sec')) { const t = d.querySelector('summary') && d.querySelector('summary').textContent.trim(); if (t && openFolds.has(t)) d.open = true; }
+      for (const d of tplWin.querySelectorAll('details.axg')) if (openLocs.has(d.dataset.axg)) d.open = true;
       tplWin.querySelector('.body').scrollTop = keepTop;
     }
     tplWin._page = page;
@@ -2987,7 +2992,7 @@
       const keys = [...groups.keys()].sort((a, b) => (VITAL_ORDER.indexOf(a) + 1 || 99) - (VITAL_ORDER.indexOf(b) + 1 || 99));
       const gcs = ['glascowComaEyesId', 'glascowComaVerbalId', 'glascowComaMotorId'].map(k => it.fields['glasgowComaScale.' + k]).map(f => f ? Number((nameOf(f.l, f.v).match(/^(\d)/) || [])[1]) : NaN);
       const total = gcs.every(n => !isNaN(n)) ? gcs.reduce((a, b) => a + b, 0) : null;
-      return `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:10px">` + keys.map(g => {
+      return `<div style="display:flex;flex-direction:column;gap:10px">` + keys.map(g => {
         const gk = g === 'other' ? null : `${it.root}.${g}`; const gl = gk && tplLocked(gk);
         const rows = gl && !isAdmin() ? '' : groups.get(g).filter(m => !/PertinentNegativeId$/.test(m.rel)).map(m => fieldRow(m, it.fields[m.rel], String(i))).join('') + groups.get(g).filter(m => /PertinentNegativeId$/.test(m.rel)).map(m => fieldRow({ ...m, n: 'Unable to obtain' }, it.fields[m.rel], String(i))).join('');
         return `<div style="border:1px solid #e2e8f0;border-radius:10px;background:#fff"><div style="padding:8px 12px;background:#f1f5f9;border-radius:10px 10px 0 0;font-weight:700;color:#334155;display:flex;gap:10px;align-items:center">${esc(VITAL_GROUP_NAMES[g] || humanize(g))}${g === 'glasgowComaScale' && total ? ` <span class="muted">total ${total}</span>` : ''}${gl ? lockNote() : ''}${gk ? lockBtn(gk) : ''}</div><div style="padding:4px 12px 8px">${rows}</div></div>`;
@@ -3004,7 +3009,7 @@
     const sorted = key ? members.slice().sort((a, b) => (a.rel === key ? -1 : b.rel === key ? 1 : 0)) : members;
     return sorted.map(m => fieldRow(m, it.fields[m.rel], String(i))).join('');
   }
-  const itemTitle = (it) => { const k = ITEM_KEY[it.kind]; const f = k && it.fields[k]; if (it.kind === 'assessment') { const fs = it.findings || []; const ab = fs.filter(x => x.id !== 'No_Abnormalities' && x.id !== 'Not_Assessed').length; const na = fs.filter(x => x.id === 'Not_Assessed').length; const blank = (typeof ESOSAVE_ASSESS !== 'undefined' ? ESOSAVE_ASSESS.top : []).filter(loc => !fs.some(x => x.loc === loc)).length; return `Assessment: ${ab ? ab + ' finding' + (ab === 1 ? '' : 's') : fs.length ? 'no abnormalities' : 'nothing set'}${na ? `, ${na} not assessed` : ''}${blank && fs.length ? `, ${blank} blank (written Not Assessed)` : ''}`; } if (it.kind === 'vital') return 'Vital'; return f && f.v != null ? nameOf(f.l, f.v) : humanize(it.kind); };
+  const itemTitle = (it) => { const k = ITEM_KEY[it.kind]; const f = k && it.fields[k]; if (it.kind === 'assessment') { const fs = (it.findings || []).filter(f => f && f.loc && f.id); const ab = fs.filter(x => !isNA(x.id)).length; const na = fs.filter(x => x.id === 'Not_Assessed').length; const blank = axComplete(fs).length - fs.length; return `Assessment: ${ab ? ab + ' finding' + (ab === 1 ? '' : 's') : fs.length ? 'no abnormalities' : 'nothing set'}${na ? `, ${na} not assessed` : ''}${blank && fs.length ? `, ${blank} blank (written Not Assessed)` : ''}`; } if (it.kind === 'vital') return 'Vital'; return f && f.v != null ? nameOf(f.l, f.v) : humanize(it.kind); };
   // a list with parents (a medication's measures, a treatment's routes) narrows to the item's other choices, as ESO's own dropdown does
   function entriesFor(f, key) {
     const entries = listOf(f.l);
@@ -3048,42 +3053,70 @@
     if (t === 'datetime') { const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/.exec(v); return m ? `${m[2]}/${m[3]}/${m[1]} ${m[4]}:${m[5]}:${m[6] || '00'}` : null; }
     return v;
   }
-  // The assessment, laid out as ESO's own Assessments screen: the categories down the side, each
-  // section with its No Abnormalities and Not Assessed buttons, its findings each with a check
-  // or an X, and the category's comments. Everything starts No Abnormalities; one button does
-  // all of it, one does Alert and Oriented x4.
-  const AX_COMMENTS = { MentalStatus: 'mentalStatusSection.comments', Skin: 'skinSection.comments', HEENT: 'heentSection.comments', Chest: 'chestSection.comments', Abdomen: 'abdomenSection.comments', Back: 'backSection.comments', PelvisGUGI: 'pelvisGuGiSection.comments', Extremities: 'extremitiesSection.comments', Neurological: 'neurologicalSection.comments', Neonatal: 'neonatalSection.comments' };
-  const axAreas = (A, catId) => { const subs = A.subCategories.filter(s => s.categoryId === catId); return A.top.map(id => A.locations.find(l => l.id === id)).filter(l => l && subs.some(s => s.id === l.sub)); };
+  // The assessment, laid out as ESO's own Assessments screen (assess-catalog.js carries the
+  // layout from ESO's code): the categories down the side; each category's sections, each with
+  // No Abnormalities and Not Assessed written where ESO writes them; each section's locations
+  // with the findings ESO offers there, each a check (present) or an X (not present), a pick-one
+  // row for a pupil size, a pulse or a capillary refill; the category's comments. A new
+  // assessment starts No Abnormalities on the areas ESO seeds; a finding on a location takes the
+  // place of that location's No Abnormalities / Not Assessed, as it does in ESO.
+  const AX = () => (typeof ESOSAVE_ASSESS !== 'undefined' && ESOSAVE_ASSESS.layout ? ESOSAVE_ASSESS : null);
+  const isNA = (id) => id === 'No_Abnormalities' || id === 'Not_Assessed';
+  const axSections = () => { const A = AX(); return A ? A.layout.flatMap(c => c.s.map(s => ({ ...s, cat: c.id }))) : []; };
+  const axSectionOf = (loc) => axSections().find(s => s.g.some(g => g.loc === loc) || s.na.includes(loc));
+  // where a finding on a location knocks out No Abnormalities / Not Assessed: the location
+  // itself, and its section's holder when that is a location of its own (Eyes for either eye)
+  const axNaHolders = (loc) => { const s = axSectionOf(loc); return [loc].concat(s ? s.na.filter(l => l !== loc && !s.g.some(g => g.loc === l)) : []); };
+  const axCatLocs = (c) => [...new Set(c.s.flatMap(s => s.g.map(g => g.loc).concat(s.na)))];
+  const axCatOf = (loc) => { const A = AX(); return A && A.layout.find(c => axCatLocs(c).includes(loc)); };
+  // what a fill writes: the template's findings, plus Not Assessed on each area ESO seeds that
+  // the template says nothing about, as ESO itself starts an assessment
+  function axComplete(findings) {
+    const A = AX(); const fs = (findings || []).filter(f => f && f.loc && f.id);
+    if (!A) return fs;
+    const touched = new Set(fs.flatMap(f => axNaHolders(f.loc)));
+    return fs.concat(A.top.filter(loc => !touched.has(loc)).map(loc => ({ loc, id: 'Not_Assessed' })));
+  }
   function assessmentUi(it) {
-    const A = typeof ESOSAVE_ASSESS !== 'undefined' ? ESOSAVE_ASSESS : null;
+    const A = AX();
     if (!A) return '<div class="muted">The assessment layout is not available.</div>';
     const fname = (id) => (A.findings.find(f => f.id === id) || {}).n || id.replace(/_/g, ' ');
     const at = (loc) => (it.findings || []).filter(f => f.loc === loc);
     const has = (loc, id) => at(loc).find(f => f.id === id);
-    const cats = A.categories.filter(c => axAreas(A, c.id).length);
+    const cats = A.layout;
     if (!it._cat || !cats.some(c => c.id === it._cat)) it._cat = cats[0].id;
-    const catState = (c) => { const areas = axAreas(A, c.id); const fs = areas.flatMap(l => at(l.id)); if (fs.some(f => f.id !== 'No_Abnormalities' && f.id !== 'Not_Assessed')) return '#b91c1c'; if (areas.every(l => has(l.id, 'No_Abnormalities'))) return '#15803d'; if (fs.some(f => f.id === 'Not_Assessed')) return '#64748b'; return '#b45309'; };
+    const catState = (c) => { const fs = axCatLocs(c).flatMap(at); if (fs.some(f => !isNA(f.id))) return '#b91c1c'; if (fs.length && fs.every(f => f.id === 'No_Abnormalities')) return '#15803d'; if (fs.some(f => f.id === 'Not_Assessed')) return '#64748b'; return '#b45309'; };
     const idx = ed.items.indexOf(it);
+    const lockAll = tplLocked(it.root + '.findings');
+    const catKeyOf = (c) => `${it.root}.findings.${c.id}`;
     let html = `<div class="ax"><div style="display:flex;gap:8px;flex-wrap:wrap;margin:4px 0 10px"><button type="button" class="tb sec" data-allnormal>All No Abnormalities</button><button type="button" class="tb sec" data-allna>All Not Assessed</button><button type="button" class="tb sec" data-aox4>Alert and Oriented x4</button><button type="button" class="tb sec" data-axclear>Clear all</button></div>
-      <div style="display:flex;gap:12px;align-items:flex-start"><div style="min-width:150px;display:flex;flex-direction:column;gap:4px">${cats.map(c => `<button type="button" data-cat="${esc(c.id)}" style="text-align:left;border:0;border-radius:8px;padding:10px 12px;font:inherit;font-weight:700;cursor:pointer;background:${it._cat === c.id ? '#22c55e' : '#f1f5f9'};color:${it._cat === c.id ? '#fff' : '#334155'};display:flex;align-items:center;gap:8px"><span style="width:10px;height:10px;border-radius:5px;background:${catState(c)};flex:none"></span>${esc(c.name.toUpperCase())}</button>`).join('')}</div>
-      <div style="flex:1;min-width:0">`;
+      <div style="display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap"><div style="min-width:150px;display:flex;flex-direction:column;gap:4px">${cats.map(c => `<button type="button" data-cat="${esc(c.id)}" style="text-align:left;border:0;border-radius:8px;padding:10px 12px;font:inherit;font-weight:700;cursor:pointer;background:${it._cat === c.id ? '#22c55e' : '#f1f5f9'};color:${it._cat === c.id ? '#fff' : '#334155'};display:flex;align-items:center;gap:8px"><span style="width:10px;height:10px;border-radius:5px;background:${catState(c)};flex:none"></span>${esc(c.n.toUpperCase())}${lockAll || tplLocked(catKeyOf(c)) ? ' 🔒' : ''}</button>`).join('')}</div>
+      <div style="flex:1;min-width:280px">`;
     const cat = cats.find(c => c.id === it._cat);
-    for (const l of axAreas(A, cat.id)) {
-      const ok = !!has(l.id, 'No_Abnormalities'), na = !!has(l.id, 'Not_Assessed');
-      const offered = (A.byArea && A.byArea[l.id]) || [];
-      const orient = l.id === 'MentalStatus' ? (A.orientation || []) : [];
-      const toggle = (id) => { const f = has(l.id, id); const on = f && f.present !== false, off = f && f.present === false; return `<span style="display:inline-flex;border:1px solid #cbd5e1;border-radius:20px;overflow:hidden"><button type="button" data-tog="${esc(l.id)}|${esc(id)}|1" title="Present" style="border:0;padding:6px 12px;font:inherit;font-weight:700;cursor:pointer;background:${on ? '#22c55e' : '#fff'};color:${on ? '#fff' : '#64748b'}">✓</button><button type="button" data-tog="${esc(l.id)}|${esc(id)}|0" title="Not present" style="border:0;border-left:1px solid #cbd5e1;padding:6px 12px;font:inherit;font-weight:700;cursor:pointer;background:${off ? '#ef4444' : '#fff'};color:${off ? '#fff' : '#64748b'}">✕</button></span>`; };
-      html += `<div style="border:1px solid #e2e8f0;border-radius:10px;margin:0 0 10px;background:#fff">
-        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 12px;background:#f1f5f9;border-radius:10px 10px 0 0"><b style="flex:1;font-size:16px">${esc(l.n === 'General' ? cat.name : l.n)}</b>
-          <button type="button" class="tb ${ok ? 'pri' : 'sec'}" data-set="${esc(l.id)}|No_Abnormalities" style="border-radius:22px">${ok ? '● ' : '○ '}No Abnormalities</button><button type="button" class="tb ${na ? 'pri' : 'sec'}" data-set="${esc(l.id)}|Not_Assessed" style="border-radius:22px">${na ? '● ' : '○ '}Not Assessed</button></div>
-        <div style="padding:8px 12px 12px">
-          ${orient.length ? `<div style="font-weight:700;color:#334155;margin:4px 0 6px">Orientation</div><div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px">${orient.map(id => `<span style="display:flex;align-items:center;gap:8px">${toggle(id)} ${esc(fname(id).replace(/^Oriented /i, ''))}</span>`).join('')}</div>` : ''}
-          <div style="font-weight:700;color:#334155;margin:4px 0 6px">Findings</div>
-          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:6px 16px">${offered.filter(id => !orient.includes(id)).map(id => `<span style="display:flex;align-items:center;gap:8px">${toggle(id)} <span>${esc(fname(id))}</span></span>`).join('')}</div>
-        </div></div>`;
+    const catLocked = lockAll || tplLocked(catKeyOf(cat));
+    html += `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 8px"><b style="font-size:17px">${esc(cat.n)}</b>${catLocked ? lockNote() : ''}${lockBtn(catKeyOf(cat))}</div>`;
+    const toggle = (loc, id) => { const f = has(loc, id); const on = f && f.present !== false, off = f && f.present === false; return `<span style="display:inline-flex;border:1px solid #cbd5e1;border-radius:20px;overflow:hidden;flex:none"><button type="button" data-tog="${esc(loc)}|${esc(id)}|1" title="Present" style="border:0;padding:6px 12px;font:inherit;font-weight:700;cursor:pointer;background:${on ? '#22c55e' : '#fff'};color:${on ? '#fff' : '#64748b'}">✓</button><button type="button" data-tog="${esc(loc)}|${esc(id)}|0" title="Not present" style="border:0;border-left:1px solid #cbd5e1;padding:6px 12px;font:inherit;font-weight:700;cursor:pointer;background:${off ? '#ef4444' : '#fff'};color:${off ? '#fff' : '#64748b'}">✕</button></span>`; };
+    const group = (g, fold) => {
+      const fs = at(g.loc).filter(f => !isNA(f.id));
+      const one = g.one ? `<div class="pills" style="display:flex;flex-wrap:wrap;gap:6px;margin:0 0 8px">${g.one.map(id => { const on = !!(has(g.loc, id) && has(g.loc, id).present !== false); return `<button type="button" data-one="${esc(g.loc)}|${esc(id)}" style="border:1px solid ${on ? '#1d4ed8' : '#cbd5e1'};background:${on ? '#1d4ed8' : '#fff'};color:${on ? '#fff' : '#1e293b'};border-radius:20px;padding:8px 14px;font:inherit;font-weight:600;cursor:pointer;min-height:40px">${esc(fname(id))}</button>`; }).join('')}</div>` : '';
+      const list = g.f.length ? `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:6px 16px">${g.f.map(id => `<span style="display:flex;align-items:center;gap:8px">${toggle(g.loc, id)} <span>${esc(fname(id))}</span></span>`).join('')}</div>` : '';
+      if (!fold) return `${g.n !== 'Findings' ? `<div style="font-weight:700;color:#334155;margin:4px 0 6px">${esc(g.n)}</div>` : ''}${one}${list}`;
+      const state = fs.length ? fs.map(f => (f.present === false ? '✕ ' : '✓ ') + fname(f.id)).join(', ') : has(g.loc, 'No_Abnormalities') ? 'No Abnormalities' : has(g.loc, 'Not_Assessed') ? 'Not Assessed' : '';
+      return `<details class="axg" data-axg="${esc(g.loc)}" ${fs.length ? 'open' : ''} style="border-top:1px solid #f1f5f9;padding:2px 0"><summary style="cursor:pointer;font-weight:600;color:#334155;padding:6px 0">${esc(g.n)}${state ? ` <span class="muted" style="font-weight:400">${esc(state)}</span>` : ''}</summary><div style="padding:4px 0 8px">${one}${list}</div></details>`;
+    };
+    if (catLocked && !isAdmin()) html += `<div class="muted" style="margin:6px 0 12px">${esc(cat.n)} is locked by the agency: a template cannot set it. Assess it on the run.</div>`;
+    else for (const s of cat.s) {
+      const naOn = (id) => s.na.length > 0 && s.na.every(l => has(l, id));
+      const fold = new Set(s.g.map(g => g.loc)).size > 1;
+      const n = [...new Set(s.g.map(g => g.loc))].flatMap(at).filter(f => !isNA(f.id)).length;
+      const ok = naOn('No_Abnormalities'), na = naOn('Not_Assessed');
+      html += `<div class="axsec" style="border:1px solid #e2e8f0;border-radius:10px;margin:0 0 10px;background:#fff">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 12px;background:#f1f5f9;border-radius:10px 10px 0 0"><b style="flex:1;font-size:16px">${esc(s.n)}${n ? ` <span class="cnt" style="background:#fbbf24;border-radius:10px;padding:0 7px;font-size:12px">${n}</span>` : ''}</b>
+          ${s.na.length ? `<button type="button" class="tb ${ok ? 'pri' : 'sec'}" data-set="${esc(s.na.join(','))}|No_Abnormalities" style="border-radius:22px">${ok ? '● ' : '○ '}No Abnormalities</button><button type="button" class="tb ${na ? 'pri' : 'sec'}" data-set="${esc(s.na.join(','))}|Not_Assessed" style="border-radius:22px">${na ? '● ' : '○ '}Not Assessed</button>` : ''}</div>
+        <div style="padding:8px 12px 12px">${s.g.map(g => group(g, fold)).join('')}</div></div>`;
     }
-    const cm = AX_COMMENTS[cat.id]; const cmf = cm && memberFields('assessments.assessmentsV2').find(m => m.rel === cm);
-    if (cmf) html += `<div style="font-weight:700;color:#334155;margin:4px 0 6px">Comments</div><div class="tf ${it.fields[cm] ? 'on' : ''}" data-key="${esc(String(idx))}|${esc(cm)}" style="grid-template-columns:34px 1fr"><input type="checkbox" data-sel ${it.fields[cm] ? 'checked' : ''}><div>${inputFor(cmf, it.fields[cm] ? it.fields[cm].v : null)}</div></div>`;
+    const cm = cat.c; const cmf = cm && memberFields('assessments.assessmentsV2').find(m => m.rel === cm);
+    if (cmf && !(catLocked && !isAdmin())) html += `<div style="font-weight:700;color:#334155;margin:4px 0 6px">Comments</div><div class="tf ${it.fields[cm] ? 'on' : ''}" data-key="${esc(String(idx))}|${esc(cm)}" style="grid-template-columns:34px 1fr"><input type="checkbox" data-sel ${it.fields[cm] ? 'checked' : ''}><div>${inputFor(cmf, it.fields[cm] ? it.fields[cm].v : null)}</div></div>`;
     return html + '</div></div></div>';
   }
   function fieldDef(key) {
@@ -3129,31 +3162,46 @@
       renderEditor();
     }));
     W.querySelectorAll('[data-remove]').forEach(b => b.addEventListener('click', () => { const i = Number(b.closest('.item').dataset.item); ed.items.splice(i, 1); renderEditor(); }));
-    W.querySelectorAll('[data-allnormal]').forEach(b => b.addEventListener('click', () => { const it = ed.items[Number(b.closest('.item').dataset.item)]; const A = ESOSAVE_ASSESS; it.findings = A.top.map(id => ({ loc: id, id: 'No_Abnormalities' })); renderEditor(); }));
-    W.querySelectorAll('[data-allna]').forEach(b => b.addEventListener('click', () => { const it = ed.items[Number(b.closest('.item').dataset.item)]; const A = ESOSAVE_ASSESS; it.findings = A.top.map(id => ({ loc: id, id: 'Not_Assessed' })); renderEditor(); }));
-    W.querySelectorAll('[data-cat]').forEach(b => b.addEventListener('click', () => { const it = ed.items[Number(b.closest('.item').dataset.item)]; it._cat = b.dataset.cat; renderEditor(); }));
+    const axItem = (b) => ed.items[Number(b.closest('.item').dataset.item)];
+    W.querySelectorAll('[data-allnormal]').forEach(b => b.addEventListener('click', () => { const it = axItem(b); it.findings = AX().top.map(id => ({ loc: id, id: 'No_Abnormalities' })); renderEditor(); }));
+    W.querySelectorAll('[data-allna]').forEach(b => b.addEventListener('click', () => { const it = axItem(b); it.findings = AX().top.map(id => ({ loc: id, id: 'Not_Assessed' })); renderEditor(); }));
+    W.querySelectorAll('[data-cat]').forEach(b => b.addEventListener('click', () => { const it = axItem(b); it._cat = b.dataset.cat; renderEditor(); }));
+    // a section's No Abnormalities / Not Assessed: written on each of the section's holders, everything in the section cleared first; the same button again clears it
     W.querySelectorAll('[data-set]').forEach(b => b.addEventListener('click', () => {
-      const it = ed.items[Number(b.closest('.item').dataset.item)]; const [loc, id] = b.dataset.set.split('|');
-      const was = (it.findings || []).some(f => f.loc === loc && f.id === id);
-      it.findings = (it.findings || []).filter(f => f.loc !== loc);
-      if (!was) it.findings.push({ loc, id });
+      const it = axItem(b); const [csv, id] = b.dataset.set.split('|'); const locs = csv.split(',');
+      const was = locs.every(l => (it.findings || []).some(f => f.loc === l && f.id === id));
+      const inside = new Set(locs.concat(axSections().filter(s => s.na.join(',') === csv).flatMap(s => s.g.map(g => g.loc))));
+      it.findings = (it.findings || []).filter(f => !inside.has(f.loc));
+      if (!was) for (const loc of locs) it.findings.push({ loc, id });
       renderEditor();
     }));
+    // a finding, present or not, takes the place of No Abnormalities / Not Assessed on its location; the same button again clears it
+    const axClearNA = (it, loc) => { const holders = axNaHolders(loc); it.findings = (it.findings || []).filter(f => !(isNA(f.id) && holders.includes(f.loc))); };
     W.querySelectorAll('[data-tog]').forEach(b => b.addEventListener('click', () => {
-      const it = ed.items[Number(b.closest('.item').dataset.item)]; const [loc, id, on] = b.dataset.tog.split('|'); const present = on === '1';
+      const it = axItem(b); const [loc, id, on] = b.dataset.tog.split('|'); const present = on === '1';
       const cur = (it.findings || []).find(f => f.loc === loc && f.id === id);
-      // a finding, present or not, takes the place of No Abnormalities / Not Assessed on its area; the same button again clears it
-      it.findings = (it.findings || []).filter(f => !(f.loc === loc && (f.id === id || f.id === 'No_Abnormalities' || f.id === 'Not_Assessed')));
+      axClearNA(it, loc);
+      it.findings = it.findings.filter(f => !(f.loc === loc && f.id === id));
       if (!(cur && (cur.present !== false) === present)) it.findings.push({ loc, id, present });
       renderEditor();
     }));
+    // a pick-one row (pupil size, a pulse, capillary refill): one of them at a time on that location
+    W.querySelectorAll('[data-one]').forEach(b => b.addEventListener('click', () => {
+      const it = axItem(b); const [loc, id] = b.dataset.one.split('|');
+      const s = axSectionOf(loc); const g = s && s.g.find(x => x.loc === loc && x.one); const ids = g ? g.one : [id];
+      const cur = (it.findings || []).find(f => f.loc === loc && f.id === id && f.present !== false);
+      axClearNA(it, loc);
+      it.findings = it.findings.filter(f => !(f.loc === loc && ids.includes(f.id)));
+      if (!cur) it.findings.push({ loc, id, present: true });
+      renderEditor();
+    }));
     W.querySelectorAll('[data-aox4]').forEach(b => b.addEventListener('click', () => {
-      const it = ed.items[Number(b.closest('.item').dataset.item)]; const A = ESOSAVE_ASSESS;
-      it.findings = (it.findings || []).filter(f => !(f.loc === 'MentalStatus' && ((A.orientation || []).includes(f.id) || f.id === 'No_Abnormalities' || f.id === 'Not_Assessed')));
+      const it = axItem(b); const A = AX();
+      it.findings = (it.findings || []).filter(f => !(f.loc === 'MentalStatus' && ((A.orientation || []).includes(f.id) || isNA(f.id))));
       for (const id of (A.orientation || [])) it.findings.push({ loc: 'MentalStatus', id, present: true });
       it._cat = 'MentalStatus'; renderEditor();
     }));
-    W.querySelectorAll('[data-axclear]').forEach(b => b.addEventListener('click', () => { const it = ed.items[Number(b.closest('.item').dataset.item)]; it.findings = []; renderEditor(); }));
+    W.querySelectorAll('[data-axclear]').forEach(b => b.addEventListener('click', () => { const it = axItem(b); it.findings = []; renderEditor(); }));
     // field rows
     W.querySelectorAll('.tf').forEach(row => {
       const key = row.dataset.key; const d = fieldDef(key); if (!d) return;
@@ -3251,6 +3299,7 @@
     const run = currentRun();
     if (!run || run.locked) { alert('ESO Save: open an unlocked run first.'); return; }
     const { body, dropped } = applyLocks(t.body || {});
+    for (const it of body.items) if (it.kind === 'assessment') it.findings = axComplete(it.findings);
     for (const f of Object.values(body.fields)) if (f && f.t === 'string' && typeof f.v === 'string') f.v = fillBlanks(f.v, run);
     for (const it of body.items) for (const f of Object.values(it.fields || {})) if (f && f.t === 'string' && typeof f.v === 'string') f.v = fillBlanks(f.v, run);
     const nf = Object.keys(body.fields).length, ni = body.items.length;

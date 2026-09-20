@@ -1786,6 +1786,8 @@ test('templates: made from ESO\'s own field catalog, saved under the person\'s i
   await pick('2|doseUnitId', 'L/min');
   // Assessments: one assessment, all normal, with a comment
   await twClick('[data-page=assessments]');
+  // ESO's retired assessment form (a field per finding, its value a section name) is still in ESO's field list; it is never offered
+  assert.equal(await tw(rowSel('assessments.assessments.mentalStatus.orientation.person')), null, 'the retired form stays out');
   await twClick('[data-additem="assessments.assessmentsV2"]');
   // laid out as ESO's screen: categories down the side, each area No Abnormalities to start; Skin gets Cold ✓ and Clammy ✕, Mental Status A&Ox4
   assert.match(await tw('.item .ih'), /no abnormalities/);
@@ -1800,6 +1802,19 @@ test('templates: made from ESO\'s own field catalog, saved under the person\'s i
   assert.match(await tw('.item [data-set="Skin|No_Abnormalities"]'), /○/, 'a finding took the place of No Abnormalities');
   await twClick('.item [data-aox4]');
   await waitFor(async () => /6 findings/.test((await tw('.item .ih')) || ''), { label: 'oriented x4 on Mental Status' });
+  // HEENT is Head, Face, Eyes, Neck, each its own section; the eyes are Left and Right, a pupil size picked one at a time, the findings per eye;
+  // a pupil size on the left eye takes the place of the Eyes section's No Abnormalities, as it does in ESO
+  await twClick('.item [data-cat="HEENT"]');
+  await waitFor(() => T.page.evaluate(() => !!document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin [data-one="EyesLeft|5mm"]')), { label: 'the eyes' });
+  assert.equal(await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelectorAll('.tplwin .axsec').length), 4, 'Head, Face, Eyes, Neck');
+  assert.equal(await T.page.evaluate(() => !!document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin [data-tog="Eyes|Blind|1"]')), false, 'findings live on each eye, not on Eyes');
+  assert.match(await tw('.item [data-set="Eyes|No_Abnormalities"]'), /●/);
+  await twClick('[data-one="EyesLeft|5mm"]');
+  await waitFor(async () => /○ No Abnormalities/.test((await tw('.item [data-set="Eyes|No_Abnormalities"]')) || ''), { label: 'the eyes are no longer No Abnormalities' });
+  await twClick('[data-one="EyesLeft|4mm"]');
+  await waitFor(async () => /4-mm/.test((await tw('.item details[data-axg="EyesLeft"] summary')) || ''), { label: 'one pupil size at a time' });
+  await twClick('[data-tog="EyesRight|Blind|1"]');
+  await waitFor(async () => /8 findings/.test((await tw('.item .ih')) || ''), { label: 'a pupil size and a finding on the eyes' });
   await twClick('.item [data-cat="Abdomen"]');
   await waitFor(() => T.page.evaluate((s) => !!document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin ' + s), rowSel('3|abdomenSection.comments')), { label: 'abdomen comments' });
   await twType(rowSel('3|abdomenSection.comments') + ' [data-in]', 'Soft, non-tender');
@@ -1819,7 +1834,7 @@ test('templates: made from ESO\'s own field catalog, saved under the person\'s i
   assert.equal(saved.body.items.length, 4);
   assert.equal(saved.body.items.find(i => i.kind === 'treatment').fields.doseUnitId.v, 9001);
   const ax = saved.body.items.find(i => i.kind === 'assessment');
-  assert.equal(ax.findings.length, 24 + 2 + 4, "ESO's own areas; the skin carries two, Mental Status the four orientations"); assert.deepEqual(ax.findings.filter(f => f.loc === 'Skin').map(f => [f.id, f.present]).sort(), [['Clammy', false], ['Cold', true]]); assert.ok(ax.findings.filter(f => f.loc !== 'Skin' && f.loc !== 'MentalStatus').every(f => f.id === 'No_Abnormalities'), 'every other area no abnormalities');
+  assert.equal(ax.findings.length, 23 + 2 + 4 + 2, "ESO's own areas; the skin carries two, Mental Status the four orientations, each eye one"); assert.deepEqual(ax.findings.filter(f => f.loc === 'Skin').map(f => [f.id, f.present]).sort(), [['Clammy', false], ['Cold', true]]); assert.deepEqual(ax.findings.filter(f => /^Eyes/.test(f.loc)).map(f => [f.loc, f.id]).sort(), [['EyesLeft', '4mm'], ['EyesRight', 'Blind']], 'the eyes: a size on the left, Blind on the right, nothing on Eyes itself'); assert.ok(ax.findings.filter(f => !/^(Skin|MentalStatus|Eyes)/.test(f.loc)).every(f => f.id === 'No_Abnormalities'), 'every other area no abnormalities');
   assert.ok(!ax.findings.some(f => f.loc === 'MentalStatus' && /No_Abnormalities|Not_Assessed/.test(f.id)), 'A&Ox4 clears the NA on Mental Status, as ESO does');
   await waitFor(() => tw('h2'), { label: 'back on the list' });
   assert.match(await tw('.body'), /Chest pain[\s\S]*private/);
@@ -1839,7 +1854,7 @@ test('templates: made from ESO\'s own field catalog, saved under the person\'s i
   assert.equal(Object.values(t.patient.patientMedicalHistories)[0].itemId, 1337168);
   const v = t.vitals.vitalSigns[0]; assert.equal(v.bloodPressure.bloodPressureSystolic, '120'); assert.equal(v.pulse.pulseRate, '80'); assert.match(v.vitalSignDateTime, /^\d\d\/\d\d\/\d{4} \d\d:\d\d:\d\d$/);
   const tr = t.flowchartTreatments.treatments[0]; assert.equal(tr.flowchartTreatmentRegistryId, 1416); assert.equal(tr.dose, '15'); assert.equal(tr.doseUnitId, 9001); assert.ok(tr.treatmentDate);
-  const a = t.assessments.assessmentsV2[0]; assert.equal(a.abdomenSection.comments, 'Soft, non-tender'); const fs = Object.values(a.findings); assert.equal(fs.length, 30); assert.deepEqual(fs.filter(f => f.findingLocationId === 'Skin').map(f => [f.findingId, f.present]).sort(), [['Clammy', false], ['Cold', true]]); assert.deepEqual(fs.filter(f => f.findingLocationId === 'MentalStatus').map(f => f.findingId).sort(), ['Oriented_Event', 'Oriented_Person', 'Oriented_Place', 'Oriented_Time']); assert.ok(fs.filter(f => !/Skin|MentalStatus/.test(f.findingLocationId)).every(f => f.findingId === 'No_Abnormalities' && f.present === true));
+  const a = t.assessments.assessmentsV2[0]; assert.equal(a.abdomenSection.comments, 'Soft, non-tender'); const fs = Object.values(a.findings); assert.equal(fs.length, 31); assert.deepEqual(fs.filter(f => f.findingLocationId === 'Skin').map(f => [f.findingId, f.present]).sort(), [['Clammy', false], ['Cold', true]]); assert.deepEqual(fs.filter(f => f.findingLocationId === 'MentalStatus').map(f => f.findingId).sort(), ['Oriented_Event', 'Oriented_Person', 'Oriented_Place', 'Oriented_Time']); assert.deepEqual(fs.filter(f => /^Eyes/.test(f.findingLocationId)).map(f => [f.findingLocationId, f.findingId, f.present]).sort(), [['EyesLeft', '4mm', true], ['EyesRight', 'Blind', true]], 'written on each eye as ESO writes them; no Not Assessed on Eyes'); assert.ok(fs.filter(f => !/^(Skin|MentalStatus|Eyes)/.test(f.findingLocationId)).every(f => f.findingId === 'No_Abnormalities' && f.present === true));
   assert.equal(t.narrative.clinicalImpression.primaryImpressionId, 500);
   const run = await T.run(id);
   assert.ok(run.batches.filter(b => b.synthetic === 'facesheet' || b.synthetic === 'template').length >= 6, 'one batch per tab');
@@ -1968,11 +1983,18 @@ test('templates: the agency owner locks a field and a part of the vitals; the cr
   await twClick('[data-lock="vitals.vitalSigns.bloodPressure"]');
   await waitFor(async () => ((await agency()).tplLocks || []).includes('vitals.vitalSigns.bloodPressure'), { label: 'group lock in the agency row' });
   assert.match(await tw('[data-lock="vitals.vitalSigns.bloodPressure"]'), /Locked/);
+  await twClick('[data-page=assessments]');
+  await twClick('[data-additem="assessments.assessmentsV2"]');
+  await waitFor(() => tw('.item [data-cat="Skin"]'), { label: 'the assessment' });
+  await twClick('.item [data-cat="Skin"]');
+  await waitFor(() => tw('[data-lock="assessments.assessmentsV2.findings.Skin"]'), { label: 'a lock per assessment category' });
+  await twClick('[data-lock="assessments.assessmentsV2.findings.Skin"]');
+  await waitFor(async () => ((await agency()).tplLocks || []).includes('assessments.assessmentsV2.findings.Skin'), { label: 'category lock in the agency row' });
   await twClick('[data-act=cancel]');
   // the crew: the lock shows, the field cannot be set, the template saves without it, the fill leaves it out
   await T.control({ userName: 'TEST, MEDIC', userId: 'person-1' });
   const id = await freshRun();
-  await waitFor(async () => ((await T.storage()).settings.tplLocks || []).length === 2, { label: 'locks reached the tablet' });
+  await waitFor(async () => ((await T.storage()).settings.tplLocks || []).length === 3, { label: 'locks reached the tablet' });
   await app(() => window.app.edit('incident', 'incident.response.priorityId', 331, 'singleselect'));
   await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.bar [data-act=templates]').click());
   await waitFor(async () => /Chest pain/.test((await tw('.body')) || ''), { label: 'his templates' });
@@ -1988,18 +2010,30 @@ test('templates: the agency owner locks a field and a part of the vitals; the cr
   assert.match(vit, /Blood pressure[\s\S]*Locked by the agency/);
   assert.equal(await T.page.evaluate(() => !!document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin .tf[data-key$="|bloodPressure.bloodPressureSystolic"]')), false, 'no blood pressure rows for the crew');
   assert.ok(await T.page.evaluate(() => !!document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin .tf[data-key$="|pulse.pulseRate"]')), 'pulse still there');
+  await twClick('[data-page=assessments]');
+  // the template's assessment carries Cold and Clammy on the skin from its maker; the crew cannot touch the skin now, and a fill leaves it out
+  await waitFor(() => tw('.item [data-cat="Skin"]'), { label: 'the assessment' });
+  await twClick('.item [data-cat="Skin"]');
+  await waitFor(async () => /Skin is locked by the agency/.test((await tw('.item .ax')) || ''), { label: 'the skin is locked for the crew' });
+  assert.equal(await T.page.evaluate(() => !!document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin [data-tog="Skin|Cold|1"]')), false, 'no skin findings to set');
+  await twClick('.item [data-cat="HEENT"]');
+  await waitFor(() => tw('[data-tog="Neck|JVD|1"]'), { label: 'the neck' });
+  await twClick('[data-tog="Neck|JVD|1"]');
   await twClick('[data-act=save]');
   await waitFor(async () => { const t = (await tplDb()).templates.find(x => x.name === 'Chest pain'); return t && !t.body.fields['incident.response.priorityId'] && !t.body.items.find(i => i.kind === 'vital').fields['bloodPressure.bloodPressureSystolic']; }, { label: 'saved without the locked things' });
   await waitFor(() => tw('[data-act=new]'), { label: 'list' });
   await T.page.evaluate(() => { const row = Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.tplwin .tpl')).find(r => /^Chest pain/.test(r.querySelector('.tn').textContent)); row.querySelector('[data-act=fill]').click(); });
   await waitFor(async () => /Fill this run from "Chest pain"/.test(await T.page.evaluate(() => (document.getElementById('esosave-host').shadowRoot.querySelector('.veil .askbox') || {}).textContent || '')), { label: 'question' });
   await T.page.evaluate(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.askbox button')).find(b => /Yes, fill it/.test(b.textContent)).click());
-  await waitFor(async () => (await T.record(id)).tree.vitals?.vitalSigns?.length === 1, { label: 'filled', timeout: 30000 });
+  await waitFor(async () => (await T.record(id)).tree.vitals?.vitalSigns?.length === 1 && (await T.record(id)).tree.assessments?.assessmentsV2?.length === 1, { label: 'filled', timeout: 30000 });
   await waitFor(() => T.page.evaluate(() => /Filled from/.test((document.getElementById('esosave-host').shadowRoot.querySelector('.veil') || {}).textContent || '')), { label: 'notice', timeout: 15000 });
   const t = (await T.record(id)).tree;
   assert.equal(t.incident.response.priorityId, 331, 'the locked field kept what the medic set');
   assert.equal(t.incident.response.runTypeId, 326, 'the open field was filled');
   assert.equal(t.vitals.vitalSigns[0].pulse.pulseRate, '80'); assert.equal(t.vitals.vitalSigns[0].bloodPressure?.bloodPressureSystolic ?? null, null, 'no blood pressure from a template');
+  const axf = Object.values(t.assessments.assessmentsV2[0].findings);
+  assert.deepEqual(axf.filter(f => f.findingLocationId === 'Skin').map(f => f.findingId), ['Not_Assessed'], 'the locked skin is written Not Assessed, as ESO starts it');
+  assert.deepEqual(axf.filter(f => f.findingLocationId === 'Neck').map(f => f.findingId), ['JVD'], 'the open neck finding went in');
   // the owner clears the locks
   await fetch(T.base + '/__db_set', { method: 'POST', body: JSON.stringify({ name: '__agency__', settings: { ...(await agency()), tplLocks: [] } }) });
   await T.setStorage({ settings: { ...(await T.storage()).settings, tplLocks: [] } });

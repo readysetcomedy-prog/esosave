@@ -235,6 +235,8 @@ export function createMockEso() {
     'flowchartTreatments.treatments.doseUnitId': F('FLOWCHARTTREATMENTDOSEUNITID', 'singleselect', 'Measure', 'UDL.AGENCYFLOWCHARTMEDICATIONMEASURE'),
     'flowchartTreatments.treatments.comments': F('FLOWCHARTTREATMENTCOMMENTS', 'string', 'Comments'),
     'flowchartTreatments.treatments.successful': F('FLOWCHARTTREATMENTSUCCESSFUL', 'boolean', 'Successful'),
+    'assessments.assessments': F('ASSESSMENT', 'collectionWithData', 'Assessments'),
+    'assessments.assessments.mentalStatus.orientation.person': F('ORIENTATIONPERSON', 'singleselect', 'Person', 'SL.ASSESSMENTSUBCATEGORIES'), // ESO's retired form, still in its field list
     'assessments.assessmentsV2': F('ASSESSMENT2', 'collectionWithData', 'Assessments'),
     'assessments.assessmentsV2.findings': F('ASSESSMENT2FINDINGS', 'binary', 'Findings'),
     'assessments.assessmentsV2.abdomenSection.comments': F('ASSESSMENT2ABDOMENSECTIONCOMMENTS', 'string', 'Abdomen Comments'),
@@ -256,6 +258,7 @@ export function createMockEso() {
     'SL.EMDPERFORMED': V([[340, 'Yes'], [341, 'No']]),
     'SL.DISPATCHDELAY': V([[350, 'None/No Delay'], [351, 'Weather'], [352, 'Traffic']]),
     'SL.SCENEDELAY': V([[372, 'None/No Delay'], [373, 'Extrication'], [374, 'Crowd']]),
+    'SL.ASSESSMENTSUBCATEGORIES': V([[6942, 'Mental Status'], [6944, 'Skin'], [6924, 'Head/Face']]),
     'SL.MEDICALHISTORY': V([[1337168, 'Hypertension'], [1337170, 'Diabetes'], [1337172, 'COPD']]),
     'SL.PERTINENTNEGATIVEHISTORY': V([[360, 'Unable to Obtain'], [361, 'Not Applicable']]),
     'UDL.FLOWCHARTTREATMENTREGISTRY': { values: [{ itemId: 1416, itemName: 'Oxygen', isMedication: true }, { itemId: 1417, itemName: 'Aspirin', isMedication: true }, { itemId: 1418, itemName: 'IV Therapy', isMedication: false }] },

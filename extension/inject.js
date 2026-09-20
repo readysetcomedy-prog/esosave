@@ -27,7 +27,7 @@
   if (ext) return;
   if (window.__esosave) return;
 
-  const VERSION = '0.15.7';
+  const VERSION = '0.15.8';
   const API_PREFIX_RE = /^\/ehr\/api\/+/i;
   const FAKE_OK_TEXT = '{"result":"Success","data":[]}';
   const PROBE_PATH = '/ehr/api/thirdpartydata/partners';
@@ -805,6 +805,7 @@
     /^patient\.(contact|incident)\b/,
     /^billing\.(patient|contactForPayment|nextOfKin)\b/,
     /^signatures\.(?!standardSignatures\.standardRefusal\b)/,
+    /^assessments\.assessments\b/, // ESO's retired assessment form: a field per finding whose value is a section name; the current screen never writes it
     /\.(itemId|mobileToMobile|softDeleted|fileId|imageType|version)$/,
   ];
   const CATALOG_ITEMS = {
@@ -1338,7 +1339,6 @@
     if (t === 'string' || t === 'number' || t === 'phone' || t === 'ssn' || t === 'pertinentNegative') return String(v); // the app sends these as text, a pertinent negative's id included
     return v;
   }
-  const ASSESS_TOP = ['MentalStatus', 'Skin', 'Head', 'Face', 'Eyes', 'Neck', 'GeneralAnterior', 'LeftAnterior', 'RightAnterior', 'LeftSide', 'RightSide', 'GeneralPosterior', 'HeartSounds', 'LungSounds_Bilateral', 'LungSounds_LU', 'LungSounds_RU', 'LungSounds_LL', 'LungSounds_RL', 'AbdomenGeneral', 'BackGeneral', 'PelvisGUGI', 'ArmWholeArmAndHandLeft', 'ArmWholeArmAndHandRight', 'LegWholeLegAndFootLeft', 'LegWholeLegAndFootRight', 'Neurological'];
   function templateOps(body, withItems) {
     const byScope = {};
     const push = (op) => { const sc = op.address.split('.')[0]; (byScope[sc] = byScope[sc] || []).push(op); };
@@ -1370,12 +1370,8 @@
         push({ verb: 'EDIT', address: `${base}.${rel}`, fieldRef: f.r, value: v, dataType: f.t });
       }
       if (it.kind === 'assessment') {
-        // as ESO starts one: a finding on each of its areas, Not Assessed where the template says nothing
-        const chosen = (it.findings || []).filter(fd => fd && fd.loc && fd.id && ASSESS_TOP.includes(fd.loc));
-        for (const loc of ASSESS_TOP) {
-          const fds = chosen.filter(x => x.loc === loc);
-          for (const fd of (fds.length ? fds : [{ loc, id: 'Not_Assessed' }])) push({ verb: 'ADD', address: `${base}.findings.['${uuid()}']`, fieldRef: 'ASSESSMENT2FINDINGS', value: { findingId: fd.id, findingLocationId: loc, present: fd.present !== false }, dataType: 'binary', isComplexType: true });
-        }
+        // the findings as the template carries them (the page side has already added Not Assessed on the areas ESO seeds), one ADD each, as ESO's own screen writes them
+        for (const fd of (it.findings || [])) if (fd && fd.loc && fd.id) push({ verb: 'ADD', address: `${base}.findings.['${uuid()}']`, fieldRef: 'ASSESSMENT2FINDINGS', value: { findingId: fd.id, findingLocationId: fd.loc, present: fd.present !== false }, dataType: 'binary', isComplexType: true });
       }
     }
     return byScope;
