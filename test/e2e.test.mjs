@@ -1776,13 +1776,21 @@ test('templates: made from ESO\'s own field catalog, saved under the person\'s i
   // Assessments: one assessment, all normal, with a comment
   await twClick('[data-page=assessments]');
   await twClick('[data-additem="assessments.assessmentsV2"]');
-  // a new assessment starts with every area No Abnormalities; the skin is marked cold and clammy
+  // laid out as ESO's screen: categories down the side, each area No Abnormalities to start; Skin gets Cold ✓ and Clammy ✕, Mental Status A&Ox4
   assert.match(await tw('.item .ih'), /no abnormalities/);
-  await twClick('[data-area="Skin"]');
-  await waitFor(() => T.page.evaluate(() => !!document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin [data-find="Skin|Cold"]')), { label: "the skin's own findings" });
-  assert.equal(await T.page.evaluate(() => !!document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin [data-find="Skin|Agitation"]')), false, 'only the findings of that area');
-  await T.page.evaluate(() => { for (const id of ['Skin|Cold', 'Skin|Clammy']) { const cb = document.getElementById('esosave-host').shadowRoot.querySelector(`.tplwin [data-find="${id}"]`); cb.checked = true; cb.dispatchEvent(new Event('change', { bubbles: true })); } });
+  await twClick('.item [data-cat="Skin"]');
+  await waitFor(() => T.page.evaluate(() => !!document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin [data-tog="Skin|Cold|1"]')), { label: "the skin's own findings" });
+  assert.equal(await T.page.evaluate(() => !!document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin [data-tog="Skin|Agitation|1"]')), false, 'only the findings of that area');
+  assert.match(await tw('.item [data-set="Skin|No_Abnormalities"]'), /●/);
+  await twClick('[data-tog="Skin|Cold|1"]');
+  await waitFor(() => T.page.evaluate(() => !!document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin [data-tog="Skin|Clammy|0"]')), { label: 'redrawn' });
+  await twClick('[data-tog="Skin|Clammy|0"]');
   await waitFor(async () => /2 findings/.test((await tw('.item .ih')) || ''), { label: 'two findings on the skin' });
+  assert.match(await tw('.item [data-set="Skin|No_Abnormalities"]'), /○/, 'a finding took the place of No Abnormalities');
+  await twClick('.item [data-aox4]');
+  await waitFor(async () => /6 findings/.test((await tw('.item .ih')) || ''), { label: 'oriented x4 on Mental Status' });
+  await twClick('.item [data-cat="Abdomen"]');
+  await waitFor(() => T.page.evaluate((s) => !!document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin ' + s), rowSel('3|abdomenSection.comments')), { label: 'abdomen comments' });
   await twType(rowSel('3|abdomenSection.comments') + ' [data-in]', 'Soft, non-tender');
   
   // Narrative: an impression and text
@@ -1800,7 +1808,8 @@ test('templates: made from ESO\'s own field catalog, saved under the person\'s i
   assert.equal(saved.body.items.length, 4);
   assert.equal(saved.body.items.find(i => i.kind === 'treatment').fields.doseUnitId.v, 9001);
   const ax = saved.body.items.find(i => i.kind === 'assessment');
-  assert.equal(ax.findings.length, 27, "ESO's own areas, no more; the skin carries two"); assert.deepEqual(ax.findings.filter(f => f.loc === 'Skin').map(f => f.id).sort(), ['Clammy', 'Cold']); assert.ok(ax.findings.filter(f => f.loc !== 'Skin').every(f => f.id === 'No_Abnormalities'), 'every other area no abnormalities');
+  assert.equal(ax.findings.length, 24 + 2 + 4, "ESO's own areas; the skin carries two, Mental Status the four orientations"); assert.deepEqual(ax.findings.filter(f => f.loc === 'Skin').map(f => [f.id, f.present]).sort(), [['Clammy', false], ['Cold', true]]); assert.ok(ax.findings.filter(f => f.loc !== 'Skin' && f.loc !== 'MentalStatus').every(f => f.id === 'No_Abnormalities'), 'every other area no abnormalities');
+  assert.ok(!ax.findings.some(f => f.loc === 'MentalStatus' && /No_Abnormalities|Not_Assessed/.test(f.id)), 'A&Ox4 clears the NA on Mental Status, as ESO does');
   await waitFor(() => tw('h2'), { label: 'back on the list' });
   assert.match(await tw('.body'), /Chest pain[\s\S]*private/);
   // fill the run from it: a question, then a progress bar, then the run carries it all
@@ -1818,7 +1827,7 @@ test('templates: made from ESO\'s own field catalog, saved under the person\'s i
   assert.equal(Object.values(t.patient.patientMedicalHistories)[0].itemId, 1337168);
   const v = t.vitals.vitalSigns[0]; assert.equal(v.bloodPressure.bloodPressureSystolic, '120'); assert.equal(v.pulse.pulseRate, '80'); assert.match(v.vitalSignDateTime, /^\d\d\/\d\d\/\d{4} \d\d:\d\d:\d\d$/);
   const tr = t.flowchartTreatments.treatments[0]; assert.equal(tr.flowchartTreatmentRegistryId, 1416); assert.equal(tr.dose, '15'); assert.equal(tr.doseUnitId, 9001); assert.ok(tr.treatmentDate);
-  const a = t.assessments.assessmentsV2[0]; assert.equal(a.abdomenSection.comments, 'Soft, non-tender'); const fs = Object.values(a.findings); assert.equal(fs.length, 27); assert.deepEqual(fs.filter(f => f.findingLocationId === 'Skin').map(f => f.findingId).sort(), ['Clammy', 'Cold']); assert.ok(fs.filter(f => f.findingLocationId !== 'Skin').every(f => f.findingId === 'No_Abnormalities' && f.present === true));
+  const a = t.assessments.assessmentsV2[0]; assert.equal(a.abdomenSection.comments, 'Soft, non-tender'); const fs = Object.values(a.findings); assert.equal(fs.length, 30); assert.deepEqual(fs.filter(f => f.findingLocationId === 'Skin').map(f => [f.findingId, f.present]).sort(), [['Clammy', false], ['Cold', true]]); assert.deepEqual(fs.filter(f => f.findingLocationId === 'MentalStatus').map(f => f.findingId).sort(), ['Oriented_Event', 'Oriented_Person', 'Oriented_Place', 'Oriented_Time']); assert.ok(fs.filter(f => !/Skin|MentalStatus/.test(f.findingLocationId)).every(f => f.findingId === 'No_Abnormalities' && f.present === true));
   assert.equal(t.narrative.clinicalImpression.primaryImpressionId, 500);
   const run = await T.run(id);
   assert.ok(run.batches.filter(b => b.synthetic === 'facesheet' || b.synthetic === 'template').length >= 6, 'one batch per tab');

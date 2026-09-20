@@ -27,7 +27,7 @@
   if (ext) return;
   if (window.__esosave) return;
 
-  const VERSION = '0.15.5';
+  const VERSION = '0.15.6';
   const API_PREFIX_RE = /^\/ehr\/api\/+/i;
   const FAKE_OK_TEXT = '{"result":"Success","data":[]}';
   const PROBE_PATH = '/ehr/api/thirdpartydata/partners';
@@ -1374,7 +1374,7 @@
         const chosen = (it.findings || []).filter(fd => fd && fd.loc && fd.id && ASSESS_TOP.includes(fd.loc));
         for (const loc of ASSESS_TOP) {
           const fds = chosen.filter(x => x.loc === loc);
-          for (const fd of (fds.length ? fds : [{ loc, id: 'Not_Assessed' }])) push({ verb: 'ADD', address: `${base}.findings.['${uuid()}']`, fieldRef: 'ASSESSMENT2FINDINGS', value: { findingId: fd.id, findingLocationId: loc, present: true }, dataType: 'binary', isComplexType: true });
+          for (const fd of (fds.length ? fds : [{ loc, id: 'Not_Assessed' }])) push({ verb: 'ADD', address: `${base}.findings.['${uuid()}']`, fieldRef: 'ASSESSMENT2FINDINGS', value: { findingId: fd.id, findingLocationId: loc, present: fd.present !== false }, dataType: 'binary', isComplexType: true });
         }
       }
     }

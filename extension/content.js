@@ -2934,7 +2934,7 @@
       const rootLocked = tplLocked(root), rootShut = rootLocked && !isAdmin();
       content += `<details class="sec" ${items.length || q ? 'open' : ''}><summary><span style="flex:1">${esc(ITEM_NAMES[kind] || humanize(root.split('.').pop()))}${items.length ? ` <span class="cnt" style="background:#fbbf24;border-radius:10px;padding:0 7px;font-size:12px">${items.length}</span>` : ''}${rootLocked ? ' ' + lockNote() : ''}</span>${lockBtn(root)}</summary>
         ${rootShut ? `<div class="muted" style="padding:0 0 10px">${esc(ITEM_NAMES[kind] || 'These')} are locked by the agency: a template cannot add them. Enter them on the run yourself.</div>` : ''}
-        ${items.map(({ it, i }) => `<div class="item" data-item="${i}"><div class="ih">${esc(itemTitle(it))}<span style="flex:1"></span>${kind === 'assessment' && !rootShut ? '<button class="tb sec" data-allnormal>All normal</button><button class="tb sec" data-allna>All not assessed</button>' : ''}<button class="tb danger" data-remove>Remove</button></div>
+        ${items.map(({ it, i }) => `<div class="item" data-item="${i}"><div class="ih">${esc(itemTitle(it))}<span style="flex:1"></span><button class="tb danger" data-remove>Remove</button></div>
           ${rootShut ? `<div class="muted">${lockNote()} Not filled.</div>` : kind === 'assessment' ? assessmentUi(it) : groupedRows(members.filter(m => !(kind === 'vital' && /vitalSignDateTime|softDeleted/.test(m.rel))), it, i, fieldRow, kind)}</div>`).join('')}
         ${rootShut ? '' : `<button class="tb pri" data-additem="${esc(root)}" data-kind="${esc(kind)}" style="margin:8px 0">Add ${esc(ITEM_ONE[kind] || 'one')}</button>`}</details>`;
     }
@@ -2974,7 +2974,7 @@
     const sorted = key ? members.slice().sort((a, b) => (a.rel === key ? -1 : b.rel === key ? 1 : 0)) : members;
     return sorted.map(m => fieldRow(m, it.fields[m.rel], String(i))).join('');
   }
-  const itemTitle = (it) => { const k = ITEM_KEY[it.kind]; const f = k && it.fields[k]; if (it.kind === 'assessment') { const ab = (it.findings || []).filter(x => x.id !== 'No_Abnormalities' && x.id !== 'Not_Assessed').length; const na = (it.findings || []).filter(x => x.id === 'Not_Assessed').length; return `Assessment: ${ab ? ab + ' finding' + (ab === 1 ? '' : 's') : 'no abnormalities'}${na ? `, ${na} area${na === 1 ? '' : 's'} not assessed` : ''}`; } if (it.kind === 'vital') return 'Vital'; return f && f.v != null ? nameOf(f.l, f.v) : humanize(it.kind); };
+  const itemTitle = (it) => { const k = ITEM_KEY[it.kind]; const f = k && it.fields[k]; if (it.kind === 'assessment') { const fs = it.findings || []; const ab = fs.filter(x => x.id !== 'No_Abnormalities' && x.id !== 'Not_Assessed').length; const na = fs.filter(x => x.id === 'Not_Assessed').length; const blank = (typeof ESOSAVE_ASSESS !== 'undefined' ? ESOSAVE_ASSESS.top : []).filter(loc => !fs.some(x => x.loc === loc)).length; return `Assessment: ${ab ? ab + ' finding' + (ab === 1 ? '' : 's') : fs.length ? 'no abnormalities' : 'nothing set'}${na ? `, ${na} not assessed` : ''}${blank && fs.length ? `, ${blank} blank (written Not Assessed)` : ''}`; } if (it.kind === 'vital') return 'Vital'; return f && f.v != null ? nameOf(f.l, f.v) : humanize(it.kind); };
   function inputFor(f, v) {
     const val = v == null ? '' : v;
     if (f.t === 'boolean') return `<select data-in><option value="">—</option><option value="true" ${val === true || val === 'true' ? 'selected' : ''}>Yes</option><option value="false" ${val === false || val === 'false' ? 'selected' : ''}>No</option></select>`;
@@ -3002,41 +3002,43 @@
     if (t === 'datetime') { const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/.exec(v); return m ? `${m[2]}/${m[3]}/${m[1]} ${m[4]}:${m[5]}:${m[6] || '00'}` : null; }
     return v;
   }
-  // The assessment, the way the report is done: everything No Abnormalities to start, then only
-  // what is wrong is marked, area by area, from the findings ESO offers for that area.
+  // The assessment, laid out as ESO's own Assessments screen: the categories down the side, each
+  // section with its No Abnormalities and Not Assessed buttons, its findings each with a check
+  // or an X, and the category's comments. Everything starts No Abnormalities; one button does
+  // all of it, one does Alert and Oriented x4.
+  const AX_COMMENTS = { MentalStatus: 'mentalStatusSection.comments', Skin: 'skinSection.comments', HEENT: 'heentSection.comments', Chest: 'chestSection.comments', Abdomen: 'abdomenSection.comments', Back: 'backSection.comments', PelvisGUGI: 'pelvisGuGiSection.comments', Extremities: 'extremitiesSection.comments', Neurological: 'neurologicalSection.comments', Neonatal: 'neonatalSection.comments' };
+  const axAreas = (A, catId) => { const subs = A.subCategories.filter(s => s.categoryId === catId); return A.top.map(id => A.locations.find(l => l.id === id)).filter(l => l && subs.some(s => s.id === l.sub)); };
   function assessmentUi(it) {
     const A = typeof ESOSAVE_ASSESS !== 'undefined' ? ESOSAVE_ASSESS : null;
     if (!A) return '<div class="muted">The assessment layout is not available.</div>';
     const fname = (id) => (A.findings.find(f => f.id === id) || {}).n || id.replace(/_/g, ' ');
     const at = (loc) => (it.findings || []).filter(f => f.loc === loc);
-    const state = (loc) => { const fs = at(loc); if (!fs.length) return ['', 'Not set (written Not Assessed)']; if (fs.length === 1 && fs[0].id === 'No_Abnormalities') return ['ok', 'No abnormalities']; if (fs.length === 1 && fs[0].id === 'Not_Assessed') return ['na', 'Not assessed']; return ['ab', fs.map(f => fname(f.id)).join(', ')]; };
-    const open = it._open || null;
-    let html = `<div class="ax"><div class="muted" style="margin:4px 0 10px">Everything starts as No Abnormalities. Tap an area to mark what is wrong there, from the findings ESO has for that area, or set it Not Assessed.</div>`;
-    for (const c of A.categories) {
-      const subs = A.subCategories.filter(s => s.categoryId === c.id);
-      const locs = A.top.map(id => A.locations.find(l => l.id === id)).filter(l => l && subs.some(s => s.id === l.sub));
-      if (!locs.length) continue;
-      html += `<h4 style="margin:12px 0 4px">${esc(c.name)}</h4>`;
-      for (const l of locs) {
-        const [cls, text] = state(l.id);
-        const colour = cls === 'ok' ? '#15803d' : cls === 'ab' ? '#b91c1c' : cls === 'na' ? '#64748b' : '#b45309';
-        html += `<div class="loc" style="grid-template-columns:minmax(140px,1fr) minmax(160px,2fr) auto"><span>${esc(locs.length > 1 || l.n !== c.name ? l.n : c.name)}</span><span style="color:${colour};font-weight:600">${esc(text)}</span><button type="button" class="tb sec" data-area="${esc(l.id)}" style="padding:6px 12px;min-height:36px">${open === l.id ? 'Close' : 'Change'}</button></div>`;
-        if (open === l.id) {
-          const chosen = new Set(at(l.id).map(f => f.id));
-          const offered = (A.byArea && A.byArea[l.id]) || [];
-          const orient = l.id === 'MentalStatus' ? (A.orientation || []) : [];
-          html += `<div style="background:#fff;border:1px solid #cbd5e1;border-radius:10px;padding:10px;margin:4px 0 10px">
-            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px"><button type="button" class="tb ${chosen.has('No_Abnormalities') ? 'pri' : 'sec'}" data-set="${esc(l.id)}|No_Abnormalities">No abnormalities</button><button type="button" class="tb ${chosen.has('Not_Assessed') ? 'pri' : 'sec'}" data-set="${esc(l.id)}|Not_Assessed">Not assessed</button></div>
-            ${orient.length ? `<div style="font-weight:700;margin:6px 0 4px">Oriented to</div><div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">${orient.map(id => `<label style="display:flex;gap:6px;align-items:center;border:1px solid #cbd5e1;border-radius:20px;padding:6px 12px"><input type="checkbox" data-find="${esc(l.id)}|${esc(id)}" ${chosen.has(id) ? 'checked' : ''}> ${esc(fname(id).replace(/^Oriented /i, ''))}</label>`).join('')}</div>` : ''}
-            <div style="font-weight:700;margin:6px 0 4px">What is wrong</div>
-            <div style="display:flex;gap:8px;flex-wrap:wrap">${offered.filter(id => !orient.includes(id)).map(id => `<label style="display:flex;gap:6px;align-items:center;border:1px solid #cbd5e1;border-radius:20px;padding:6px 12px;background:${chosen.has(id) ? '#fee2e2' : '#fff'}"><input type="checkbox" data-find="${esc(l.id)}|${esc(id)}" ${chosen.has(id) ? 'checked' : ''}> ${esc(fname(id))}</label>`).join('')}</div>
-          </div>`;
-        }
-      }
+    const has = (loc, id) => at(loc).find(f => f.id === id);
+    const cats = A.categories.filter(c => axAreas(A, c.id).length);
+    if (!it._cat || !cats.some(c => c.id === it._cat)) it._cat = cats[0].id;
+    const catState = (c) => { const areas = axAreas(A, c.id); const fs = areas.flatMap(l => at(l.id)); if (fs.some(f => f.id !== 'No_Abnormalities' && f.id !== 'Not_Assessed')) return '#b91c1c'; if (areas.every(l => has(l.id, 'No_Abnormalities'))) return '#15803d'; if (fs.some(f => f.id === 'Not_Assessed')) return '#64748b'; return '#b45309'; };
+    const idx = ed.items.indexOf(it);
+    let html = `<div class="ax"><div style="display:flex;gap:8px;flex-wrap:wrap;margin:4px 0 10px"><button type="button" class="tb sec" data-allnormal>All No Abnormalities</button><button type="button" class="tb sec" data-allna>All Not Assessed</button><button type="button" class="tb sec" data-aox4>Alert and Oriented x4</button><button type="button" class="tb sec" data-axclear>Clear all</button></div>
+      <div style="display:flex;gap:12px;align-items:flex-start"><div style="min-width:150px;display:flex;flex-direction:column;gap:4px">${cats.map(c => `<button type="button" data-cat="${esc(c.id)}" style="text-align:left;border:0;border-radius:8px;padding:10px 12px;font:inherit;font-weight:700;cursor:pointer;background:${it._cat === c.id ? '#22c55e' : '#f1f5f9'};color:${it._cat === c.id ? '#fff' : '#334155'};display:flex;align-items:center;gap:8px"><span style="width:10px;height:10px;border-radius:5px;background:${catState(c)};flex:none"></span>${esc(c.name.toUpperCase())}</button>`).join('')}</div>
+      <div style="flex:1;min-width:0">`;
+    const cat = cats.find(c => c.id === it._cat);
+    for (const l of axAreas(A, cat.id)) {
+      const ok = !!has(l.id, 'No_Abnormalities'), na = !!has(l.id, 'Not_Assessed');
+      const offered = (A.byArea && A.byArea[l.id]) || [];
+      const orient = l.id === 'MentalStatus' ? (A.orientation || []) : [];
+      const toggle = (id) => { const f = has(l.id, id); const on = f && f.present !== false, off = f && f.present === false; return `<span style="display:inline-flex;border:1px solid #cbd5e1;border-radius:20px;overflow:hidden"><button type="button" data-tog="${esc(l.id)}|${esc(id)}|1" title="Present" style="border:0;padding:6px 12px;font:inherit;font-weight:700;cursor:pointer;background:${on ? '#22c55e' : '#fff'};color:${on ? '#fff' : '#64748b'}">✓</button><button type="button" data-tog="${esc(l.id)}|${esc(id)}|0" title="Not present" style="border:0;border-left:1px solid #cbd5e1;padding:6px 12px;font:inherit;font-weight:700;cursor:pointer;background:${off ? '#ef4444' : '#fff'};color:${off ? '#fff' : '#64748b'}">✕</button></span>`; };
+      html += `<div style="border:1px solid #e2e8f0;border-radius:10px;margin:0 0 10px;background:#fff">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 12px;background:#f1f5f9;border-radius:10px 10px 0 0"><b style="flex:1;font-size:16px">${esc(l.n === 'General' ? cat.name : l.n)}</b>
+          <button type="button" class="tb ${ok ? 'pri' : 'sec'}" data-set="${esc(l.id)}|No_Abnormalities" style="border-radius:22px">${ok ? '● ' : '○ '}No Abnormalities</button><button type="button" class="tb ${na ? 'pri' : 'sec'}" data-set="${esc(l.id)}|Not_Assessed" style="border-radius:22px">${na ? '● ' : '○ '}Not Assessed</button></div>
+        <div style="padding:8px 12px 12px">
+          ${orient.length ? `<div style="font-weight:700;color:#334155;margin:4px 0 6px">Orientation</div><div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px">${orient.map(id => `<span style="display:flex;align-items:center;gap:8px">${toggle(id)} ${esc(fname(id).replace(/^Oriented /i, ''))}</span>`).join('')}</div>` : ''}
+          <div style="font-weight:700;color:#334155;margin:4px 0 6px">Findings</div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:6px 16px">${offered.filter(id => !orient.includes(id)).map(id => `<span style="display:flex;align-items:center;gap:8px">${toggle(id)} <span>${esc(fname(id))}</span></span>`).join('')}</div>
+        </div></div>`;
     }
-    const cm = memberFields('assessments.assessmentsV2').filter(m => /comments$/i.test(m.rel));
-    if (cm.length) html += '<h4>Comments</h4>' + cm.map(m => `<div class="tf ${it.fields[m.rel] ? 'on' : ''}" data-key="${esc(String(ed.items.indexOf(it)))}|${esc(m.rel)}"><input type="checkbox" data-sel ${it.fields[m.rel] ? 'checked' : ''}><div class="fl">${esc(humanize(m.rel.split('.')[0].replace(/Section$/, '')))}</div><div>${inputFor(m, it.fields[m.rel] ? it.fields[m.rel].v : null)}</div></div>`).join('');
-    return html + '</div>';
+    const cm = AX_COMMENTS[cat.id]; const cmf = cm && memberFields('assessments.assessmentsV2').find(m => m.rel === cm);
+    if (cmf) html += `<div style="font-weight:700;color:#334155;margin:4px 0 6px">Comments</div><div class="tf ${it.fields[cm] ? 'on' : ''}" data-key="${esc(String(idx))}|${esc(cm)}" style="grid-template-columns:34px 1fr"><input type="checkbox" data-sel ${it.fields[cm] ? 'checked' : ''}><div>${inputFor(cmf, it.fields[cm] ? it.fields[cm].v : null)}</div></div>`;
+    return html + '</div></div></div>';
   }
   function fieldDef(key) {
     // key: an address, or "<item index>|<member rel>"
@@ -3083,20 +3085,29 @@
     W.querySelectorAll('[data-remove]').forEach(b => b.addEventListener('click', () => { const i = Number(b.closest('.item').dataset.item); ed.items.splice(i, 1); renderEditor(); }));
     W.querySelectorAll('[data-allnormal]').forEach(b => b.addEventListener('click', () => { const it = ed.items[Number(b.closest('.item').dataset.item)]; const A = ESOSAVE_ASSESS; it.findings = A.top.map(id => ({ loc: id, id: 'No_Abnormalities' })); renderEditor(); }));
     W.querySelectorAll('[data-allna]').forEach(b => b.addEventListener('click', () => { const it = ed.items[Number(b.closest('.item').dataset.item)]; const A = ESOSAVE_ASSESS; it.findings = A.top.map(id => ({ loc: id, id: 'Not_Assessed' })); renderEditor(); }));
-    W.querySelectorAll('[data-area]').forEach(b => b.addEventListener('click', () => { const it = ed.items[Number(b.closest('.item').dataset.item)]; it._open = it._open === b.dataset.area ? null : b.dataset.area; renderEditor(); }));
+    W.querySelectorAll('[data-cat]').forEach(b => b.addEventListener('click', () => { const it = ed.items[Number(b.closest('.item').dataset.item)]; it._cat = b.dataset.cat; renderEditor(); }));
     W.querySelectorAll('[data-set]').forEach(b => b.addEventListener('click', () => {
       const it = ed.items[Number(b.closest('.item').dataset.item)]; const [loc, id] = b.dataset.set.split('|');
-      it.findings = (it.findings || []).filter(f => f.loc !== loc).concat([{ loc, id }]);
+      const was = (it.findings || []).some(f => f.loc === loc && f.id === id);
+      it.findings = (it.findings || []).filter(f => f.loc !== loc);
+      if (!was) it.findings.push({ loc, id });
       renderEditor();
     }));
-    W.querySelectorAll('[data-find]').forEach(cb => cb.addEventListener('change', () => {
-      const it = ed.items[Number(cb.closest('.item').dataset.item)]; const [loc, id] = cb.dataset.find.split('|');
-      // a finding replaces No Abnormalities / Not Assessed on that area; the last one taken off puts No Abnormalities back
+    W.querySelectorAll('[data-tog]').forEach(b => b.addEventListener('click', () => {
+      const it = ed.items[Number(b.closest('.item').dataset.item)]; const [loc, id, on] = b.dataset.tog.split('|'); const present = on === '1';
+      const cur = (it.findings || []).find(f => f.loc === loc && f.id === id);
+      // a finding, present or not, takes the place of No Abnormalities / Not Assessed on its area; the same button again clears it
       it.findings = (it.findings || []).filter(f => !(f.loc === loc && (f.id === id || f.id === 'No_Abnormalities' || f.id === 'Not_Assessed')));
-      if (cb.checked) it.findings.push({ loc, id });
-      if (!it.findings.some(f => f.loc === loc)) it.findings.push({ loc, id: 'No_Abnormalities' });
+      if (!(cur && (cur.present !== false) === present)) it.findings.push({ loc, id, present });
       renderEditor();
     }));
+    W.querySelectorAll('[data-aox4]').forEach(b => b.addEventListener('click', () => {
+      const it = ed.items[Number(b.closest('.item').dataset.item)]; const A = ESOSAVE_ASSESS;
+      it.findings = (it.findings || []).filter(f => !(f.loc === 'MentalStatus' && ((A.orientation || []).includes(f.id) || f.id === 'No_Abnormalities' || f.id === 'Not_Assessed')));
+      for (const id of (A.orientation || [])) it.findings.push({ loc: 'MentalStatus', id, present: true });
+      it._cat = 'MentalStatus'; renderEditor();
+    }));
+    W.querySelectorAll('[data-axclear]').forEach(b => b.addEventListener('click', () => { const it = ed.items[Number(b.closest('.item').dataset.item)]; it.findings = []; renderEditor(); }));
     // field rows
     W.querySelectorAll('.tf').forEach(row => {
       const key = row.dataset.key; const d = fieldDef(key); if (!d) return;
@@ -3156,7 +3167,7 @@
     // an item without its key (a treatment with no treatment picked, an empty vital) cannot be written
     const empty = ed.items.filter(it => !(it.kind === 'vital' || it.kind === 'assessment' ? (it.kind === 'assessment' ? (it.findings || []).length || Object.keys(it.fields).length : Object.keys(it.fields).length) : it.fields[ITEM_KEY[it.kind]]));
     if (empty.length) { alert(`ESO Save: ${empty.length === 1 ? 'one item is' : empty.length + ' items are'} empty (${empty.map(it => ITEM_ONE[it.kind] || it.kind).join(', ')}): pick ${empty.some(it => ITEM_KEY[it.kind]) ? 'what it is' : 'at least one value'}, or remove it.`); return; }
-    const items = ed.items.map(it => { const { _open, ...rest } = it; return rest; });
+    const items = ed.items.map(it => { const { _open, _cat, ...rest } = it; return rest; });
     let body = { v: 1, fields: ed.fields, items };
     if (!isAdmin()) { const r = applyLocks(body); body = r.body; }
     if (!Object.keys(body.fields).length && !body.items.length) { alert('ESO Save: the template is empty. Tick at least one field.'); return; }
