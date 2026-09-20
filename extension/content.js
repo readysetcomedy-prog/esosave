@@ -1139,16 +1139,16 @@
     mainScrollerCache = { at: Date.now(), el };
     return el;
   }
-  function sheetFor(key) {
+  function sheetFor(key, anchor) {
     const gk = key.split(':')[0];
-    if (CHIP_GROUPS[gk] && CHIP_GROUPS[gk].form) return quickSheet();
+    if (CHIP_GROUPS[gk] && CHIP_GROUPS[gk].form) { const sp = anchor ? scrollParent(anchor) : null; return sp ? rideFor(sp).quick : quickSheet(); }
     const ms = mainScroller();
     return ms ? rideFor(ms).quick : quickSheet();
   }
-  function quickEl(key, make) {
+  function quickEl(key, make, anchor) {
     let el = quickEls.get(key);
     if (!el) { el = make(); quickEls.set(key, el); }
-    const sheet = sheetFor(key);
+    const sheet = sheetFor(key, anchor);
     if (el.parentNode !== sheet) sheet.appendChild(el);
     return el;
   }
@@ -1240,7 +1240,7 @@
     const gap = 6, rowH = 34;
     let x = r.left + r.width + 12, y = r.top + (r.height - 28) / 2, row = 0;
     const under = r.bottom;
-    const layer = quickSheet();
+    void quickSheet();
     const els = [];
     for (const [short, name, id] of [...g.chips, ...(g.noOther ? [] : [['Other…', null, 'other']])]) {
       const chip = quickEl(`${gk}:${id}`, () => {
@@ -1248,14 +1248,14 @@
         c.addEventListener('pointerdown', (e) => e.stopPropagation());
         c.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); if (id === 'other') openNative(gk); else tapChip(gk, name, id); });
         return c;
-      });
+      }, btn);
       chip.classList.toggle('added', id === 'all' ? g.all.every(n => isOn(n)) : id !== 'other' && isOn(name, id));
       chip.classList.toggle('on', id === 'all' ? g.all.some(n => pend(gk).has(n)) : id !== 'other' && pend(gk).has(name));
       chip.classList.toggle('off', id !== 'other' && id !== 'all' && pendOff(gk).has(name));
       chip.classList.toggle('busy', quickBusy);
       chip.style.display = 'block';
       chip.style.visibility = 'hidden';
-      layer.appendChild(chip);
+      { const sh = sheetFor(`${gk}:${id}`, btn); if (chip.parentNode !== sh) sh.appendChild(chip); }
       if (g.field) { els.push(chip); continue; }
       const w = chip.getBoundingClientRect().width || 60;
       if (x + w > right) { row++; x = r.left; y = under + 8 + (row - 1) * rowH; }
@@ -1516,7 +1516,7 @@
     const fr0 = firstField ? firstField.getBoundingClientRect() : lr;
     const left = Math.min(pr.left, fr0.left), right = Math.max(pr.right, fr0.right, lr.right - 8);
     let x = left, y = pr.bottom + 8, row = 0;
-    const layer = quickSheet();
+    void quickSheet();
     for (const fac of chosen) {
       const chip = quickEl(`f:${gk}:${fac.id}`, () => {
         const c = document.createElement('button'); c.type = 'button'; c.className = 'chip' + (fac.id === 'other' ? ' other' : ''); c.textContent = fac.label || fac.name; c.title = fac.name; c.dataset.group = 'fac-' + gk;
@@ -1527,7 +1527,7 @@
       chip.classList.toggle('added', fac.id !== 'other' && current.toUpperCase() === fac.name.toUpperCase());
       chip.classList.toggle('busy', quickBusy);
       chip.style.display = 'block'; chip.style.visibility = 'hidden';
-      layer.appendChild(chip);
+      { const sh = sheetFor(`f:${gk}:${fac.id}`); if (chip.parentNode !== sh) sh.appendChild(chip); }
       const w = chip.getBoundingClientRect().width || 120;
       if (x + w > right && x > left) { row++; x = left; y = pr.bottom + 8 + row * rowH; }
       chip.style.left = Math.round(x) + 'px'; chip.style.top = Math.round(y) + 'px';

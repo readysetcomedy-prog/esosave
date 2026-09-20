@@ -1007,6 +1007,8 @@ test('every quick button scrolls under ESO\'s banner: the layers are clipped at 
   // the rows ride inside ESO's scrolling container (no script moves them during a scroll), so the
   // container's own edge takes them under the bar
   assert.ok(await T.page.evaluate(() => { const r = window.__q('.quick [data-group=sr-primary]'); return r && r.getRootNode().host.classList.contains('esosave-ride') && r.getRootNode().host.parentElement === document.getElementById('scroller'); }), 'the row lives in the scroller');
+  await waitFor(() => T.page.evaluate(() => !!window.__q('.quick .chip[data-group=toStretcher]')), { label: 'transport chips' });
+  assert.ok(await T.page.evaluate(() => window.__qa('.quick .chip').every(c => c.getRootNode().host.parentElement === document.getElementById('scroller'))), 'every chip lives in the scroller too, never the fixed overlay');
   // after the scroll settles, and after the regular re-layout ticks, a row still sits under its label
   const under = () => T.page.evaluate(() => { const f = document.querySelector('eso-field[data-field-ref=PRIMARYIMPRESSIONID]'); const lab = f.querySelector('label').getBoundingClientRect(); const c = window.__q('.quick [data-group=sr-primary]').getBoundingClientRect(); return Math.round(c.top - lab.bottom); });
   await sleep(900);
