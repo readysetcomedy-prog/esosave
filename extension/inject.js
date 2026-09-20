@@ -27,7 +27,7 @@
   if (ext) return;
   if (window.__esosave) return;
 
-  const VERSION = '0.15.9';
+  const VERSION = '0.15.10';
   const API_PREFIX_RE = /^\/ehr\/api\/+/i;
   const FAKE_OK_TEXT = '{"result":"Success","data":[]}';
   const PROBE_PATH = '/ehr/api/thirdpartydata/partners';
@@ -313,7 +313,7 @@
   function summarize(res) {
     const j = tryJSON(res.text);
     const msg = j && (j.message || j.error || j.responseStatus?.message || (Array.isArray(j.errors) && j.errors.join('; ')));
-    return `HTTP ${res.status}${msg ? ': ' + String(msg).slice(0, 300) : (res.text ? ': ' + res.text.slice(0, 200) : '')}`;
+    return `HTTP ${res.status}${msg ? ': ' + String(msg).slice(0, 300) : (res.text ? ': ' + String(res.text).replace(/\s+/g, ' ').slice(0, 300) : '')}`;
   }
 
   // ------------------------------------------------------------------ connectivity
@@ -1301,7 +1301,19 @@
       return { ok: true, held: true };
     }
     if (o === 'auth') setLoggedOut(true);
-    return { ok: false, error: `ESO refused the ${what}: ${summarize(res)}` };
+    return { ok: false, error: `ESO refused the ${what}: ${summarize(res)}`, status: res.status, body: res.text };
+  }
+  // The same, but a 400 on a batch of several ops is split in halves until the ops ESO refuses
+  // stand alone: they are left out and named, everything else is written. (ESO takes or refuses
+  // a batch whole, so nothing is written twice.)
+  async function saveOpsIsolating(run, scope, ops, what, kind) {
+    const r = await saveOps(run, scope, ops, what, kind);
+    if (r.ok || r.status !== 400) return { ...r, refused: [] };
+    if (ops.length === 1) return { ok: true, held: false, refused: [{ op: ops[0], error: summarize({ status: r.status, text: r.body }) }] };
+    const mid = Math.ceil(ops.length / 2);
+    const a = await saveOpsIsolating(run, scope, ops.slice(0, mid), what, kind); if (!a.ok) return a;
+    const b = await saveOpsIsolating(run, scope, ops.slice(mid), what, kind); if (!b.ok) return b;
+    return { ok: true, held: !!(a.held || b.held), refused: a.refused.concat(b.refused) };
   }
   async function fillFacesheet(a) {
     const run = S.runs[a.recordId];
@@ -1336,7 +1348,8 @@
     if (v === null || v === undefined || v === '') return null;
     if (t === 'integer') return typeof v === 'number' ? v : (String(v).trim() !== '' && !isNaN(Number(v)) ? Number(v) : v);
     if (t === 'boolean') return v === true || v === 'true' || v === 1;
-    if (t === 'string' || t === 'number' || t === 'phone' || t === 'ssn' || t === 'pertinentNegative') return String(v); // the app sends these as text, a pertinent negative's id included
+    if (t === 'string' || t === 'number' || t === 'phone' || t === 'ssn') return String(v); // the app sends these as text
+    if (t === 'pertinentNegative') return typeof v === 'string' && /^\d+$/.test(v) ? Number(v) : v; // recorded: the id as a number
     return v;
   }
   function templateOps(body, withItems) {
@@ -1348,6 +1361,10 @@
       const v = templateValue(f.t, f.v); if (v === null) continue;
       push({ verb: 'EDIT', address: a, fieldRef: f.r, value: v, dataType: f.t });
     }
+    // a field that only shows once another is answered (a refusal reason after the disposition) must follow it, as it would from the screen: plain edits first, in ESO's own field order, then the multi-pick adds
+    const order = new Map(((S.catalog && S.catalog.fields) || []).map((f, i) => [f.a, i]));
+    const rank = (op) => (op.verb === 'ADD' ? 1e6 : 0) + (order.has(op.address.replace(/\.\['[^']*'\]$/, '')) ? order.get(op.address.replace(/\.\['[^']*'\]$/, '')) : 5e5);
+    for (const sc of Object.keys(byScope)) byScope[sc].sort((x, y) => rank(x) - rank(y));
     for (const it of (withItems === false ? [] : (body.items || []))) {
       if (!it || !it.root || !it.r) continue;
       const k = uuid(), base = `${it.root}.['${k}']`, F = it.fields || {}, used = new Set();
@@ -1386,18 +1403,21 @@
     const scopes = Object.keys(byScope).sort((x, y) => SCOPE_ORDER.indexOf(x) - SCOPE_ORDER.indexOf(y));
     const total = scopes.reduce((n, sc) => n + byScope[sc].length, 0);
     if (!total) return fail('The template is empty.');
-    let done = 0, held = false;
+    let done = 0, held = false; const refused = [], written = [];
+    const fieldName = (op) => { const addr = op.address.replace(/\.\['[^']*'\]/g, ''); const f = ((S.catalog && S.catalog.fields) || []).find(x => x.a === addr || x.a === addr.replace(/\.[^.]+$/, '')); return f ? f.n : addr; };
     post('event', { name: 'templateProgress', recordId: a.recordId, done, total, scope: scopes[0] });
     for (const sc of scopes) {
-      const r = await saveOps(run, sc, byScope[sc], sc + ' tab', 'template');
-      if (!r.ok) { log(run, `Template "${a.tplName || ''}": could not fill the ${sc} tab. ${r.error}`, 'error'); return fail(r.error); }
+      const r = await saveOpsIsolating(run, sc, byScope[sc], sc + ' tab', 'template');
+      if (!r.ok) { log(run, `Template "${a.tplName || ''}": could not fill the ${sc} tab. ${r.error}${r.body ? ' Body: ' + String(r.body).slice(0, 1000) : ''}`, 'error'); return post('event', { name: 'templateFilled', recordId: a.recordId, ok: false, error: r.error, written, refused }); }
       if (r.held) held = true;
+      for (const x of r.refused) { refused.push({ scope: sc, name: fieldName(x.op), address: x.op.address, error: x.error }); log(run, `Template "${a.tplName || ''}": ESO would not take ${fieldName(x.op)} (${x.op.address}) on the ${sc} tab: ${x.error}. Left out.`, 'warn'); }
+      written.push(sc);
       done += byScope[sc].length;
       post('event', { name: 'templateProgress', recordId: a.recordId, done, total, scope: sc, held });
     }
     if (a.tplId) { run.tplFilled = run.tplFilled || {}; run.tplFilled[a.tplId] = Date.now(); persist(run); }
-    log(run, `Template "${a.tplName || ''}": filled ${total} fields across ${scopes.length} tab${scopes.length === 1 ? '' : 's'}${held ? '; held until ESO answers' : ''}.`, held ? 'warn' : 'good');
-    post('event', { name: 'templateFilled', recordId: a.recordId, ok: true, held, total, scopes });
+    log(run, `Template "${a.tplName || ''}": filled ${total - refused.length} fields across ${scopes.length} tab${scopes.length === 1 ? '' : 's'}${refused.length ? `; ${refused.length} refused by ESO and left out` : ''}${held ? '; held until ESO answers' : ''}.`, refused.length || held ? 'warn' : 'good');
+    post('event', { name: 'templateFilled', recordId: a.recordId, ok: true, held, total: total - refused.length, scopes, refused });
   }
 
   // Blank views of a freshly created run, kept so a run can be started with no signal at all.

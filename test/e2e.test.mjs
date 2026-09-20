@@ -1874,6 +1874,30 @@ test('templates: made from ESO\'s own field catalog, saved under the person\'s i
   assert.equal(t2.vitals.vitalSigns.length, 1, 'no second vital'); assert.equal(t2.assessments.assessmentsV2.length, 1, 'no second assessment'); assert.equal(Object.keys(t2.patient.patientMedicalHistories).length, 1, 'no second history entry');
 });
 
+test('templates: a field ESO refuses is left out and named to the medic; everything else in the template still goes in', async () => {
+  await T.control({ userName: 'TEST, MEDIC', userId: 'person-1', rejectValue: 326 }); // ESO refuses the Run Type the template carries
+  const id = await freshRun();
+  const dialogs = []; const onDialog = (d) => { dialogs.push(d.message()); d.dismiss().catch(() => {}); }; T.page.on('dialog', onDialog);
+  try {
+    await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.bar [data-act=templates]').click());
+    await waitFor(() => tw('h1'), { label: 'window' });
+    await twClickText('.tpl [data-act=fill]', 'Fill this run');
+    await waitFor(async () => /Fill this run from "Chest pain"/.test(await T.page.evaluate(() => (document.getElementById('esosave-host').shadowRoot.querySelector('.veil .askbox') || {}).textContent || '')), { label: 'question' });
+    await T.page.evaluate(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.askbox button')).find(b => /Yes, fill it/.test(b.textContent)).click());
+    const tree = async () => (await T.record(id)).tree;
+    await waitFor(async () => { const t = await tree(); return /Pt c\/o chest pain/.test(t.narrative?.narrative?.narrativeText || '') && t.incident?.response?.priorityId === 330; }, { label: 'the rest filled', timeout: 30000 });
+    await waitFor(() => dialogs.length, { label: 'the medic is told' });
+    assert.match(dialogs[0], /ESO would not take 1 thing from "Chest pain"[\s\S]*Run Type \(incident tab\): HTTP 400: Rejected value 326[\s\S]*Everything else went in/);
+    const t = await tree();
+    assert.equal(t.incident.response.runTypeId ?? null, null, 'the refused field stayed out');
+    assert.equal(t.vitals.vitalSigns.length, 1, 'the items still went in');
+    const ops = (await T.record(id)).ops.filter(o => /runTypeId/.test(o.address));
+    assert.equal(ops.length, 0, 'nothing of the refused op landed');
+    const log = (await T.run(id)).log.map(l => l.msg).join('\n');
+    assert.match(log, /ESO would not take Run Type \(incident.response.runTypeId\) on the incident tab: HTTP 400: Rejected value 326\. Left out\./);
+  } finally { T.page.off('dialog', onDialog); await T.control({ rejectValue: null }); }
+});
+
 test('templates: shared to everyone or to named people show up for them, named after who shared them; a copy becomes theirs', async () => {
   await T.control({ userName: 'TEST, MEDIC', userId: 'person-1' });
   await freshRun();

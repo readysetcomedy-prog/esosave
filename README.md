@@ -171,7 +171,9 @@ to bad signal or a hung page.
   filled in from the run. Filling needs an open, unlocked
   run: a question first, then a progress bar as each tab is written with the same saves ESO's
   app makes, replacing what is there; with no signal it is held like any save and pushed
-  later. The list seen last is kept on the device, so it works with no signal.
+  later. Should ESO refuse a tab's batch (HTTP 400), the batch is split until the refused
+  fields stand alone: they are left out and named to the medic with ESO's own reason (and
+  written to the run's log with ESO's full reply), and everything else still goes in. The list seen last is kept on the device, so it works with no signal.
 - **Copy a vital.** A small copy button floats just left of each saved vital's time in the Vitals
   tab; tapping it re-enters that vital as a new one with the current time, every other value the
   same. Only fields the app itself has been seen saving are copied, and the run log names any that

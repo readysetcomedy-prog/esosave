@@ -3340,7 +3340,8 @@
   async function onTemplateFilled(p) {
     const name = tplFilling ? tplFilling.name : 'the template'; tplFilling = null;
     hideVeil();
-    if (!p.ok) { const m = /^ESO refused the (\w+) tab: (HTTP \d+)/.exec(p.error || ''); alert(m ? `ESO Save: ESO would not take the ${m[1]} tab from "${name}" (${m[2]}). The other tabs before it were filled. Open that tab, check what the template puts there, and tell Michael which template it was.` : `ESO Save: could not fill from "${name}". ${p.error || ''}`); return; }
+    if (!p.ok) { const m = /^ESO refused the (\w+) tab: (HTTP \d+)(.*)$/.exec(p.error || ''); const w = p.written || []; alert(m ? `ESO Save: ESO would not take the ${m[1]} tab from "${name}" (${m[2]}${m[3] || ''}). ${w.length ? `Written before it: ${w.join(', ')}. Nothing after it was written.` : 'Nothing was written.'} Tell Michael which template it was; the details are in the ESO Save log.` : `ESO Save: could not fill from "${name}". ${p.error || ''}`); return; }
+    if (p.refused && p.refused.length) alert(`ESO Save: ESO would not take ${p.refused.length} thing${p.refused.length === 1 ? '' : 's'} from "${name}" and ${p.refused.length === 1 ? 'it was' : 'they were'} left out:\n${p.refused.map(r => `• ${r.name} (${r.scope} tab): ${r.error}`).join('\n')}\nEverything else went in. Tell Michael; the details are in the ESO Save log.`);
     // the app shows what it has loaded: step off the open tab and back so it re-reads it
     const id = lastStatus && lastStatus.currentRecordId;
     const here = lastStatus && lastStatus.lastView && lastStatus.lastView.recordId === id ? lastStatus.lastView.view : null;
