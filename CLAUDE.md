@@ -11,7 +11,8 @@ are the agency's: one `__agency__` row in the table, changed only by the agency 
 (`ADMIN` in `extension/content.js`) and shown greyed out to everyone else. **Open** ones (the quick-button
 toggles and the facility chips, the `OPEN_SETTINGS` list in `extension/content.js`) may be changed
 by the crew and follow the ESO login through the `esosave_users` table. The paperwork scanner
-(`scanDocs`) and the vitals-copy groups (`vitalCopySkip`) are open.
+(`scanDocs`) and the vitals-copy groups (`vitalCopySkip`) are open; the template locks
+(`tplLocks`, keys a fill leaves out) are locked.
 
 **Before adding any new setting, ask the repo owner whether it is locked or open.** Do not guess.
 

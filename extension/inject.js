@@ -27,7 +27,7 @@
   if (ext) return;
   if (window.__esosave) return;
 
-  const VERSION = '0.15.1';
+  const VERSION = '0.15.3';
   const API_PREFIX_RE = /^\/ehr\/api\/+/i;
   const FAKE_OK_TEXT = '{"result":"Success","data":[]}';
   const PROBE_PATH = '/ehr/api/thirdpartydata/partners';
@@ -1335,10 +1335,11 @@
     if (v === null || v === undefined || v === '') return null;
     if (t === 'integer') return typeof v === 'number' ? v : (String(v).trim() !== '' && !isNaN(Number(v)) ? Number(v) : v);
     if (t === 'boolean') return v === true || v === 'true' || v === 1;
-    if (t === 'string' || t === 'number' || t === 'phone' || t === 'ssn') return String(v);
+    if (t === 'string' || t === 'number' || t === 'phone' || t === 'ssn' || t === 'pertinentNegative') return String(v); // the app sends these as text, a pertinent negative's id included
     return v;
   }
-  function templateOps(body) {
+  const ASSESS_TOP = ['MentalStatus', 'Skin', 'Head', 'Face', 'Eyes', 'Neck', 'GeneralAnterior', 'LeftAnterior', 'RightAnterior', 'LeftSide', 'RightSide', 'GeneralPosterior', 'HeartSounds', 'LungSounds_Bilateral', 'LungSounds_LU', 'LungSounds_RU', 'LungSounds_LL', 'LungSounds_RL', 'AbdomenGeneral', 'BackGeneral', 'PelvisGUGI', 'ArmWholeArmAndHandLeft', 'ArmWholeArmAndHandRight', 'LegWholeLegAndFootLeft', 'LegWholeLegAndFootRight', 'Neurological'];
+  function templateOps(body, withItems) {
     const byScope = {};
     const push = (op) => { const sc = op.address.split('.')[0]; (byScope[sc] = byScope[sc] || []).push(op); };
     for (const [a, f] of Object.entries(body.fields || {})) {
@@ -1347,7 +1348,7 @@
       const v = templateValue(f.t, f.v); if (v === null) continue;
       push({ verb: 'EDIT', address: a, fieldRef: f.r, value: v, dataType: f.t });
     }
-    for (const it of (body.items || [])) {
+    for (const it of (withItems === false ? [] : (body.items || []))) {
       if (!it || !it.root || !it.r) continue;
       const k = uuid(), base = `${it.root}.['${k}']`, F = it.fields || {}, used = new Set();
       const val = (rel) => { const f = F[rel]; used.add(rel); return f ? templateValue(f.t, f.v) : null; };
@@ -1368,9 +1369,13 @@
         const v = templateValue(f.t, f.v); if (v === null) continue;
         push({ verb: 'EDIT', address: `${base}.${rel}`, fieldRef: f.r, value: v, dataType: f.t });
       }
-      for (const fd of (it.findings || [])) {
-        if (!fd || !fd.loc || !fd.id) continue;
-        push({ verb: 'ADD', address: `${base}.findings.['${uuid()}']`, fieldRef: 'ASSESSMENT2FINDINGS', value: { findingId: fd.id, findingLocationId: fd.loc, present: true }, dataType: 'binary', isComplexType: true });
+      if (it.kind === 'assessment') {
+        // as ESO starts one: a finding on each of its areas, Not Assessed where the template says nothing
+        const chosen = (it.findings || []).filter(fd => fd && fd.loc && fd.id && ASSESS_TOP.includes(fd.loc));
+        for (const loc of ASSESS_TOP) {
+          const fd = chosen.find(x => x.loc === loc);
+          push({ verb: 'ADD', address: `${base}.findings.['${uuid()}']`, fieldRef: 'ASSESSMENT2FINDINGS', value: { findingId: fd ? fd.id : 'Not_Assessed', findingLocationId: loc, present: true }, dataType: 'binary', isComplexType: true });
+        }
       }
     }
     return byScope;
@@ -1381,7 +1386,7 @@
     const fail = (error) => post('event', { name: 'templateFilled', recordId: a.recordId, ok: false, error });
     if (!run) return fail('Run not found.');
     if (run.locked) return fail('The run is locked.');
-    const byScope = templateOps(a.body || {});
+    const byScope = templateOps(a.body || {}, a.items !== false);
     const scopes = Object.keys(byScope).sort((x, y) => SCOPE_ORDER.indexOf(x) - SCOPE_ORDER.indexOf(y));
     const total = scopes.reduce((n, sc) => n + byScope[sc].length, 0);
     if (!total) return fail('The template is empty.');
@@ -1394,6 +1399,7 @@
       done += byScope[sc].length;
       post('event', { name: 'templateProgress', recordId: a.recordId, done, total, scope: sc, held });
     }
+    if (a.tplId) { run.tplFilled = run.tplFilled || {}; run.tplFilled[a.tplId] = Date.now(); persist(run); }
     log(run, `Template "${a.tplName || ''}": filled ${total} fields across ${scopes.length} tab${scopes.length === 1 ? '' : 's'}${held ? '; held until ESO answers' : ''}.`, held ? 'warn' : 'good');
     post('event', { name: 'templateFilled', recordId: a.recordId, ok: true, held, total, scopes });
   }
@@ -1579,6 +1585,7 @@
       crewCerts: (run.crew || []).filter(c => c && c.personnelId).map(c => ({ id: c.personnelId, cert: c.certification || null })),
       hasViews: Object.keys(run.views).length, hasCrew: !!(run.crew && run.crew.length),
       attachments: (run.attachments || []).map(a => ({ itemId: a.itemId, name: a.name, description: a.description })),
+      tplFilled: run.tplFilled || null,
     };
   }
   function buildStatus() {

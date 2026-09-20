@@ -1794,7 +1794,7 @@ test('templates: made from ESO\'s own field catalog, saved under the person\'s i
   assert.equal(saved.body.items.length, 4);
   assert.equal(saved.body.items.find(i => i.kind === 'treatment').fields.doseUnitId.v, 9001);
   const ax = saved.body.items.find(i => i.kind === 'assessment');
-  assert.ok(ax.findings.length > 100 && ax.findings.every(f => f.id === 'No_Abnormalities'), 'every location marked no abnormalities');
+  assert.equal(ax.findings.length, 26, "ESO's own areas, no more"); assert.ok(ax.findings.every(f => f.id === 'No_Abnormalities'), 'every area marked no abnormalities');
   await waitFor(() => tw('h2'), { label: 'back on the list' });
   assert.match(await tw('.body'), /Chest pain[\s\S]*private/);
   // fill the run from it: a question, then a progress bar, then the run carries it all
@@ -1817,6 +1817,19 @@ test('templates: made from ESO\'s own field catalog, saved under the person\'s i
   const run = await T.run(id);
   assert.ok(run.batches.filter(b => b.synthetic === 'facesheet' || b.synthetic === 'template').length >= 6, 'one batch per tab');
   assert.ok(run.log.some(l => /Template "Chest pain": filled/.test(l.msg)));
+  // filled again: the fields are written again, the items are not added twice unless asked
+  await app(() => window.app.edit('incident', 'incident.response.priorityId', 331, 'singleselect'));
+  await waitFor(async () => (await tree()).incident.response.priorityId === 331, { label: 'changed by hand' });
+  await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.bar [data-act=templates]').click());
+  await waitFor(() => tw('h1'), { label: 'window' });
+  await twClickText('.tpl [data-act=fill]', 'Fill this run');
+  await waitFor(async () => /already filled this run once/.test(await T.page.evaluate(() => (document.getElementById('esosave-host').shadowRoot.querySelector('.veil .askbox') || {}).textContent || '')), { label: 'the repeat warning' });
+  assert.ok(await T.page.evaluate(() => !!document.getElementById('esosave-host').shadowRoot.querySelector('.veil .askbox [data-again]')), 'a tick to add the items again');
+  await T.page.evaluate(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.askbox button')).find(b => /Yes, fill it/.test(b.textContent)).click());
+  await waitFor(async () => (await tree()).incident.response.priorityId === 330, { label: 'field overwritten', timeout: 30000 });
+  await waitFor(() => T.page.evaluate(() => /Filled from "Chest pain"/.test((document.getElementById('esosave-host').shadowRoot.querySelector('.veil') || {}).textContent || '')), { label: 'the notice', timeout: 15000 });
+  const t2 = await tree();
+  assert.equal(t2.vitals.vitalSigns.length, 1, 'no second vital'); assert.equal(t2.assessments.assessmentsV2.length, 1, 'no second assessment'); assert.equal(Object.keys(t2.patient.patientMedicalHistories).length, 1, 'no second history entry');
 });
 
 test('templates: shared to everyone or to named people show up for them, named after who shared them; a copy becomes theirs', async () => {
@@ -1907,4 +1920,60 @@ test('templates: with no signal the fill is held and pushed when signal returns'
   await T.context.setOffline(false);
   await waitFor(async () => (await T.record(id)).tree.narrative?.clinicalImpression?.primaryImpressionId === 500, { label: 'pushed once signal is back', timeout: 40000 });
   await waitFor(async () => (await T.run(id)).batches.every(b => b.status === 'acked' || b.status === 'dropped'), { label: 'all acked', timeout: 30000 });
+});
+
+test('templates: the agency owner locks a field and a part of the vitals; the crew sees the lock, cannot set them, and a fill leaves them out', async () => {
+  const agency = async () => ((await fetch(T.base + '/__db_dump').then(r => r.json())).find(r => r.name === '__agency__') || {}).settings || {};
+  await T.control({ userName: 'GASTON, MICHAEL', userId: 'd4e45fac-ee36-4ac8-bf9a-3fb3e265c0d0' });
+  await freshRun();
+  await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.bar [data-act=templates]').click());
+  await waitFor(() => tw('[data-act=new]'), { label: 'window' });
+  await twClick('[data-act=new]');
+  await waitFor(() => tw('[data-act=lockmode]'), { label: 'the owner sees Lock fields' });
+  await twClick('[data-act=lockmode]');
+  await twClick('[data-page=incident]');
+  await waitFor(() => tw('[data-lock="incident.response.priorityId"]'), { label: 'lock buttons' });
+  await twClick('[data-lock="incident.response.priorityId"]');
+  await waitFor(async () => ((await agency()).tplLocks || []).includes('incident.response.priorityId'), { label: 'lock in the agency row' });
+  await twClick('[data-page=vitals]');
+  await twClick('[data-additem="vitals.vitalSigns"]');
+  await waitFor(() => tw('[data-lock="vitals.vitalSigns.bloodPressure"]'), { label: 'a lock per vital group' });
+  await twClick('[data-lock="vitals.vitalSigns.bloodPressure"]');
+  await waitFor(async () => ((await agency()).tplLocks || []).includes('vitals.vitalSigns.bloodPressure'), { label: 'group lock in the agency row' });
+  assert.match(await tw('[data-lock="vitals.vitalSigns.bloodPressure"]'), /Locked/);
+  await twClick('[data-act=cancel]');
+  // the crew: the lock shows, the field cannot be set, the template saves without it, the fill leaves it out
+  await T.control({ userName: 'TEST, MEDIC', userId: 'person-1' });
+  const id = await freshRun();
+  await waitFor(async () => ((await T.storage()).settings.tplLocks || []).length === 2, { label: 'locks reached the tablet' });
+  await app(() => window.app.edit('incident', 'incident.response.priorityId', 331, 'singleselect'));
+  await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.bar [data-act=templates]').click());
+  await waitFor(async () => /Chest pain/.test((await tw('.body')) || ''), { label: 'his templates' });
+  assert.equal(await tw('[data-act=lockmode]'), null, 'no Lock fields for the crew');
+  await T.page.evaluate(() => { const row = Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.tplwin .tpl')).find(r => /^Chest pain/.test(r.querySelector('.tn').textContent)); row.querySelector('[data-act=edit]').click(); });
+  await waitFor(() => tw('[data-page=incident]'), { label: 'editor' });
+  await twClick('[data-page=incident]');
+  const prio = () => T.page.evaluate((s) => { const r = document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin ' + s); return r ? { cls: r.className, text: r.textContent, dis: r.querySelector('[data-sel]').disabled, input: !!r.querySelector('[data-pick], [data-in]') } : null; }, rowSel('incident.response.priorityId'));
+  const p = await waitFor(prio, { label: 'priority row' });
+  assert.ok(/shut/.test(p.cls) && p.dis && !p.input && /Locked by the agency/.test(p.text), 'locked for the crew: ' + JSON.stringify(p));
+  await twClick('[data-page=vitals]');
+  const vit = await tw('.item');
+  assert.match(vit, /Blood pressure[\s\S]*Locked by the agency/);
+  assert.equal(await T.page.evaluate(() => !!document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin .tf[data-key$="|bloodPressure.bloodPressureSystolic"]')), false, 'no blood pressure rows for the crew');
+  assert.ok(await T.page.evaluate(() => !!document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin .tf[data-key$="|pulse.pulseRate"]')), 'pulse still there');
+  await twClick('[data-act=save]');
+  await waitFor(async () => { const t = (await tplDb()).templates.find(x => x.name === 'Chest pain'); return t && !t.body.fields['incident.response.priorityId'] && !t.body.items.find(i => i.kind === 'vital').fields['bloodPressure.bloodPressureSystolic']; }, { label: 'saved without the locked things' });
+  await waitFor(() => tw('[data-act=new]'), { label: 'list' });
+  await T.page.evaluate(() => { const row = Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.tplwin .tpl')).find(r => /^Chest pain/.test(r.querySelector('.tn').textContent)); row.querySelector('[data-act=fill]').click(); });
+  await waitFor(async () => /Fill this run from "Chest pain"/.test(await T.page.evaluate(() => (document.getElementById('esosave-host').shadowRoot.querySelector('.veil .askbox') || {}).textContent || '')), { label: 'question' });
+  await T.page.evaluate(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.askbox button')).find(b => /Yes, fill it/.test(b.textContent)).click());
+  await waitFor(async () => (await T.record(id)).tree.vitals?.vitalSigns?.length === 1, { label: 'filled', timeout: 30000 });
+  await waitFor(() => T.page.evaluate(() => /Filled from/.test((document.getElementById('esosave-host').shadowRoot.querySelector('.veil') || {}).textContent || '')), { label: 'notice', timeout: 15000 });
+  const t = (await T.record(id)).tree;
+  assert.equal(t.incident.response.priorityId, 331, 'the locked field kept what the medic set');
+  assert.equal(t.incident.response.runTypeId, 326, 'the open field was filled');
+  assert.equal(t.vitals.vitalSigns[0].pulse.pulseRate, '80'); assert.equal(t.vitals.vitalSigns[0].bloodPressure?.bloodPressureSystolic ?? null, null, 'no blood pressure from a template');
+  // the owner clears the locks
+  await fetch(T.base + '/__db_set', { method: 'POST', body: JSON.stringify({ name: '__agency__', settings: { ...(await agency()), tplLocks: [] } }) });
+  await T.setStorage({ settings: { ...(await T.storage()).settings, tplLocks: [] } });
 });

@@ -148,7 +148,10 @@ to bad signal or a hung page.
   it. A name is used once per shared category across the agency (one "Refusal" shared to
   everyone and one shared with named people may both exist, two shared to everyone may not) and
   once among a person's own private ones; the editor says so and asks for a change, "Refusal2"
-  say, and the table's own unique indexes hold the line. Filling needs an open, unlocked
+  say, and the table's own unique indexes hold the line. The agency owner can lock any field, any
+  kind of item (vitals as a whole) or a part of one (blood pressure) from any template's editor
+  (Lock fields): the crew sees the lock, cannot set it, and a fill leaves it out, so a template
+  can never make up what the crew must measure themselves. Filling needs an open, unlocked
   run: a question first, then a progress bar as each tab is written with the same saves ESO's
   app makes, replacing what is there; with no signal it is held like any save and pushed
   later. The list seen last is kept on the device, so it works with no signal.

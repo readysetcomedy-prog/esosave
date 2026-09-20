@@ -43,7 +43,7 @@
   const sget = (keys) => new Promise(res => storage.get(keys, (v) => res(v || {})));
   const sset = (obj) => new Promise(res => storage.set(obj, () => res()));
   const sremove = (keys) => new Promise(res => storage.remove(keys, () => res()));
-  const DEFAULT_SETTINGS = { purgeHoursAfterLock: 0, probeSec: 20, heldProbeSec: 8, warmTabs: true, cardCollapsed: false, showTimes: true, sendPrompt: true, unsentList: true, quickHistory: true, quickMeds: true, quickAllergies: true, quickAcuity: true, quickDelays: true, quickTransport: true, quickAssess: true, quickDisposition: true, autoResponse: true, quickIncident: true, quickMechanism: true, quickFacilities: true, quickNarrative: true, quickPatient: true, quickRefusal: true, autoMileage: true, askBeforeLock: true, cadGate: true, scanDocs: true, vitalCopySkip: [], facilitySending: [], facilityDestination: [] };
+  const DEFAULT_SETTINGS = { purgeHoursAfterLock: 0, probeSec: 20, heldProbeSec: 8, warmTabs: true, cardCollapsed: false, showTimes: true, sendPrompt: true, unsentList: true, quickHistory: true, quickMeds: true, quickAllergies: true, quickAcuity: true, quickDelays: true, quickTransport: true, quickAssess: true, quickDisposition: true, autoResponse: true, quickIncident: true, quickMechanism: true, quickFacilities: true, quickNarrative: true, quickPatient: true, quickRefusal: true, autoMileage: true, askBeforeLock: true, cadGate: true, scanDocs: true, vitalCopySkip: [], tplLocks: [], facilitySending: [], facilityDestination: [] };
   // The agency's standard facility chips (ids and names from ESO's saved facilities). Every install
   // starts with these; Settings can add or remove per device.
   const FAC = {
@@ -82,7 +82,7 @@
   const openSettings = (src) => { const o = {}; for (const k of OPEN_SETTINGS) if (k in src) o[k] = src[k]; return o; };
   // The locked settings are the agency's: one row for all tablets, changed only by the agency's
   // owner (matched by ESO login name or agency person id), shown greyed out to everyone else.
-  const LOCKED_SETTINGS = ['purgeHoursAfterLock', 'warmTabs', 'showTimes', 'sendPrompt', 'unsentList', 'askBeforeLock', 'cadGate'];
+  const LOCKED_SETTINGS = ['purgeHoursAfterLock', 'warmTabs', 'showTimes', 'sendPrompt', 'unsentList', 'askBeforeLock', 'cadGate', 'tplLocks'];
   const lockedSettings = (src) => { const o = {}; for (const k of LOCKED_SETTINGS) if (k in src) o[k] = src[k]; return o; };
   const AGENCY_ROW = '__agency__';
   const ADMIN = { name: 'GASTON, MICHAEL', id: 'd4e45fac-ee36-4ac8-bf9a-3fb3e265c0d0' };
@@ -334,6 +334,7 @@
     .tplwin details.sec > summary::before { content: '▸'; color: #64748b; } .tplwin details.sec[open] > summary::before { content: '▾'; }
     .tplwin .tf { display: grid; grid-template-columns: 34px minmax(160px, 1fr) minmax(220px, 2fr); gap: 8px; align-items: center; padding: 6px 0; border-top: 1px solid #f1f5f9; }
     .tplwin .tf input[type=checkbox] { width: 24px; height: 24px; }
+    .tplwin .tf.shut { opacity: .75; background: #f8fafc; }
     .tplwin .tf .fl { font-weight: 600; } .tplwin .tf.on .fl { color: #1d4ed8; }
     .tplwin .tf input[type=text], .tplwin .tf input[type=date], .tplwin .tf input[type=time], .tplwin .tf input[type=datetime-local], .tplwin .tf select, .tplwin .tf textarea { width: 100%; box-sizing: border-box; font: inherit; padding: 9px 10px; border: 1px solid #cbd5e1; border-radius: 8px; min-height: 42px; background: #fff; }
     .tplwin .pick { position: relative; } .tplwin .pick .chosen { font-size: 14px; color: #1d4ed8; font-weight: 700; margin-top: 3px; min-height: 18px; }
@@ -472,6 +473,7 @@
         `<label class="s${lk}"><input type="checkbox" id="sendprompt" ${settings.sendPrompt === false ? '' : 'checked'} ${dis}> When a run is locked, offer to fax or email it to the destination if it has not been sent yet</label>` +
         `<label class="s${lk}"><input type="checkbox" id="unsentlist" ${settings.unsentList === false ? '' : 'checked'} ${dis}> Keep a list of locked runs from the last 15 days that have a fax or email destination but were never sent</label>` +
         `<label class="s${lk}"><input type="checkbox" id="asklock" ${settings.askBeforeLock === false ? '' : 'checked'} ${dis}> Before a lock, ask whether the proper paperwork is attached (or not required); No leaves the run open</label>` +
+        `<div class="s${lk}" style="display:block">Template locks: ${(settings.tplLocks || []).length ? (settings.tplLocks || []).length + ' locked (set in a template\'s editor with Lock fields; only ' + esc(ADMIN.name) + ' can change them)' : 'none (open any template\'s editor and press Lock fields to keep the crew from templating a field, vitals, or a part of them)'}</div>` +
         `<label class="s${lk}"><input type="checkbox" id="cadgate" ${settings.cadGate === false ? '' : 'checked'} ${dis}> CAD import: only a run the call log shows you on may be imported. Unit Capability and Unit's Level of Care follow the crew's ESO certifications (a paramedic on the crew makes it ALS; a unit named NT… is non-transport)</label>` +
         `<div class="s" style="margin-top:8px;font-weight:700">Quick buttons${user ? ` <span class="muted" style="font-weight:400">· yours, ${esc(user)}: they follow your ESO login to any tablet</span>` : ''}</div>` +
         `<label class="s"><input type="checkbox" id="qdelays" ${settings.quickDelays === false ? '' : 'checked'}> Delays: one "All: None/No Delay" button above the delay fields (Incident tab) that presses ESO's own None button on every delay still empty</label>` +
@@ -2760,7 +2762,8 @@
   const ITEM_NAMES = { vital: 'Vital signs', treatment: 'Treatments', assessment: 'Assessments', history: 'Patient history', allergy: 'Allergies', medication: 'Home medications', belonging: 'Belongings', sign: 'Signs and symptoms', protocol: 'Protocols used', immunization: 'Immunizations' };
   const ITEM_ONE = { vital: 'a vital', treatment: 'a treatment', assessment: 'an assessment', history: 'a history entry', allergy: 'an allergy', medication: 'a medication', belonging: 'a belonging', sign: 'a sign or symptom', protocol: 'a protocol', immunization: 'an immunization' };
   const ITEM_KEY = { treatment: 'flowchartTreatmentRegistryId', history: 'itemId', allergy: 'itemId', medication: 'itemId', belonging: 'itemId', sign: 'signId', protocol: 'protocolsUsedId', immunization: 'immunizationTypeId' };
-  const humanize = (seg) => String(seg || '').replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/[_.]/g, ' ').replace(/^./, c => c.toUpperCase()).replace(/\bId\b/g, '').trim();
+  const SHORT_NAMES = { cpr: 'CPR', acs: 'ACS', mvc: 'MVC', css: 'CSS', lapss: 'LAPSS', mend: 'MEND', ob: 'OB', ebola: 'Ebola', ppe: 'PPE', emd: 'EMD', cad: 'CAD' };
+  const humanize = (seg) => SHORT_NAMES[String(seg || '').toLowerCase()] || String(seg || '').replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/[_.]/g, ' ').replace(/^./, c => c.toUpperCase()).replace(/\bId\b/g, '').trim();
   const tplHeaders = (extra) => ({ apikey: AGENCY_DB.key, Authorization: 'Bearer ' + AGENCY_DB.key, 'Content-Type': 'application/json', ...(extra || {}) });
   async function tplReq(url, opts) {
     const r = await fetch(url, { ...opts, headers: tplHeaders(opts && opts.headers) });
@@ -2814,8 +2817,9 @@
     if (tpls.who && userId && tpls.who !== userId) { tpls = { mine: [], shared: [], everyone: [], at: 0, who: userId }; note = note || 'No signal: the templates seen on this tablet were another login\'s.'; }
     const run = currentRun();
     const canFill = !!run && !run.locked;
-    const row = (t, kind) => `<div class="tpl" data-id="${esc(t.id)}"><div><div class="tn">${esc(t.name)}</div>${kind !== 'mine' ? `<div class="by">shared by ${esc(t.owner_name || '')}</div>` : `<div class="by">${t.share === 'everyone' ? 'shared with everyone' : t.share === 'some' ? 'shared with some people' : 'private'}</div>`}</div>
-      <button class="tb pri" data-act="fill" ${canFill ? '' : 'disabled title="Open a run first"'}>Fill this run</button>
+    const held = (t) => { const nf = Object.keys((t.body && t.body.fields) || {}).length, its = (t.body && t.body.items) || []; const kinds = {}; for (const it of its) kinds[it.kind] = (kinds[it.kind] || 0) + 1; return [`${nf} field${nf === 1 ? '' : 's'}`].concat(Object.entries(kinds).map(([k, n]) => `${n} ${n === 1 ? (ITEM_ONE[k] || k).replace(/^(a|an) /, '') : (ITEM_NAMES[k] || k).toLowerCase()}`)).join(' · '); };
+    const row = (t, kind) => `<div class="tpl" data-id="${esc(t.id)}"><div><div class="tn">${esc(t.name)}</div><div class="by">${kind !== 'mine' ? `shared by ${esc(t.owner_name || '')}` : (t.share === 'everyone' ? 'shared with everyone' : t.share === 'some' ? 'shared with some people' : 'private')} · ${esc(held(t))}</div></div>
+      <button class="tb pri" data-act="fill" ${canFill ? '' : 'disabled title="Open an unlocked run first"'}>Fill this run</button>
       ${kind === 'mine' ? '<button class="tb sec" data-act="edit">Edit</button><button class="tb danger" data-act="delete">Delete</button>' : '<button class="tb sec" data-act="copy">Copy to mine</button>'}</div>`;
     tplWin.innerHTML = `<div class="tophead"><h1>Templates</h1><button class="tb" data-act="new">New template</button><button class="tb sec" data-act="close">Close</button></div>
       <div class="body">
@@ -2844,7 +2848,38 @@
     if (t && t.id && t.share === 'some') { try { ed.people = (await tplPeople(t.id)).map(p => ({ id: p.person_id, name: p.person_name })); } catch (e) { /* offline */ } }
     tplView = 'edit'; renderEditor();
   }
-  const listOf = (ref) => (catalog && catalog.lists && catalog.lists[ref]) || [];
+  const NONE_RE = /^(none|none noted|none reported|none\/no delay|no delay|not applicable|n\/a|nothing)$/i;
+  const noneOf = (ref) => listOf(ref).find(e => NONE_RE.test(String(e.n).trim())) || null;
+  // ---- locks: the agency owner can lock any field, any item (vitals as a whole), any part of one
+  // (blood pressure); the crew sees the lock and cannot set it, and a fill leaves it out. A key is
+  // a field's address, an item root, or root.part; a lock covers everything under it.
+  const tplLocks = () => Array.isArray(settings.tplLocks) ? settings.tplLocks : [];
+  const tplLocked = (key) => tplLocks().some(k => key === k || key.startsWith(k + '.'));
+  let lockMode = false;
+  async function toggleLock(key) {
+    if (!isAdmin()) return;
+    const cur = tplLocks();
+    settings.tplLocks = cur.includes(key) ? cur.filter(k => k !== key) : cur.concat([key]);
+    await sset({ settings }); await pushAgency();
+    renderEditor();
+  }
+  const lockBtn = (key, extra) => lockMode && isAdmin() ? `<button type="button" class="tb sec" data-lock="${esc(key)}" title="${tplLocked(key) ? 'Locked: the crew cannot set this' : 'Open: lock it'}" style="padding:6px 10px;min-height:36px;${extra || ''}">${tplLocks().includes(key) ? '🔒 Locked' : tplLocked(key) ? '🔒 (in a locked group)' : '🔓 Lock'}</button>` : '';
+  const lockNote = () => `<span class="muted" style="font-weight:600">🔒 Locked by the agency</span>`;
+  // what a fill leaves out: locked fields, items and parts
+  function applyLocks(body) {
+    const out = { v: body.v || 1, fields: {}, items: [] }; let dropped = 0;
+    for (const [a, f] of Object.entries(body.fields || {})) { if (tplLocked(a)) dropped++; else out.fields[a] = f; }
+    for (const it of (body.items || [])) {
+      if (tplLocked(it.root)) { dropped++; continue; }
+      const copy = { ...it, fields: {} };
+      for (const [rel, f] of Object.entries(it.fields || {})) { if (tplLocked(it.root + '.' + rel)) dropped++; else copy.fields[rel] = f; }
+      if (it.kind === 'assessment' && tplLocked(it.root + '.findings')) { copy.findings = []; dropped++; }
+      out.items.push(copy);
+    }
+    return { body: out, dropped };
+  }
+  // the list, with its None entry (if it has one) first
+  const listOf = (ref) => { const l = (catalog && catalog.lists && catalog.lists[ref]) || []; const i = l.findIndex(e => NONE_RE.test(String(e.n).trim())); return i > 0 ? [l[i]].concat(l.slice(0, i), l.slice(i + 1)) : l; };
   const nameOf = (ref, id) => { const x = listOf(ref).find(e => String(e.id) === String(id)); return x ? x.n : String(id); };
   function fieldsOfPage(page) { return (catalog.fields || []).filter(f => f.a.split('.')[0] === page); }
   function sectionsOf(page) {
@@ -2876,7 +2911,9 @@
     const secs = sectionsOf(page), roots = itemRootsOf(page);
     const fieldRow = (f, cur, prefix) => {
       const on = !!cur; const key = prefix ? `${prefix}|${f.rel}` : f.a;
-      return `<div class="tf ${on ? 'on' : ''}" data-key="${esc(key)}"><input type="checkbox" data-sel ${on ? 'checked' : ''}><div class="fl">${esc(f.n)}<div class="muted" style="font-weight:400">${esc(f.t === 'pertinentNegative' ? 'reason unable to obtain' : '')}</div></div><div>${inputFor(f, cur ? cur.v : null)}</div></div>`;
+      const locked = tplLocked(f.a);
+      const shut = locked && !isAdmin();
+      return `<div class="tf ${on ? 'on' : ''} ${shut ? 'shut' : ''}" data-key="${esc(key)}"><input type="checkbox" data-sel ${on ? 'checked' : ''} ${shut ? 'disabled' : ''}><div class="fl">${esc(f.n)}<div class="muted" style="font-weight:400">${esc(f.t === 'pertinentNegative' ? 'reason unable to obtain' : '')}${locked ? lockNote() : ''}</div></div><div>${shut ? '' : inputFor(f, cur ? cur.v : null)}${lockBtn(f.a, 'margin-top:4px')}</div></div>`;
     };
     for (const [sec, fields] of secs) {
       const shown = q ? fields.filter(f => f.n.toLowerCase().includes(q) || sec.toLowerCase().includes(q)) : fields;
@@ -2890,15 +2927,43 @@
     for (const [root, kind] of roots) {
       const items = ed.items.map((it, i) => ({ it, i })).filter(x => x.it.root === root);
       const members = memberFields(root);
-      content += `<details class="sec" ${items.length || q ? 'open' : ''}><summary>${esc(ITEM_NAMES[kind] || humanize(root.split('.').pop()))}${items.length ? ` <span class="cnt" style="background:#fbbf24;border-radius:10px;padding:0 7px;font-size:12px">${items.length}</span>` : ''}</summary>
-        ${items.map(({ it, i }) => `<div class="item" data-item="${i}"><div class="ih">${esc(itemTitle(it))}<span style="flex:1"></span>${kind === 'assessment' ? '<button class="tb sec" data-allnormal>All normal</button>' : ''}<button class="tb danger" data-remove>Remove</button></div>
-          ${kind === 'assessment' ? assessmentUi(it) : members.filter(m => !(kind === 'vital' && /vitalSignDateTime|softDeleted/.test(m.rel))).map(m => fieldRow(m, it.fields[m.rel], String(i))).join('')}</div>`).join('')}
-        <button class="tb pri" data-additem="${esc(root)}" data-kind="${esc(kind)}" style="margin:8px 0">Add ${esc(ITEM_ONE[kind] || 'one')}</button></details>`;
+      const rootLocked = tplLocked(root), rootShut = rootLocked && !isAdmin();
+      content += `<details class="sec" ${items.length || q ? 'open' : ''}><summary><span style="flex:1">${esc(ITEM_NAMES[kind] || humanize(root.split('.').pop()))}${items.length ? ` <span class="cnt" style="background:#fbbf24;border-radius:10px;padding:0 7px;font-size:12px">${items.length}</span>` : ''}${rootLocked ? ' ' + lockNote() : ''}</span>${lockBtn(root)}</summary>
+        ${rootShut ? `<div class="muted" style="padding:0 0 10px">${esc(ITEM_NAMES[kind] || 'These')} are locked by the agency: a template cannot add them. Enter them on the run yourself.</div>` : ''}
+        ${items.map(({ it, i }) => `<div class="item" data-item="${i}"><div class="ih">${esc(itemTitle(it))}<span style="flex:1"></span>${kind === 'assessment' && !rootShut ? '<button class="tb sec" data-allnormal>All normal</button><button class="tb sec" data-allna>All not assessed</button>' : ''}<button class="tb danger" data-remove>Remove</button></div>
+          ${rootShut ? `<div class="muted">${lockNote()} Not filled.</div>` : kind === 'assessment' ? assessmentUi(it) : groupedRows(members.filter(m => !(kind === 'vital' && /vitalSignDateTime|softDeleted/.test(m.rel))), it, i, fieldRow, kind)}</div>`).join('')}
+        ${rootShut ? '' : `<button class="tb pri" data-additem="${esc(root)}" data-kind="${esc(kind)}" style="margin:8px 0">Add ${esc(ITEM_ONE[kind] || 'one')}</button>`}</details>`;
     }
     if (!content) content = '<div class="muted">Nothing on this tab can be templated.</div>';
-    tplWin.innerHTML = `<div class="tophead"><input class="name" type="text" placeholder="Template name" value="${esc(ed.name)}" data-name><span style="flex:1"></span><button class="tb pri" data-act="save">Save</button><button class="tb sec" data-act="cancel">Cancel</button></div>
+    const nf = Object.keys(ed.fields).length, ni = ed.items.length;
+    tplWin.innerHTML = `<div class="tophead"><input class="name" type="text" placeholder="Template name" value="${esc(ed.name)}" data-name><span class="muted" style="color:#d1fae5">${nf} field${nf === 1 ? '' : 's'}${ni ? `, ${ni} item${ni === 1 ? '' : 's'}` : ''}</span><span style="flex:1"></span>${isAdmin() ? `<button class="tb ${lockMode ? 'pri' : 'sec'}" data-act="lockmode" title="Lock fields the crew must enter themselves">${lockMode ? 'Done locking' : 'Lock fields'}</button>` : ''}<button class="tb pri" data-act="save">Save</button><button class="tb sec" data-act="cancel">Cancel</button></div>
       <div class="body">${shareUi}<input type="text" class="search" placeholder="Find a field on this tab…" value="${esc(ed.q)}" data-q><div class="pages">${pageBtns}</div>${content}</div>`;
     wireEditor();
+  }
+  // a vital's members in their groups (Blood pressure: Systolic, Diastolic, Method; Pulse: Rate,
+  // Rhythm...), the key of a treatment first, the rest of a treatment's 250 fields folded away
+  const VITAL_ORDER = ['bloodPressure', 'pulse', 'respiration', 'etCO2SPO2CO', 'glucoseAndTemp', 'pain', 'avpu', 'position', 'glasgowComaScale', 'revisedTraumaScore', 'cardiacMonitoring'];
+  const VITAL_GROUP_NAMES = { bloodPressure: 'Blood pressure', pulse: 'Pulse', respiration: 'Respirations', etCO2SPO2CO: 'SpO₂, EtCO₂ and CO', glucoseAndTemp: 'Glucose and temperature', pain: 'Pain', avpu: 'AVPU', position: 'Patient side and posture', glasgowComaScale: 'Glasgow Coma Scale', revisedTraumaScore: 'Revised trauma score', cardiacMonitoring: 'Cardiac monitoring' };
+  const vitalGroup = (rel) => rel.includes('.') ? rel.split('.')[0] : /^pain/i.test(rel) ? 'pain' : /^avpu/i.test(rel) ? 'avpu' : /^patient(Side|Posture)/i.test(rel) ? 'position' : 'other';
+  // a group that is not a dotted part of the vital (pain, AVPU, position) locks by its fields
+  const groupFields = (it, g) => memberFields(it.root).filter(m => vitalGroup(m.rel) === g).map(m => it.root + '.' + m.rel);
+  function groupedRows(members, it, i, fieldRow, kind) {
+    if (kind === 'vital') {
+      const groups = new Map();
+      for (const m of members) { const g = vitalGroup(m.rel); if (!groups.has(g)) groups.set(g, []); groups.get(g).push(m); }
+      const keys = [...groups.keys()].sort((a, b) => (VITAL_ORDER.indexOf(a) + 1 || 99) - (VITAL_ORDER.indexOf(b) + 1 || 99));
+      return keys.map(g => { const gk = g === 'other' ? null : `${it.root}.${g}`; const gl = gk && tplLocked(gk); return `<div style="margin:8px 0 2px;font-weight:700;color:#334155;display:flex;gap:10px;align-items:center">${esc(VITAL_GROUP_NAMES[g] || humanize(g))}${gl ? lockNote() : ''}${gk ? lockBtn(gk) : ''}</div>` + (gl && !isAdmin() ? '' : groups.get(g).map(m => fieldRow(m, it.fields[m.rel], String(i))).join('')); }).join('');
+    }
+    if (kind === 'treatment') {
+      const first = ['flowchartTreatmentRegistryId', 'dose', 'doseUnitId', 'routeId', 'provider', 'successful', 'comments', 'indicationForGivingIds', 'responseId'];
+      const head = members.filter(m => first.includes(m.rel)).sort((a, b) => first.indexOf(a.rel) - first.indexOf(b.rel));
+      const rest = members.filter(m => !first.includes(m.rel));
+      const set = rest.filter(m => it.fields[m.rel]).length;
+      return head.map(m => fieldRow(m, it.fields[m.rel], String(i))).join('') + `<details ${set ? 'open' : ''} style="margin-top:6px"><summary style="cursor:pointer;font-weight:600;color:#334155">More fields (${rest.length}${set ? ', ' + set + ' set' : ''})</summary>${rest.map(m => fieldRow(m, it.fields[m.rel], String(i))).join('')}</details>`;
+    }
+    const key = ITEM_KEY[kind];
+    const sorted = key ? members.slice().sort((a, b) => (a.rel === key ? -1 : b.rel === key ? 1 : 0)) : members;
+    return sorted.map(m => fieldRow(m, it.fields[m.rel], String(i))).join('');
   }
   const itemTitle = (it) => { const k = ITEM_KEY[it.kind]; const f = k && it.fields[k]; if (it.kind === 'assessment') return `Assessment (${(it.findings || []).length} findings)`; if (it.kind === 'vital') return 'Vital'; return f && f.v != null ? nameOf(f.l, f.v) : humanize(it.kind); };
   function inputFor(f, v) {
@@ -2907,8 +2972,10 @@
     if (f.t === 'date') return `<input type="date" data-in value="${esc(esoToInput(val, 'date'))}">`;
     if (f.t === 'datetime') return `<input type="datetime-local" data-in value="${esc(esoToInput(val, 'datetime'))}">`;
     if (f.t === 'time') return `<input type="time" data-in step="1" value="${esc(esoToInput(val, 'time'))}">`;
-    if (f.l && (f.t === 'singleselect' || f.t === 'pertinentNegative')) return `<div class="pick"><input type="text" data-pick placeholder="Search or scroll…"><div class="picklist" hidden></div><div class="chosen">${val !== '' ? esc(nameOf(f.l, val)) : ''}</div></div>`;
-    if (f.l && f.t === 'multiselect') { const arr = Array.isArray(val) ? val : (val === '' ? [] : [val]); return `<div class="pick"><input type="text" data-pick data-multi placeholder="Search or scroll…"><div class="picklist" hidden></div><div class="chosen">${arr.map(x => `<span>${esc(nameOf(f.l, x))} <a data-unpick="${esc(x)}" style="cursor:pointer">✕</a></span>`).join('')}</div></div>`; }
+    const none = f.l ? noneOf(f.l) : null;
+    const noneBtn = none ? `<button type="button" class="tb sec" data-none="${esc(none.id)}" style="padding:8px 12px;min-height:38px;margin-top:4px">${esc(none.n)}</button>` : '';
+    if (f.l && (f.t === 'singleselect' || f.t === 'pertinentNegative')) return `<div class="pick"><input type="text" data-pick placeholder="Search or scroll…"><div class="picklist" hidden></div><div class="chosen">${val !== '' ? esc(nameOf(f.l, val)) : ''}</div>${noneBtn}</div>`;
+    if (f.l && f.t === 'multiselect') { const arr = Array.isArray(val) ? val : (val === '' ? [] : [val]); return `<div class="pick"><input type="text" data-pick data-multi placeholder="Search or scroll…"><div class="picklist" hidden></div><div class="chosen">${arr.map(x => `<span>${esc(nameOf(f.l, x))} <a data-unpick="${esc(x)}" style="cursor:pointer">✕</a></span>`).join('')}</div>${noneBtn}</div>`; }
     if (f.t === 'string' && /narrative|comment|note|description|statement/i.test(f.n + f.a)) return `<textarea data-in rows="3">${esc(val)}</textarea>`;
     return `<input type="text" data-in ${/number|integer|phone|ssn/.test(f.t) ? 'inputmode="decimal"' : ''} value="${esc(val)}">`;
   }
@@ -2930,13 +2997,19 @@
     const A = typeof ESOSAVE_ASSESS !== 'undefined' ? ESOSAVE_ASSESS : null;
     if (!A) return '<div class="muted">The assessment layout is not available.</div>';
     const find = (loc) => (it.findings || []).find(f => f.loc === loc);
-    const opts = (loc) => { const cur = find(loc); const basic = [['', '—'], ['No_Abnormalities', 'No Abnormalities'], ['Not_Assessed', 'Not Assessed']]; const extra = cur && !basic.some(b => b[0] === cur.id) ? [[cur.id, (A.findings.find(f => f.id === cur.id) || {}).n || cur.id]] : []; return basic.concat(extra).map(([id, n]) => `<option value="${esc(id)}" ${cur && cur.id === id ? 'selected' : ''}>${esc(n)}</option>`).join('') + `<option value="__other">Other finding…</option>`; };
-    let html = '<div class="ax">';
+    const fname = (id) => (A.findings.find(f => f.id === id) || {}).n || id;
+    const opts = (loc) => { const cur = find(loc); const basic = [['', '—'], ['No_Abnormalities', 'No Abnormalities'], ['Not_Assessed', 'Not Assessed']]; const extra = cur && !basic.some(b => b[0] === cur.id) ? [[cur.id, fname(cur.id)]] : []; return basic.concat(extra).map(([id, n]) => `<option value="${esc(id)}" ${cur && cur.id === id ? 'selected' : ''}>${esc(n)}</option>`).join('') + `<option value="__other">Other finding…</option>`; };
+    let html = `<div class="ax"><div class="muted" style="margin:4px 0 8px">The areas ESO's Quick Ax has. Each: No Abnormalities, Not Assessed, or open it and set its parts one by one; an area left blank is written Not Assessed, as ESO itself starts every assessment. "All normal" does every area at once.</div>`;
     for (const c of A.categories) {
       const subs = A.subCategories.filter(s => s.categoryId === c.id);
-      const locs = A.locations.filter(l => subs.some(s => s.id === l.sub));
+      const locs = A.top.map(id => A.locations.find(l => l.id === id)).filter(l => l && subs.some(s => s.id === l.sub));
       if (!locs.length) continue;
-      html += `<h4>${esc(c.name)}</h4>` + locs.map(l => `<div class="loc"><span>${esc(l.n)}</span><select data-loc="${esc(l.id)}">${opts(l.id)}</select></div>`).join('');
+      const ids = locs.map(l => (find(l.id) || {}).id || '');
+      const all = ids.every(x => x === ids[0]) ? ids[0] : (ids.some(Boolean) ? 'mixed' : '');
+      const set = ids.filter(Boolean).length;
+      html += `<details class="sec" ${all === 'mixed' ? 'open' : ''} style="margin:6px 0"><summary><span style="flex:1">${esc(c.name)}${set ? ` <span class="muted">(${set} of ${locs.length} set)</span>` : ''}</span>
+        <select data-cat="${esc(c.id)}" style="font:inherit;padding:8px;border:1px solid #cbd5e1;border-radius:8px;min-height:40px"><option value="" ${all === '' ? 'selected' : ''}>—</option><option value="No_Abnormalities" ${all === 'No_Abnormalities' ? 'selected' : ''}>No Abnormalities</option><option value="Not_Assessed" ${all === 'Not_Assessed' ? 'selected' : ''}>Not Assessed</option>${all === 'mixed' ? '<option value="mixed" selected>Mixed</option>' : ''}</select></summary>`
+        + locs.map(l => `<div class="loc"><span>${esc(l.n)}</span><select data-loc="${esc(l.id)}">${opts(l.id)}</select></div>`).join('') + '</details>';
     }
     const cm = memberFields('assessments.assessmentsV2').filter(m => /comments$/i.test(m.rel));
     if (cm.length) html += '<h4>Comments</h4>' + cm.map(m => `<div class="tf ${it.fields[m.rel] ? 'on' : ''}" data-key="${esc(String(ed.items.indexOf(it)))}|${esc(m.rel)}"><input type="checkbox" data-sel ${it.fields[m.rel] ? 'checked' : ''}><div class="fl">${esc(humanize(m.rel.split('.')[0]))}</div><div>${inputFor(m, it.fields[m.rel] ? it.fields[m.rel].v : null)}</div></div>`).join('');
@@ -2964,7 +3037,9 @@
       const show = () => { const q = pp.value.trim().toLowerCase(); const hits = crew.filter(c => !ed.people.some(p => p.id === c.id) && (!q || c.name.toLowerCase().includes(q))).slice(0, 60); list.innerHTML = hits.map(c => `<button type="button" data-pid="${esc(c.id)}">${esc(c.name)}</button>`).join('') || '<div class="muted" style="padding:8px">No one matches.</div>'; list.hidden = false; list.querySelectorAll('[data-pid]').forEach(b => b.addEventListener('click', () => { ed.people.push({ id: b.dataset.pid, name: crew.find(c => c.id === b.dataset.pid).name }); renderEditor(); const n = tplWin.querySelector('[data-people]'); if (n) n.focus(); })); };
       pp.addEventListener('focus', show); pp.addEventListener('input', show);
     }
-    W.querySelector('[data-act=cancel]').addEventListener('click', () => { tplView = 'list'; ed = null; renderTemplates(); });
+    W.querySelector('[data-act=cancel]').addEventListener('click', () => { tplView = 'list'; ed = null; lockMode = false; renderTemplates(); });
+    const lm = W.querySelector('[data-act=lockmode]'); if (lm) lm.addEventListener('click', () => { lockMode = !lockMode; renderEditor(); });
+    W.querySelectorAll('[data-lock]').forEach(b => b.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); toggleLock(b.dataset.lock); }));
     W.querySelector('[data-act=save]').addEventListener('click', saveEditor);
     W.querySelectorAll('[data-additem]').forEach(b => b.addEventListener('click', () => {
       const root = b.dataset.additem, kind = b.dataset.kind, rootField = null;
@@ -2982,7 +3057,15 @@
       renderEditor();
     }));
     W.querySelectorAll('[data-remove]').forEach(b => b.addEventListener('click', () => { const i = Number(b.closest('.item').dataset.item); ed.items.splice(i, 1); renderEditor(); }));
-    W.querySelectorAll('[data-allnormal]').forEach(b => b.addEventListener('click', () => { const it = ed.items[Number(b.closest('.item').dataset.item)]; const A = ESOSAVE_ASSESS; it.findings = A.locations.map(l => ({ loc: l.id, id: 'No_Abnormalities' })); renderEditor(); }));
+    W.querySelectorAll('[data-allnormal]').forEach(b => b.addEventListener('click', () => { const it = ed.items[Number(b.closest('.item').dataset.item)]; const A = ESOSAVE_ASSESS; it.findings = A.top.map(id => ({ loc: id, id: 'No_Abnormalities' })); renderEditor(); }));
+    W.querySelectorAll('[data-allna]').forEach(b => b.addEventListener('click', () => { const it = ed.items[Number(b.closest('.item').dataset.item)]; const A = ESOSAVE_ASSESS; it.findings = A.top.map(id => ({ loc: id, id: 'Not_Assessed' })); renderEditor(); }));
+    W.querySelectorAll('select[data-cat]').forEach(sel => { sel.addEventListener('click', (e) => e.stopPropagation()); sel.addEventListener('change', () => {
+      const it = ed.items[Number(sel.closest('.item').dataset.item)]; const A = ESOSAVE_ASSESS;
+      const subs = A.subCategories.filter(x => x.categoryId === sel.dataset.cat); const locs = A.top.filter(id => { const l = A.locations.find(x => x.id === id); return l && subs.some(x => x.id === l.sub); });
+      it.findings = (it.findings || []).filter(f => !locs.includes(f.loc));
+      if (sel.value && sel.value !== 'mixed') for (const loc of locs) it.findings.push({ loc, id: sel.value });
+      renderEditor();
+    }); });
     W.querySelectorAll('select[data-loc]').forEach(sel => sel.addEventListener('change', () => {
       const it = ed.items[Number(sel.closest('.item').dataset.item)]; const loc = sel.dataset.loc;
       it.findings = (it.findings || []).filter(f => f.loc !== loc);
@@ -3025,6 +3108,14 @@
         };
         pk.addEventListener('focus', show); pk.addEventListener('input', show);
         pk.addEventListener('blur', () => setTimeout(() => { if (!list.contains(shadow.activeElement)) list.hidden = true; }, 250));
+        const nb = row.querySelector('[data-none]');
+        if (nb) nb.addEventListener('click', () => {
+          const e = listOf(d.f.l).find(x => String(x.id) === nb.dataset.none); const id = e ? e.id : nb.dataset.none;
+          setVal(multi ? [id] : id); // None stands alone
+          row.querySelector('.chosen').innerHTML = multi ? `<span>${esc(nameOf(d.f.l, id))} <a data-unpick="${esc(id)}" style="cursor:pointer">✕</a></span>` : esc(nameOf(d.f.l, id));
+          wireUnpick(row, d, setVal, cur);
+          if (key.includes('|')) updateItemTitle(row.closest('.item'), ed.items[Number(key.split('|')[0])]);
+        });
         box.addEventListener('change', () => { if (!box.checked) { setVal(null); row.querySelector('.chosen').innerHTML = ''; } else { box.checked = !!cur().length; pk.focus(); } });
         wireUnpick(row, d, setVal, cur);
       }
@@ -3049,10 +3140,13 @@
     if (!ed) return;
     const name = ed.name.trim();
     if (!name) { alert('ESO Save: give the template a name first.'); tplWin.querySelector('[data-name]').focus(); return; }
-    // drop items missing their key (a treatment with no treatment picked)
-    const items = ed.items.filter(it => it.kind === 'vital' || it.kind === 'assessment' ? (it.kind === 'assessment' ? (it.findings || []).length || Object.keys(it.fields).length : Object.keys(it.fields).length) : it.fields[ITEM_KEY[it.kind]]);
-    const body = { v: 1, fields: ed.fields, items };
-    if (!Object.keys(body.fields).length && !items.length) { alert('ESO Save: the template is empty. Tick at least one field.'); return; }
+    // an item without its key (a treatment with no treatment picked, an empty vital) cannot be written
+    const empty = ed.items.filter(it => !(it.kind === 'vital' || it.kind === 'assessment' ? (it.kind === 'assessment' ? (it.findings || []).length || Object.keys(it.fields).length : Object.keys(it.fields).length) : it.fields[ITEM_KEY[it.kind]]));
+    if (empty.length) { alert(`ESO Save: ${empty.length === 1 ? 'one item is' : empty.length + ' items are'} empty (${empty.map(it => ITEM_ONE[it.kind] || it.kind).join(', ')}): pick ${empty.some(it => ITEM_KEY[it.kind]) ? 'what it is' : 'at least one value'}, or remove it.`); return; }
+    const items = ed.items;
+    let body = { v: 1, fields: ed.fields, items };
+    if (!isAdmin()) { const r = applyLocks(body); body = r.body; }
+    if (!Object.keys(body.fields).length && !body.items.length) { alert('ESO Save: the template is empty. Tick at least one field.'); return; }
     if (!userId) { alert('ESO Save: ESO has not said who is signed in yet. Open a run, then save.'); return; }
     const btn = tplWin.querySelector('[data-act=save]'); btn.disabled = true; btn.textContent = 'Saving…';
     try {
@@ -3075,15 +3169,27 @@
   function fillWithTemplate(t) {
     const run = currentRun();
     if (!run || run.locked) { alert('ESO Save: open an unlocked run first.'); return; }
-    const nf = Object.keys((t.body && t.body.fields) || {}).length, ni = ((t.body && t.body.items) || []).length;
+    const { body, dropped } = applyLocks(t.body || {});
+    const nf = Object.keys(body.fields).length, ni = body.items.length;
+    if (!nf && !ni) { alert(`ESO Save: everything in "${t.name}" is locked by the agency, so there is nothing to fill.`); return; }
+    const before = run.tplFilled && run.tplFilled[t.id];
     closeTemplates();
-    askBox(`Fill this run from "${t.name}"?`, `${run.incidentNumber || 'This run'} gets ${nf} field${nf === 1 ? '' : 's'}${ni ? ` and ${ni} item${ni === 1 ? '' : 's'}` : ''} from the template. Anything already on the run for those fields is replaced.`, [['Yes, fill it', true], ['No', false]], (yes) => {
+    askBox(`Fill this run from "${t.name}"?`, `${run.incidentNumber || 'This run'} gets ${nf} field${nf === 1 ? '' : 's'}${ni ? ` and ${ni} item${ni === 1 ? '' : 's'}` : ''} from the template. Anything already on the run for those fields is replaced.${dropped ? ` ${dropped} thing${dropped === 1 ? '' : 's'} in it ${dropped === 1 ? 'is' : 'are'} locked by the agency and left out.` : ''}${before && ni ? ' This template already filled this run once: its fields are written again; tick below to add its items (vitals, treatments, assessments…) a second time.' : ''}`, [['Yes, fill it', true], ['No', false]], (yes) => {
       if (!yes) return;
+      const again = veilAgain;
       tplFilling = { name: t.name, at: Date.now() };
       showProgress(`Filling from "${t.name}"…`, 'Starting', 0);
-      toPage('action', { name: 'fillTemplate', recordId: run.recordId, body: t.body, tplName: t.name });
+      toPage('action', { name: 'fillTemplate', recordId: run.recordId, body, tplName: t.name, tplId: t.id, items: before && ni ? again : true });
     });
+    if (before && ni && veil) {
+      const box = veil.querySelector('.askbox');
+      const lab = document.createElement('label'); lab.style.cssText = 'display:flex;gap:8px;align-items:center;justify-content:center;margin:0 0 12px;font-size:15px';
+      lab.innerHTML = '<input type="checkbox" data-again style="width:22px;height:22px"> Add the items again';
+      box.insertBefore(lab, box.querySelector('.actions'));
+      veilAgain = false; lab.querySelector('input').addEventListener('change', (e) => { veilAgain = e.target.checked; });
+    } else veilAgain = true;
   }
+  let veilAgain = true;
   function showProgress(title, text, frac) {
     if (veil && veil.querySelector('.track')) { veil.querySelector('.prog').textContent = text; veil.querySelector('.fill').style.width = Math.round(frac * 100) + '%'; return; }
     hideVeil(); if (!shadow) return;
@@ -3099,7 +3205,7 @@
   async function onTemplateFilled(p) {
     const name = tplFilling ? tplFilling.name : 'the template'; tplFilling = null;
     hideVeil();
-    if (!p.ok) { alert(`ESO Save: could not fill from ${name}. ${p.error || ''}`); return; }
+    if (!p.ok) { const m = /^ESO refused the (\w+) tab: (HTTP \d+)/.exec(p.error || ''); alert(m ? `ESO Save: ESO would not take the ${m[1]} tab from "${name}" (${m[2]}). The other tabs before it were filled. Open that tab, check what the template puts there, and tell Michael which template it was.` : `ESO Save: could not fill from "${name}". ${p.error || ''}`); return; }
     // the app shows what it has loaded: step off the open tab and back so it re-reads it
     const id = lastStatus && lastStatus.currentRecordId;
     const here = lastStatus && lastStatus.lastView && lastStatus.lastView.recordId === id ? lastStatus.lastView.view : null;
