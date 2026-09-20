@@ -2814,6 +2814,7 @@
   function renderTemplates(note) {
     if (!tplWin) return;
     if (tplView === 'edit') return renderEditor();
+    tplWin._page = null;
     if (tpls.who && userId && tpls.who !== userId) { tpls = { mine: [], shared: [], everyone: [], at: 0, who: userId }; note = note || 'No signal: the templates seen on this tablet were another login\'s.'; }
     const run = currentRun();
     const canFill = !!run && !run.locked;
@@ -2897,6 +2898,9 @@
   const memberFields = (root) => (catalog.fields || []).filter(f => f.i === root).map(f => ({ ...f, rel: f.a.slice(root.length + 1) }));
   function renderEditor() {
     if (!tplWin || !ed) return;
+    // a redraw keeps the place on the page (and the open folds) the crew was at
+    const oldBody = tplWin.querySelector('.body'); const keepTop = oldBody ? oldBody.scrollTop : 0;
+    const openFolds = new Set(Array.from(tplWin.querySelectorAll('details.sec[open]')).map(d => d.querySelector('summary') && d.querySelector('summary').textContent.trim()));
     const q = ed.q.trim().toLowerCase();
     const counts = {}; for (const a of Object.keys(ed.fields)) { const p = a.split('.')[0]; counts[p] = (counts[p] || 0) + 1; } for (const it of ed.items) { const p = it.root.split('.')[0]; counts[p] = (counts[p] || 0) + 1; }
     const pageBtns = TPL_PAGES.map(([k, l]) => `<button data-page="${k}" class="${ed.page === k ? 'on' : ''}">${l}${counts[k] ? `<span class="cnt">${counts[k]}</span>` : ''}</button>`).join('');
@@ -2938,6 +2942,11 @@
     const nf = Object.keys(ed.fields).length, ni = ed.items.length;
     tplWin.innerHTML = `<div class="tophead"><input class="name" type="text" placeholder="Template name" value="${esc(ed.name)}" data-name><span class="muted" style="color:#d1fae5">${nf} field${nf === 1 ? '' : 's'}${ni ? `, ${ni} item${ni === 1 ? '' : 's'}` : ''}</span><span style="flex:1"></span>${isAdmin() ? `<button class="tb ${lockMode ? 'pri' : 'sec'}" data-act="lockmode" title="Lock fields the crew must enter themselves">${lockMode ? 'Done locking' : 'Lock fields'}</button>` : ''}<button class="tb pri" data-act="save">Save</button><button class="tb sec" data-act="cancel">Cancel</button></div>
       <div class="body">${shareUi}<input type="text" class="search" placeholder="Find a field on this tab…" value="${esc(ed.q)}" data-q><div class="pages">${pageBtns}</div>${content}</div>`;
+    if (tplWin._page === page) {
+      for (const d of tplWin.querySelectorAll('details.sec')) { const t = d.querySelector('summary') && d.querySelector('summary').textContent.trim(); if (t && openFolds.has(t)) d.open = true; }
+      tplWin.querySelector('.body').scrollTop = keepTop;
+    }
+    tplWin._page = page;
     wireEditor();
   }
   // a vital's members in their groups (Blood pressure: Systolic, Diastolic, Method; Pulse: Rate,
