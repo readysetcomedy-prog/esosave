@@ -1849,6 +1849,8 @@ test('templates: shared to everyone or to named people show up for them, named a
   assert.match(body, /Templates shared to everyone[\s\S]*Chest pain[\s\S]*shared by TEST, MEDIC/);
   assert.doesNotMatch(body, /For Alex/);
   assert.match(body.split('Templates shared with you')[1].split('Templates shared to everyone')[0], /None/);
+  // only its maker can change or delete it: her buttons on his template are Fill and Copy
+  assert.deepEqual(await T.page.evaluate(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.tplwin .tpl [data-act]')).map(b => b.dataset.act)), ['fill', 'copy']);
   await twClickText('.tpl [data-act=copy]', 'Copy to mine');
   await waitFor(() => T.page.evaluate(() => !!document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin [data-name]')), { label: 'editor' });
   assert.equal(await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin [data-name]').value), 'Chest pain (copy)');
@@ -1860,6 +1862,8 @@ test('templates: shared to everyone or to named people show up for them, named a
   await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.bar [data-act=templates]').click());
   await waitFor(async () => /For Alex/.test((await tw('.body')) || ''), { label: 'listed for him' });
   assert.match((await tw('.body')).split('Templates shared with you')[1].split('Templates shared to everyone')[0], /For Alex[\s\S]*shared by TEST, MEDIC/);
+  assert.ok(!(await T.page.evaluate(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.tplwin .tpl [data-act]')).some(b => /edit|delete/.test(b.dataset.act)))), 'no Edit or Delete on what others made');
+  assert.equal((await tplDb()).templates.find(t => t.name === 'Chest pain').owner_id, 'person-1', 'the original is still his after the copy');
   await twClick('[data-act=close]');
   await T.control({ userName: 'TEST, MEDIC', userId: 'person-1' });
 });
