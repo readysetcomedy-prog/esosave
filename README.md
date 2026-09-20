@@ -121,11 +121,13 @@ to bad signal or a hung page.
   printout), the crew taps "‹ Safari" to come back, and the pages upload themselves with the same
   request ESO's dialog sends, named `…Photo1.jpg`, `…Photo2.jpg` as ESO names them. A facesheet
   (scanned, or a picture uploaded on the iPad) is read by the iPad's own text recognition and the
-  crew shown what was found, name, sex, DOB, race, address, phones, physician, primary and
-  secondary insurance, Medicare or Medicaid number, the insured and their relationship, before
-  anything is written; "Fill both pages" writes the Patient page and the Billing page with the same
-  saves ESO's app makes (the address is looked up in ESO's places table first, so the county comes
-  too). A masked SSN and anything not on ESO's lists is left blank and named. A setting, on by
+  crew shown what was found, name, sex (and gender, unless the sheet names one of its own), DOB,
+  race, ethnicity, address, phones, physician, and the insured on the Billing page (the guarantor
+  the sheet names, or the patient again), before anything is written; "Fill both pages" writes
+  both with the same saves ESO's app makes (the address is looked up in ESO's places table first,
+  so the county comes too). The insurance itself is never filled: that is the billing office's.
+  A masked SSN and anything not on ESO's lists is left blank and named, and "Show the text that
+  was read" shows what the text recognition produced. A setting, on by
   default; off, ESO's camera and Add Attachment work untouched. On a desktop the facesheet is
   attached and named but not read (no text recognition there).
 - **Copy a vital.** A small copy button floats just left of each saved vital's time in the Vitals
@@ -134,6 +136,11 @@ to bad signal or a hung page.
   were not.
 
 Nothing is invented. The extension only replays what ESO's own app tried to send.
+
+Every quick button sits in a host of the extension's own inside ESO's scrolling container, so it
+rides with the page natively (no script moves it during a scroll) and the container's own edge
+takes it under the banner. Only buttons over ESO's fixed panels (the refusal form) live in the
+fixed overlay.
 
 ## How it works
 

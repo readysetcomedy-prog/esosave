@@ -281,6 +281,12 @@
     .veil button.a { margin-top: 4px; }
     .veil .row { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-top: 14px; }
     .veil .row button.a { font-size: 15px; padding: 10px 16px; }
+    .veil .askbox, .veil .lockask { max-width: min(720px, 92vw); }
+    .veil .askbox h2, .veil .lockask h2 { font-size: 22px; }
+    .veil .askbox .why, .veil .lockask .why { font-size: 17px !important; }
+    .veil .askbox .actions, .veil .lockask .actions { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; margin-top: 8px; }
+    .veil .askbox .actions button.a, .veil .lockask .actions button.a { font-size: 19px; padding: 16px 26px; min-height: 58px; min-width: 150px; border-radius: 10px; margin: 0; }
+    .veil .fillask .actions button.a { font-size: 17px; min-height: 52px; }
     .urow { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid #eee; font-size: 13px; }
     .urow .actions { margin: 0; }
     .fac { margin-top: 8px; } .fac .chosen { margin: 4px 0; display: flex; flex-wrap: wrap; gap: 4px; } .fac .chosen a { cursor: pointer; font-weight: 700; margin-left: 2px; }
@@ -1079,9 +1085,71 @@
     return quickLayer;
   }
   const quickSheet = () => ensureQuickLayer().firstElementChild;
+  // ---- where the buttons live. A button drawn in a fixed overlay has to be dragged along by
+  // script on every scroll frame, and on an iPad the page moves a frame ahead of that (the
+  // jiggle). So the buttons for a tab's content sit in a host of our own inside ESO's scrolling
+  // container itself, positioned in the container's content, and ride with the page natively;
+  // the container's own edge clips them under the banner. Only buttons over ESO's fixed panels
+  // (the refusal form) stay in the fixed overlay.
+  const rides = new Map();      // scroller element -> { host, scroller, quick, copy }
+  const rideHosts = new Set();
+  const ours = (el) => !!el && ((host && host.contains(el)) || [...rideHosts].some(h => h.contains(el)));
+  function scrollParent(el) {
+    for (let e = el && el.parentElement; e && e !== document.body && e !== document.documentElement; e = e.parentElement) {
+      const cs = getComputedStyle(e);
+      if (/(auto|scroll)/.test(cs.overflowY) && e.scrollHeight > e.clientHeight + 1) return e;
+    }
+    return null;
+  }
+  function rideFor(scroller) {
+    let r = rides.get(scroller);
+    if (r && r.host.parentElement === scroller) return r;
+    if (r) { r.host.remove(); rideHosts.delete(r.host); rides.delete(scroller); }
+    if (getComputedStyle(scroller).position === 'static') scroller.style.position = 'relative';
+    const h = document.createElement('div');
+    h.className = 'esosave-ride';
+    h.style.cssText = 'position:absolute;left:0;top:0;width:0;height:0;overflow:visible;z-index:20;pointer-events:none;';
+    const sh = h.attachShadow({ mode: 'open' });
+    const st = document.createElement('style');
+    st.textContent = CSS + ' .quick, .copylayer { position: absolute; inset: auto; left: 0; top: 0; width: 0; height: 0; overflow: visible; clip-path: none; } .sheet { position: absolute; inset: auto; left: 0; top: 0; width: 0; height: 0; overflow: visible; transform: translateZ(0); }';
+    sh.appendChild(st);
+    const q = document.createElement('div'); q.className = 'quick'; q.innerHTML = '<div class="sheet"></div>';
+    const c = document.createElement('div'); c.className = 'copylayer'; c.innerHTML = '<div class="sheet"></div>';
+    sh.appendChild(q); sh.appendChild(c);
+    scroller.appendChild(h);
+    r = { host: h, scroller, quickLayer: q, copyLayer: c, quick: q.firstElementChild, copy: c.firstElementChild };
+    rides.set(scroller, r); rideHosts.add(h);
+    return r;
+  }
+  // The sheets are offset so a child placed at viewport coordinates (as every layout here does)
+  // lands on that same spot in the container's content, and then scrolls with it.
+  function placeRides() {
+    for (const [scroller, r] of rides) {
+      if (!scroller.isConnected || r.host.parentElement !== scroller) { r.host.remove(); rideHosts.delete(r.host); rides.delete(scroller); continue; }
+      const b = scroller.getBoundingClientRect();
+      const lx = `${Math.round(scroller.scrollLeft - b.left - scroller.clientLeft)}px`, ly = `${Math.round(scroller.scrollTop - b.top - scroller.clientTop)}px`;
+      for (const sheet of [r.quick, r.copy]) { if (sheet.style.left !== lx) sheet.style.left = lx; if (sheet.style.top !== ly) sheet.style.top = ly; }
+    }
+  }
+  let mainScrollerCache = { at: 0, el: null };
+  function mainScroller() {
+    if (Date.now() - mainScrollerCache.at < 300) return mainScrollerCache.el;
+    const probe = Array.from(document.querySelectorAll('eso-field, assessment-record, crew-list, eso-location, tr, grid-row')).find(e => !e.closest('shelf-panel, eso-modal, eso-modal-dialog, standard-refusal, jump-link-shelf-panel') && !ours(e) && visible(e));
+    const el = probe ? scrollParent(probe) : null;
+    mainScrollerCache = { at: Date.now(), el };
+    return el;
+  }
+  function sheetFor(key) {
+    const gk = key.split(':')[0];
+    if (CHIP_GROUPS[gk] && CHIP_GROUPS[gk].form) return quickSheet();
+    const ms = mainScroller();
+    return ms ? rideFor(ms).quick : quickSheet();
+  }
   function quickEl(key, make) {
     let el = quickEls.get(key);
-    if (!el) { el = make(); quickEls.set(key, el); quickSheet().appendChild(el); }
+    if (!el) { el = make(); quickEls.set(key, el); }
+    const sheet = sheetFor(key);
+    if (el.parentNode !== sheet) sheet.appendChild(el);
     return el;
   }
   function dropQuick(prefix) {
@@ -1139,7 +1207,7 @@
     const x = r.left + Math.min(24, r.width / 2), y = Math.max(r.top + Math.min(12, r.height / 2), bannerBottom() + 4);
     if (y >= r.bottom) return true; // wholly under the banner: the clip hides its rows anyway
     if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) return true; // off screen for now: nothing to say
-    const top = document.elementsFromPoint(x, y).find(e => !(host && host.contains(e)));
+    const top = document.elementsFromPoint(x, y).find(e => !ours(e));
     return !top || el.contains(top) || top.contains(el);
   }
   const fieldEl = (ref) => { const f = document.querySelector(`eso-field[data-field-ref="${ref}"]`); return f && visible(f) && onTop(f) ? f : null; };
@@ -1995,6 +2063,7 @@
   }
   function layoutQuick() {
     try { rebaseLayers(); } catch (e) { /* keep going */ }
+    try { placeRides(); } catch (e) { /* keep going */ }
     try { clipLayers(); } catch (e) { /* keep going */ }
     try { layoutCrew(); } catch (e) { /* keep going */ }
     try { watchMileage(); } catch (e) { /* keep going */ }
@@ -2083,25 +2152,30 @@
   }
   function decorateVitalRows() {
     rebaseLayers();
+    try { placeRides(); } catch (e) { /* keep going */ }
     const cells = vitalTimeCells();
     if (!cells.length && !copyButtons.size) return;
     const layer = ensureCopyLayer();
     if (!layer) return;
     const keep = new Set();
     const seen = {};
-    layer.style.display = copyHiddenAt && !(lastStatus.lastView && lastStatus.lastView.ts > copyHiddenAt) ? 'none' : '';
+    const hidden = copyHiddenAt && !(lastStatus.lastView && lastStatus.lastView.ts > copyHiddenAt) ? 'none' : '';
+    layer.style.display = hidden;
+    for (const r of rides.values()) r.copyLayer.style.display = hidden;
     for (const { el, text, rect, cell } of cells) {
       const time = text.padStart(8, '0');
       const nth = seen[time] = (seen[time] || 0);
       seen[time]++;
       let btn = copyButtons.get(el);
-      if (!btn) { btn = makeCopyButton(); copyButtons.set(el, btn); layer.firstElementChild.appendChild(btn); }
+      if (!btn) { btn = makeCopyButton(); copyButtons.set(el, btn); }
+      const sp = scrollParent(el); const sheet = sp ? rideFor(sp).copy : layer.firstElementChild;
+      if (btn.parentNode !== sheet) sheet.appendChild(btn);
       keep.add(el);
       btn.dataset.time = time; btn.dataset.nth = String(nth);
       // hidden when something (the entry form, a menu) is drawn over the row
       const hit = document.elementFromPoint(rect.left + Math.min(rect.width / 2, 12), rect.top + rect.height / 2);
       const row = el.closest('tr') || (el.parentElement && el.parentElement.parentElement) || el.parentElement || el;
-      const covered = hit && hit !== el && !el.contains(hit) && !row.contains(hit) && !(host && host.contains(hit));
+      const covered = hit && hit !== el && !el.contains(hit) && !row.contains(hit) && !ours(hit);
       const off = rect.bottom < 0 || rect.top > innerHeight;
       if (covered || off) { btn.style.display = 'none'; continue; }
       const w = 26, h = 22;
@@ -2137,7 +2211,7 @@
     for (const type of ['touchstart', 'touchend', 'pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click']) {
       document.addEventListener(type, (e) => {
         const btn = e.target && e.target.closest ? e.target.closest('button, a') : null;
-        if (!btn || (host && host.contains(btn))) return;
+        if (!btn || ours(btn)) return;
         const m = match(btn, e); if (!m) return;
         if (m === 'through') return;
         e.preventDefault(); e.stopImmediatePropagation(); e.stopPropagation();
@@ -2327,8 +2401,9 @@
     if (!text) { if (p.source === 'scan') notice('Facesheet attached', 'It could not be read, so the Patient and Billing pages were left alone.', 4000); return; }
     const parsed = parseFacesheet(text);
     const plan = facesheetPlan(parsed, (facilityTypes && facilityTypes.lists) || null);
-    if (!plan.patient.length && !plan.billing.length) { notice('Facesheet attached', 'Nothing on it could be read into the Patient or Billing page.', 4000); return; }
+    plan.text = text;
     const run = currentRun(); if (!run) return;
+    if (!plan.patient.length && !plan.billing.length) { plan.lines = []; askFill(run, plan); return; }
     askFill(run, plan);
   }
   const blobBase64 = (blob) => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1] || ''); r.onerror = () => rej(new Error('read failed')); r.readAsDataURL(blob); });
@@ -2341,10 +2416,13 @@
     veil.innerHTML = `<div class="box askbox fillask" style="max-width:560px;text-align:left"><h2>Fill from the facesheet?</h2>
       <div class="why" style="font-size:14px;margin:8px 0 4px">These go onto the Patient and Billing pages, replacing what is there for these fields:</div>
       <ul style="margin:4px 0 10px 18px;padding:0;font-size:14px;line-height:1.45">${plan.lines.map(l => `<li>${esc(l)}</li>`).join('')}</ul>
+      ${plan.lines.length ? '' : '<div class="why" style="font-size:14px;margin:0 0 10px">Nothing on it could be read into the Patient or Billing page.</div>'}
       ${plan.skipped.length ? `<div class="why" style="font-size:13px;margin:0 0 10px">Left blank: ${esc(plan.skipped.join('; '))}.</div>` : ''}
-      <div class="actions"><button class="a" data-act="fill-yes">Fill both pages</button><button class="a sec" data-act="fill-no">Not now</button></div></div>`;
+      <details style="font-size:12px;margin:0 0 10px"><summary style="cursor:pointer">Show the text that was read</summary><pre style="white-space:pre-wrap;max-height:220px;overflow:auto;background:#f1f5f9;padding:8px;border-radius:6px;margin:6px 0 0">${esc(plan.text || '')}</pre></details>
+      <div class="actions">${plan.lines.length ? '<button class="a" data-act="fill-yes">Fill both pages</button>' : ''}<button class="a sec" data-act="fill-no">${plan.lines.length ? 'Not now' : 'Close'}</button></div></div>`;
     veil.querySelector('[data-act=fill-no]').addEventListener('click', () => hideVeil());
-    veil.querySelector('[data-act=fill-yes]').addEventListener('click', () => {
+    const yes = veil.querySelector('[data-act=fill-yes]');
+    if (yes) yes.addEventListener('click', () => {
       showVeilMessage('Filling the Patient and Billing pages…', `${plan.patient.length + plan.billing.length} fields`);
       toPage('action', { name: 'fillFacesheet', recordId: run.recordId, patient: plan.patient, billing: plan.billing, places: plan.places });
     });
@@ -2370,71 +2448,118 @@
   // unlabelled row naming a race is the race.
   const RACES = [[/white|caucasian/i, 'White'], [/black|african/i, 'Black or African American'], [/asian/i, 'Asian'], [/indian|alaska|native american/i, 'American Indian or Alaska Native'], [/hispanic|latino/i, 'Hispanic or Latino'], [/middle eastern|north african/i, 'Middle Eastern or North African'], [/hawaiian|pacific/i, 'Native Hawaiian or Other Pacific Islander']];
   const RELS = [[/^self|patient$/i, 'Self'], [/spouse|husband|wife/i, 'Spouse'], [/child|son|daughter|dependent/i, 'Child/Dependent'], [/parent|mother|father/i, 'Parent'], [/partner/i, 'Life/Domestic Partner'], [/employee/i, 'Employee']];
+  // every label the parser reads, plus the ones it knows to leave alone (so a value is never
+  // mistaken for part of the next label)
+  const KNOWN = new Set(['pcp', 'primarycareprovider', 'primarycarephysician', 'primaryphysician', 'pcpname', 'familyphysician', 'primarydoctor',
+    'patientname', 'name', 'patient', 'legalname', 'homeaddress', 'address', 'address1', 'streetaddress', 'street', 'patientaddress', 'mailingaddress', 'city', 'citystatezip', 'citystzip', 'citystate',
+    'sex', 'birthsex', 'sexatbirth', 'legalsex', 'gender', 'genderidentity', 'dob', 'dateofbirth', 'birthdate', 'born', 'birthday', 'ssn', 'socialsecurity', 'socialsecuritynumber', 'ss', 'ssno',
+    'race', 'raceethnicity', 'patientrace', 'ethnicity', 'ethnicgroup', 'ethnic', 'homephone', 'primaryphone', 'phone', 'phonenumber', 'homephonenumber', 'patientphone', 'telephone',
+    'mobilephone', 'cellphone', 'cell', 'mobile', 'cellular', 'workphone', 'businessphone', 'guarantorname', 'guarantor', 'patientsreltn', 'relationtopatient', 'relationship', 'reltn',
+    'relationshiptopatient', 'relationtothepatient', 'patientrelationship', 'relation', 'reltopatient', 'billingaddress', 'guarantoraddress', 'subscribername', 'subscriber', 'insuredname', 'insured',
+    'policyholder', 'patreltosubscriber', 'relationtosubscriber', 'relationshiptosubscriber', 'relationtoinsured', 'relationshiptoinsured', 'insurancename', 'payor', 'payer', 'insurance', 'carrier',
+    'company', 'insurancecompany', 'planname', 'payorname', 'payername',
+    // read past, never used
+    'altphone', 'religion', 'age', 'contactname', 'claimaddress', 'insurancetype', 'guarantorid', 'mrn', 'fin', 'encounterdate', 'hospitalaccount', 'contactserial', 'roombed', 'unit', 'patientclass',
+    'hospitalservice', 'admittingprovider', 'attendingprovider', 'referringphysician', 'admdiagnosis', 'employer', 'status', 'plan', 'groupnumber', 'subscriberid', 'subscriberdob', 'policynumber',
+    'insurancephone', 'authorizationnumber', 'authorizationphone', 'authorizationcontact', 'employername', 'employerphone', 'financialclass', 'regdttm', 'estdtofarrival', 'inptadmdttm', 'dischdttm',
+    'observationdttm', 'vipindicator', 'admitreason', 'patienttype', 'medicalservice', 'location', 'isolation', 'diseasealert', 'admittype', 'admitsource', 'advancedirective', 'regclerk',
+    'admitphysician', 'attendphysician', 'legalguardian', 'inptadmdate', 'inptadmtime', 'chartid', 'maritalstatus', 'language', 'email', 'occupation', 'accountnumber', 'visitnumber', 'nextofkin',
+    'emergencycontact', 'preferredname', 'nickname', 'suffix', 'middlename', 'firstname', 'lastname']);
   function parseFacesheet(text) {
-    const out = { patient: {}, guarantor: {}, primary: {}, secondary: {}, contact: {}, encounter: {}, head: {} };
+    const out = { patient: {}, guarantor: {}, primary: {}, secondary: {}, contact: {}, encounter: {}, head: {}, other: {} };
     const key = (t) => String(t || '').toLowerCase().replace(/[^a-z]/g, '');
-    let section = 'head', lastAddressRow = -1, lastAddressSection = null;
+    let section = 'head', lastAddressRow = -1, lastAddressSection = null, carry = null;
     const rows = String(text).split(/\r?\n/);
     const set = (sec, k, v) => { if (v && out[sec] && !(k in out[sec])) out[sec][k] = v; };
+    const header = (k) => /^(patientinformation|patient|patientdemographics|demographics)$/.test(k) ? 'patient'
+      : /^(guarantorinformation|guarantor)$/.test(k) ? 'guarantor'
+      : /^(guarantoremployer|coverage|tertiaryinsurance|employer|employerinformation)$/.test(k) ? 'other'
+      : /^(contactinformation|emergencycontact|emergencycontacts|nextofkin)$/.test(k) ? 'contact'
+      : /^(primaryinsurance|insuranceprimary)$/.test(k) ? 'primary'
+      : /^(secondaryinsurance|insurancesecondary)$/.test(k) ? 'secondary'
+      : /^(encounterinformation|encounter|visitinformation|visit)$/.test(k) ? 'encounter' : null;
+    // "Label: value Label2: value2" as one recognised cell (two columns read as one line), or a
+    // label with its value in the next cell, or in the next row: every "Label:" starts a pair.
+    // The label is the longest run of words before the colon that is one this parser knows
+    // (so "ROE, LOUISE M DOB:" splits at "DOB"); an unknown label is the one word before it.
+    const LABEL_WORD = /^[A-Za-z][A-Za-z.'\/()-]*$/;
+    const labelsIn = (cell) => {
+      const found = [];
+      for (let i = cell.indexOf(':'); i !== -1; i = cell.indexOf(':', i + 1)) {
+        if (cell[i + 1] && !/\s/.test(cell[i + 1])) continue; // 17:17, not a label
+        const words = [];
+        let j = i;
+        while (words.length < 4) {
+          let e = j; while (e > 0 && cell[e - 1] === ' ') e--;
+          let b = e; while (b > 0 && cell[b - 1] !== ' ') b--;
+          if (e === b) break;
+          const w = cell.slice(b, e);
+          if (!LABEL_WORD.test(w)) break;
+          words.unshift({ w, b });
+          j = b;
+          if (b === 0) break;
+        }
+        if (!words.length) continue;
+        let pick = words[words.length - 1];
+        for (let n = words.length; n >= 1; n--) { const cand = words.slice(words.length - n); if (KNOWN.has(key(cand.map(x => x.w).join('')))) { pick = cand[0]; break; } }
+        found.push({ label: key(cell.slice(pick.b, i)), start: pick.b, end: i + 1 });
+      }
+      return found;
+    };
+    const unlabelled = (sec, cell, r) => {
+      const city = cityLine(cell);
+      if (city && lastAddressSection === sec && r - lastAddressRow <= 2) { take(sec, 'city', cell, r); return; }
+      if ((sec === 'patient' || sec === 'head') && RACES.some(([re]) => re.test(cell)) && cell.length < 45) set('patient', 'race', cell);
+    };
     rows.forEach((row, r) => {
       const cells = row.split(/\s\|\s|\t/).map(c => c.trim()).filter(Boolean);
       let pending = null;
-      for (const cell of cells) {
+      cells.forEach((cell, ci) => {
         const k = key(cell);
-        if (!/:/.test(cell)) {
-          if (/^(patientinformation|patient)$/.test(k)) { section = 'patient'; continue; }
-          if (/^(guarantorinformation|guarantor)$/.test(k)) { section = 'guarantor'; continue; }
-          if (/^(guarantoremployer)$/.test(k)) { section = 'other'; continue; }
-          if (/^(contactinformation|emergencycontact|nextofkin)$/.test(k)) { section = 'contact'; continue; }
-          if (/^primaryinsurance$/.test(k)) { section = 'primary'; continue; }
-          if (/^secondaryinsurance$/.test(k)) { section = 'secondary'; continue; }
-          if (/^(tertiaryinsurance|coverage)$/.test(k)) { section = 'other'; continue; }
-          if (/^(encounterinformation|encounter)$/.test(k)) { section = 'encounter'; continue; }
+        if (!/:/.test(cell)) { const h = header(k); if (h) { section = h; carry = null; pending = null; return; } }
+        const pairs = labelsIn(cell);
+        pairs.forEach((p, i) => { p.value = cell.slice(p.end, i + 1 < pairs.length ? pairs[i + 1].start : undefined).trim(); });
+        const lead = pairs.length ? cell.slice(0, pairs[0].start).trim() : cell;
+        if (lead) {
+          const p = pending || (ci === 0 ? carry : null);
+          if (p) { take(section, p, lead, r); pending = null; carry = null; }
+          else unlabelled(section, lead, r);
         }
-        const m = /^([^:]{1,40}):\s*(.*)$/.exec(cell);
-        if (m && key(m[1])) {
-          const label = key(m[1]), value = m[2].trim();
-          if (value) { take(section, label, value, r); pending = null; } else pending = label;
-          continue;
-        }
-        if (pending) { take(section, pending, cell, r); pending = null; continue; }
-        // an unlabelled cell: the city line under an address, or the race
-        const city = cityLine(cell);
-        if (city && lastAddressSection === section && r - lastAddressRow <= 2) { take(section, 'city', cell, r); continue; }
-        if ((section === 'patient' || section === 'head') && RACES.some(([re]) => re.test(cell)) && cell.length < 45) set('patient', 'race', cell);
-      }
+        pending = null;
+        for (const p of pairs) { if (!p.label) continue; if (p.value) take(section, p.label, p.value, r); else pending = p.label; }
+      });
+      carry = pending; // a label at the end of a row may find its value at the start of the next
     });
     function take(sec, label, value, r) {
-      const s = out[sec] ? sec : 'other';
       const is = (...names) => names.includes(label);
-      if (is('pcp', 'primarycareprovider', 'primarycarephysician', 'primaryphysician', 'pcpname')) { set('patient', 'pcp', value); return; }
+      if (is('pcp', 'primarycareprovider', 'primarycarephysician', 'primaryphysician', 'pcpname', 'familyphysician', 'primarydoctor')) { set('patient', 'pcp', value); return; }
       if (sec === 'patient' || sec === 'head') {
-        if (is('patientname', 'name', 'patient')) set('patient', 'name', value);
-        else if (is('homeaddress', 'address', 'address1', 'streetaddress', 'street')) { set('patient', 'address', value); lastAddressRow = r; lastAddressSection = sec; }
-        else if (is('city', 'citystatezip', 'citystzip')) set('patient', 'city', value);
-        else if (is('sex', 'gender')) set('patient', 'sex', value);
-        else if (is('dob', 'dateofbirth', 'birthdate', 'birthdate')) set('patient', 'dob', value);
-        else if (is('ssn', 'socialsecurity', 'socialsecuritynumber', 'ss')) set('patient', 'ssn', value);
-        else if (is('race', 'raceethnicity')) set('patient', 'race', value);
-        else if (is('homephone', 'primaryphone', 'phone', 'phonenumber', 'homephonenumber')) set('patient', 'phoneHome', value);
-        else if (is('mobilephone', 'cellphone', 'cell', 'mobile')) set('patient', 'phoneMobile', value);
+        if (is('patientname', 'name', 'patient', 'legalname')) set('patient', 'name', value);
+        else if (is('lastname')) set('patient', 'last', value);
+        else if (is('firstname')) set('patient', 'first', value);
+        else if (is('middlename')) set('patient', 'middle', value);
+        else if (is('homeaddress', 'address', 'address1', 'streetaddress', 'street', 'patientaddress', 'mailingaddress')) { set('patient', 'address', value); lastAddressRow = r; lastAddressSection = sec; }
+        else if (is('city', 'citystatezip', 'citystzip', 'citystate')) set('patient', 'city', value);
+        else if (is('sex', 'birthsex', 'sexatbirth', 'legalsex')) { const w = value.split(/\s+/); set('patient', 'sex', w[0]); if (w.length > 1) unlabelled(sec, w.slice(1).join(' '), r); }
+        else if (is('gender', 'genderidentity')) set('patient', 'gender', value);
+        else if (is('dob', 'dateofbirth', 'birthdate', 'birthdate', 'born', 'birthday')) set('patient', 'dob', value);
+        else if (is('ssn', 'socialsecurity', 'socialsecuritynumber', 'ss', 'ssno')) set('patient', 'ssn', value);
+        else if (is('race', 'raceethnicity', 'patientrace')) set('patient', 'race', value);
+        else if (is('ethnicity', 'ethnicgroup', 'ethnic')) set('patient', 'ethnicity', value);
+        else if (is('homephone', 'primaryphone', 'phone', 'phonenumber', 'homephonenumber', 'patientphone', 'telephone')) set('patient', 'phoneHome', value);
+        else if (is('mobilephone', 'cellphone', 'cell', 'mobile', 'cellular')) set('patient', 'phoneMobile', value);
         else if (is('workphone', 'businessphone')) set('patient', 'phoneWork', value);
       } else if (sec === 'guarantor') {
         if (is('guarantorname', 'guarantor', 'name')) set('guarantor', 'name', value);
-        else if (is('patientsreltn', 'relationtopatient', 'relationship', 'reltn', 'relationshiptopatient', 'relationtothepatient', 'patientrelationship', 'relation')) set('guarantor', 'rel', value);
-        else if (is('billingaddress', 'address', 'homeaddress', 'address1')) { set('guarantor', 'address', value); lastAddressRow = r; lastAddressSection = sec; }
-        else if (is('city', 'citystatezip')) set('guarantor', 'city', value);
-        else if (is('dob', 'dateofbirth', 'birthdate')) set('guarantor', 'dob', value);
+        else if (is('patientsreltn', 'relationtopatient', 'relationship', 'reltn', 'relationshiptopatient', 'relationtothepatient', 'patientrelationship', 'relation', 'reltopatient')) set('guarantor', 'rel', value);
+        else if (is('billingaddress', 'address', 'homeaddress', 'address1', 'guarantoraddress')) { set('guarantor', 'address', value); lastAddressRow = r; lastAddressSection = sec; }
+        else if (is('city', 'citystatezip', 'citystate')) set('guarantor', 'city', value);
+        else if (is('dob', 'dateofbirth', 'birthdate', 'birthday')) set('guarantor', 'dob', value);
         else if (is('ssn', 'socialsecurity', 'socialsecuritynumber')) set('guarantor', 'ssn', value);
       } else if (sec === 'primary' || sec === 'secondary') {
-        if (is('insurancename', 'payor', 'payer', 'insurance', 'carrier', 'company', 'insurancecompany', 'planname', 'payorname', 'payername')) set(sec, 'company', value);
-        else if (is('plan', 'insuranceplan', 'product')) set(sec, 'plan', value);
-        else if (is('policynumber', 'policy', 'subscriberid', 'memberid', 'idnumber', 'policyid', 'memberno', 'policyno', 'insuranceid', 'id', 'subscribernumber', 'membernumber')) set(sec, 'policy', value);
-        else if (is('groupnumber', 'group', 'groupno', 'groupid')) set(sec, 'group', value);
-        else if (is('insurancephone', 'phone', 'phonenumber', 'payorphone')) set(sec, 'phone', value);
-        else if (is('subscribername', 'subscriber', 'insuredname', 'insured', 'policyholder')) set(sec, 'subscriber', value);
+        if (is('subscribername', 'subscriber', 'insuredname', 'insured', 'policyholder')) set(sec, 'subscriber', value);
         else if (is('patientsreltn', 'patreltosubscriber', 'relationship', 'relationtosubscriber', 'reltn', 'relationshiptosubscriber', 'patientrelationship', 'relationtoinsured', 'relationshiptoinsured')) set(sec, 'rel', value);
-        else if (is('financialclass', 'finclass', 'payorclass')) set(sec, 'fin', value);
+        else if (is('insurancename', 'payor', 'payer', 'insurance', 'carrier', 'company', 'insurancecompany', 'planname', 'payorname', 'payername')) set(sec, 'company', value);
       }
     }
     return out;
@@ -2457,9 +2582,23 @@
   const fmtPhone = (d) => `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}`;
   // What goes where: the ops for the Patient page and the Billing page, the place lookups, a line
   // per item for the question, and what was left blank and why.
+  // ESO's own lists (the system ones are the same for every agency; the bundle's copy wins when seen)
+  const ESO_LISTS = {
+    states: [['AL', 247], ['AK', 248], ['AZ', 249], ['AR', 250], ['CA', 251], ['CO', 252], ['CT', 253], ['DE', 254], ['FL', 256], ['GA', 257], ['HI', 258], ['ID', 259], ['IL', 260], ['IN', 261], ['IA', 262], ['KS', 263], ['KY', 264], ['LA', 265], ['ME', 266], ['MD', 267], ['MA', 268], ['MI', 269], ['MN', 270], ['MS', 271], ['MO', 272], ['MT', 273], ['NE', 274], ['NV', 275], ['NH', 276], ['NJ', 277], ['NM', 278], ['NY', 279], ['NC', 280], ['ND', 281], ['OH', 282], ['OK', 283], ['OR', 284], ['PA', 285], ['RI', 286], ['SC', 287], ['SD', 288], ['TN', 289], ['TX', 290], ['UT', 291], ['VT', 292], ['VA', 293], ['WA', 294], ['WV', 295], ['WI', 296], ['WY', 297]].map(([abbr, id]) => ({ id, abbr, name: abbr })),
+    phoneTypes: [{ id: 12830, name: 'Home' }, { id: 12831, name: 'Home Mobile' }, { id: 12827, name: 'Work' }, { id: 12828, name: 'Work Mobile' }, { id: 12833, name: 'Daytime' }, { id: 12834, name: 'Evening' }],
+    sex: [{ id: 15359, name: 'Female' }, { id: 15360, name: 'Male' }, { id: 15361, name: 'Unknown' }],
+    gender: [{ id: 314, name: 'Female' }, { id: 313, name: 'Male' }, { id: 14760, name: 'Female-to-Male, Transgender Male' }, { id: 14761, name: 'Male-to-Female, Transgender Female' }, { id: 14762, name: 'Other, neither exclusively male or female' }, { id: 10316, name: 'Unknown (Unable to Determine)' }],
+    race: [{ id: 315, name: 'American Indian or Alaska Native' }, { id: 316, name: 'Asian' }, { id: 317, name: 'Black or African American' }, { id: 10317, name: 'Hispanic or Latino' }, { id: 1338789, name: 'Middle Eastern or North African' }, { id: 318, name: 'Native Hawaiian or Other Pacific Islander' }, { id: 319, name: 'White' }],
+    ethnicity: [{ id: 321, name: 'Hispanic or Latino' }, { id: 322, name: 'Not Hispanic or Latino' }],
+    relationship: [{ id: 5780, name: 'Self' }, { id: 5781, name: 'Spouse' }, { id: 5782, name: 'Child/Dependent' }, { id: 5783, name: 'Parent' }, { id: 11792, name: 'Life/Domestic Partner' }, { id: 11791, name: 'Employee' }, { id: 5784, name: 'Other Relationship' }],
+  };
+  // What goes where: the ops for the Patient page and the Billing page (the insured: the patient
+  // again, or the guarantor named on the sheet; never the insurance itself, that is the billing
+  // office's), the place lookups, a line per item for the question, and what was left blank and why.
   function facesheetPlan(f, lists) {
-    const L = lists || {};
+    const L = {}; for (const k of Object.keys(ESO_LISTS)) L[k] = (lists && Array.isArray(lists[k]) && lists[k].length) ? lists[k] : ESO_LISTS[k];
     const byName = (list, re) => { const x = (list || []).find(i => re.test(i.name || '')); return x ? x.id : null; };
+    const exact = (list, name) => byName(list, new RegExp('^' + String(name).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i'));
     const patient = [], billing = [], places = [], lines = [], skipped = [];
     const ed = (arr, address, fieldRef, value, dataType) => { if (value !== null && value !== undefined && value !== '') arr.push({ verb: 'EDIT', address, fieldRef, value, dataType: dataType || 'string' }); };
     const phoneOps = (arr, base, refs, typeId, number) => {
@@ -2470,26 +2609,32 @@
     };
     const P = f.patient, G = f.guarantor;
     // ---- Patient page
-    const name = splitName(P.name);
+    const name = splitName(P.name) || (P.last ? { last: P.last.trim(), first: (P.first || '').trim(), middle: (P.middle || '').trim() } : null);
     if (name && name.last) {
       ed(patient, 'patient.demographics.lastName', 'PATIENTLASTNAME', name.last); ed(patient, 'patient.demographics.firstName', 'PATIENTFIRSTNAME', name.first); ed(patient, 'patient.demographics.middleName', 'PATIENTMIDDLENAME', name.middle);
       lines.push(`Name: ${name.last}, ${name.first}${name.middle ? ' ' + name.middle : ''}`);
     }
-    const sex = /^f/i.test(P.sex || '') ? 'Female' : /^m/i.test(P.sex || '') ? 'Male' : null;
-    if (sex) {
-      const sid = byName(L.sex, new RegExp('^' + sex + '$', 'i')), gid = byName(L.gender, new RegExp('^' + sex + '$', 'i'));
-      if (sid) ed(patient, 'patient.demographics.sexId', 'PATIENTSEXID', sid, 'singleselect');
-      if (gid) ed(patient, 'patient.demographics.genderId', 'PATIENTGENDERID', gid, 'singleselect');
-      if (sid || gid) lines.push(`Sex: ${sex}`); else skipped.push('sex (list not seen yet)');
-    }
+    const sexOf = (t) => /^f/i.test(t || '') ? 'Female' : /^m/i.test(t || '') ? 'Male' : null;
+    const sex = sexOf(P.sex);
+    if (sex) { ed(patient, 'patient.demographics.sexId', 'PATIENTSEXID', exact(L.sex, sex), 'singleselect'); lines.push(`Sex: ${sex}`); }
+    // gender: the sex, unless the sheet names a gender of its own
+    const gender = P.gender ? (exact(L.gender, P.gender) ? P.gender : sexOf(P.gender)) : sex;
+    if (gender) { const gid = exact(L.gender, gender); if (gid) ed(patient, 'patient.demographics.genderId', 'PATIENTGENDERID', gid, 'singleselect'); if (gid && gender !== sex) lines.push(`Gender: ${gender}`); }
+    else if (P.gender) skipped.push(`gender "${P.gender}" (not one of ESO's)`);
     const dob = dateOf(P.dob);
     if (dob) { ed(patient, 'patient.demographics.dob', 'PATIENTDOB', dob + ' 00:00:00', 'date'); lines.push(`DOB: ${dob}`); }
     if (P.ssn) { const d = P.ssn.replace(/\D/g, ''); if (/x|\*/i.test(P.ssn) || d.length !== 9) skipped.push('SSN (masked on the facesheet)'); else { ed(patient, 'patient.demographics.ssn', 'PATIENTSSN', d, 'ssn'); lines.push('SSN: ***-**-' + d.slice(-4)); } }
     if (P.race) {
       const hit = RACES.find(([re]) => re.test(P.race));
-      const rid = hit ? byName(L.race, new RegExp('^' + hit[1].replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i')) : null;
+      const rid = hit ? exact(L.race, hit[1]) : null;
       if (rid) { patient.push({ verb: 'ADD', address: `patient.demographics.raceIds.['${rid}']`, fieldRef: 'PATIENTRACEIDS', value: rid, dataType: 'multiselect' }); lines.push(`Race: ${hit[1]}`); }
       else skipped.push(`race "${P.race}" (not one of ESO's)`);
+    }
+    if (P.ethnicity) {
+      const eth = /hispanic|latino/i.test(P.ethnicity) ? (/\b(not|non)\b/i.test(P.ethnicity) ? 'Not Hispanic or Latino' : 'Hispanic or Latino') : null;
+      const eid = eth ? exact(L.ethnicity, eth) : null;
+      if (eid) { ed(patient, 'patient.demographics.ethnicityId', 'PATIENTETHNICITYID', eid, 'singleselect'); lines.push(`Ethnicity: ${eth}`); }
+      else if (!/unknown|declined|refused|unable/i.test(P.ethnicity)) skipped.push(`ethnicity "${P.ethnicity}" (not one of ESO's)`);
     }
     const addr = (src) => { const c = src.city ? cityLine(src.city) : null; const st = c ? (L.states || []).find(s => s.abbr === c.state) : null; return { line1: src.address || null, city: c ? c.city : null, stateId: st ? st.id : null, state: c ? c.state : null, zip: c ? c.zip : null }; };
     const pa = addr(P);
@@ -2510,39 +2655,15 @@
       const doc = P.pcp.split(',')[0].replace(/^\s*dr\.?\s+/i, '').trim().split(/\s+/).filter(Boolean);
       if (doc.length >= 2) { ed(patient, 'patient.contact.physicianFirstName', 'PATIENTPHYSICIANFIRSTNAME', doc[0]); ed(patient, 'patient.contact.physicianLastName', 'PATIENTPHYSICIANLASTNAME', doc[doc.length - 1]); lines.push(`Physician: ${doc[0]} ${doc[doc.length - 1]}`); }
     }
-    // ---- Billing page: who pays, and the insured
-    const ins = (src, which, refs) => {
-      if (!src.company) return null;
-      if (L.insuranceOther) ed(billing, `billing.payment.${which}InsuranceId`, refs.id, L.insuranceOther, 'singleselect'); else skipped.push(`${which} insurance company (list not seen yet)`);
-      ed(billing, `billing.payment.${which}CompanyName`, refs.company, src.company);
-      ed(billing, `billing.payment.${which}PolicyNumber`, refs.policy, src.policy || null);
-      ed(billing, `billing.payment.${which}GroupNumber`, refs.group, src.group || null);
-      ed(billing, `billing.payment.${which}InsuranceGroupName`, refs.groupName, src.plan || null);
-      const n = phoneOf(src.phone);
-      if (n) phoneOps(billing, `billing.payment.${which}InsurancePhoneNumbers`, [refs.phones, refs.phoneType, refs.phone], ptype(/^work$/i), n);
-      lines.push(`${which === 'primary' ? 'Primary' : 'Secondary'} insurance: ${src.company}${src.plan ? ' (' + src.plan + ')' : ''}${src.policy ? ', policy ' + src.policy : ''}${src.group ? ', group ' + src.group : ''}${n ? ', ' + fmtPhone(n) : ''}`);
-      return src;
-    };
-    const pri = ins(f.primary, 'primary', { id: 'PRIMARYINSURANCEID', company: 'PRIMARYCOMPANYNAME', policy: 'PRIMARYPOLICYNUMBER', group: 'PRIMARYGROUPNUMBER', groupName: 'BILLINGPRIMARYINSURANCEGROUPNAME', phones: 'BILLINGPRIMARYINSURANCEPHONENUMBERS', phoneType: 'BILLINGPRIMARYINSURANCEPHONETYPEID', phone: 'BILLINGPRIMARYINSURANCEPHONENUMBER' });
-    const sec = ins(f.secondary, 'secondary', { id: 'SECONDARYINSURANCEID', company: 'SECONDARYCOMPANYNAME', policy: 'SECONDARYPOLICYNUMBER', group: 'SECONDARYGROUPNUMBER', groupName: 'BILLINGSECONDARYINSURANCEGROUPNAME', phones: 'BILLINGSECONDARYINSURANCEPHONENUMBERS', phoneType: 'BILLINGSECONDARYINSURANCEPHONETYPEID', phone: 'BILLINGSECONDARYINSURANCEPHONENUMBER' });
-    const words = (src) => src ? [src.company, src.plan, src.fin].filter(Boolean).join(' ') : '';
-    const method = /medicare/i.test(words(pri)) ? 'Medicare' : /medicaid/i.test(words(pri)) ? 'Medicaid' : pri ? 'Insurance' : null;
-    if (method) { const mid = byName(L.payment, new RegExp('^' + method + '$', 'i')); if (mid) { ed(billing, 'billing.payment.methodOfPaymentId', 'METHODOFPAYMENTID', mid, 'singleselect'); lines.push(`Method of payment: ${method}`); } }
-    const MBI = /^[1-9][AC-HJKMNP-RT-Y][AC-HJKMNP-RT-Y0-9]\d[AC-HJKMNP-RT-Y][AC-HJKMNP-RT-Y0-9]\d[AC-HJKMNP-RT-Y]{2}\d{2}$/;
-    for (const src of [pri, sec]) {
-      if (!src || !src.policy) continue;
-      const w = words(src), id = src.policy.replace(/\s/g, '').toUpperCase();
-      if (/medicare/i.test(w) && !/advantage|hmo|ppo/i.test(w) && MBI.test(id) && !billing.some(o => o.fieldRef === 'MEDICARENAME')) { ed(billing, 'billing.payment.medicareName', 'MEDICARENAME', id); lines.push(`Medicare number: ${id}`); }
-      if (/medicaid/i.test(w) && !billing.some(o => o.fieldRef === 'MEDICAIDNAME')) { ed(billing, 'billing.payment.medicaidName', 'MEDICAIDNAME', src.policy); lines.push(`Medicaid number: ${src.policy}`); }
-    }
-    const relText = G.rel || (pri && pri.rel) || (sec && sec.rel) || null;
+    // ---- Billing page: the insured (the guarantor on the sheet; the patient when it says Self)
+    const relText = G.rel || f.primary.rel || f.secondary.rel || null;
     const rel = relText ? (RELS.find(([re]) => re.test(relText.trim())) || [])[1] : null;
-    const gname = splitName(G.name || (pri && pri.subscriber) || null);
+    const gname = splitName(G.name || f.primary.subscriber || null);
     const self = rel === 'Self' || (!rel && gname && name && gname.last === name.last && gname.first === name.first);
     if (gname || self) {
       const who = self && name ? name : gname;
       if (who) { ed(billing, 'billing.contactForPayment.insuredLastName', 'INSUREDLASTNAME', who.last); ed(billing, 'billing.contactForPayment.insuredFirstName', 'INSUREDFIRSTNAME', who.first); ed(billing, 'billing.contactForPayment.insuredMiddleName', 'INSUREDMIDDLENAME', who.middle); }
-      const rid = rel ? byName(L.relationship, new RegExp('^' + rel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i')) : (self ? byName(L.relationship, /^Self$/i) : null);
+      const rid = rel ? exact(L.relationship, rel) : (self ? exact(L.relationship, 'Self') : null);
       if (rid) ed(billing, 'billing.contactForPayment.relationshipToTheInsuredId', 'RELATIONSHIPTOTHEINSUREDID', rid, 'singleselect');
       else if (relText) skipped.push(`relationship to the insured "${relText}"`);
       const gd = dateOf(G.dob) || (self ? dob : null);
@@ -2554,9 +2675,10 @@
         ed(billing, 'billing.contactForPayment.address.zip', 'BILLINGCONTACTZIP', ga.zip);
         if (ga.city && ga.stateId && ga.zip) places.push({ scope: 'billing', city: ga.city, stateId: ga.stateId, zip: ga.zip });
       }
-      if (who) lines.push(`Insured: ${who.last}, ${who.first}${rel || self ? ' (' + (rel || 'Self') + ')' : ''}${gd ? ', DOB ' + gd : ''}`);
+      if (who) lines.push(`Insured (Billing page): ${who.last}, ${who.first}${rel || self ? ' (' + (rel || 'Self') + ')' : ''}${gd ? ', DOB ' + gd : ''}`);
       if (G.ssn && /x|\*/i.test(G.ssn)) skipped.push('insured SSN (masked on the facesheet)');
     }
+    if (f.primary.company || f.secondary.company) skipped.push('insurance (left to the billing office)');
     return { patient, billing, places, lines, skipped };
   }
   // a short notice in our overlay that goes by itself
@@ -2674,7 +2796,7 @@
   }
   let rowTimer = null;
   const scheduleRows = (ms) => { clearTimeout(rowTimer); rowTimer = setTimeout(() => { decorateVitalRows(); layoutQuick(); }, ms); };
-  const rowObserver = new MutationObserver(() => scheduleRows(150));
+  const rowObserver = new MutationObserver((muts) => { if (muts.some(m => !ours(m.target) && !(m.target && m.target.classList && m.target.classList.contains('esosave-ride')))) scheduleRows(150); });
   const startRowObserver = () => { if (document.body) rowObserver.observe(document.body, { childList: true, subtree: true, characterData: true }); };
   if (document.body) startRowObserver(); else document.addEventListener('DOMContentLoaded', startRowObserver);
   // While the page scrolls, the layers slide with it by exactly the scrolled distance, one
@@ -2694,16 +2816,16 @@
   }
   addEventListener('scroll', (e) => {
     const el = e.target && e.target.nodeType === 9 ? document : e.target;
-    if (!el || (host && host.contains(el))) return;
+    if (!el || ours(el)) return;
     if (scroller !== el) { for (const s of [quickLayer, copyLayer].map(l => l && l.firstElementChild).filter(Boolean)) s.style.transform = ''; decorateVitalRows(); layoutQuick(); scroller = el; scrollBase = scrollPos(el); }
     scrollUntil = Date.now() + 160;
     if (!scrollRaf) scrollRaf = requestAnimationFrame(slideLayers);
   }, { capture: true, passive: true });
   document.addEventListener('pointerdown', (e) => {
-    if (!copyButtons.size || (host && e.composedPath().includes(host))) return;
+    if (!copyButtons.size || ours(e.target)) return;
     const t = e.target && e.target.closest ? e.target.closest('a, button, [role="tab"], li') : null;
     const label = t && (t.innerText || t.textContent || '').trim().toUpperCase();
-    if (label && Object.values(TAB_LABELS).includes(label) && t.getBoundingClientRect().top <= 260) { copyHiddenAt = Date.now(); if (copyLayer) copyLayer.style.display = 'none'; }
+    if (label && Object.values(TAB_LABELS).includes(label) && t.getBoundingClientRect().top <= 260) { copyHiddenAt = Date.now(); if (copyLayer) copyLayer.style.display = 'none'; for (const r of rides.values()) r.copyLayer.style.display = 'none'; }
   }, true);
   addEventListener('resize', () => scheduleRows(60));
   setInterval(() => { decorateVitalRows(); layoutQuick(); }, 700);

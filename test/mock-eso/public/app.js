@@ -18,6 +18,10 @@
       x.send(body === undefined ? null : body);
     });
   }
+  // the extension's buttons live in its own hosts (one fixed, one inside each scroller): a test looks in all of them
+  const hosts = () => [document.getElementById('esosave-host'), ...document.querySelectorAll('.esosave-ride')].filter(h => h && h.shadowRoot);
+  window.__q = (sel) => { for (const h of hosts()) { const r = h.shadowRoot.querySelector(sel); if (r) return r; } return null; };
+  window.__qa = (sel) => hosts().flatMap(h => Array.from(h.shadowRoot.querySelectorAll(sel)));
   const app = window.app = {
     recordId: null, keyMap: {}, dirty: [], responses: [], views: {}, autosaveMs: 300, flushing: false, errors: [],
     async start() {

@@ -273,7 +273,7 @@ test('a copy button on a saved vital re-enters it as a new vital with the curren
   // the entry form shows a time next to its own controls: it must not get a button
   await T.page.evaluate(() => { document.body.insertAdjacentHTML('beforeend', '<div id="entry" class="vital-entry-modal" style="position:fixed;right:20px;top:20px;background:#fff;border:1px solid #000;padding:8px"><div><span>15:39:12</span><input value="x"></div></div>'); });
   await app(() => window.app.openTab('Vitals'));
-  const buttons = () => T.page.evaluate(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.esosave-copy')).filter(b => b.style.display !== 'none').map(b => ({ time: b.dataset.time, rect: b.getBoundingClientRect().toJSON() })));
+  const buttons = () => T.page.evaluate(() => Array.from(window.__qa('.esosave-copy')).filter(b => b.style.display !== 'none').map(b => ({ time: b.dataset.time, rect: b.getBoundingClientRect().toJSON() })));
   await waitFor(async () => (await buttons()).length === 1, { label: 'one copy button, for the saved row only' });
   const [btn] = await buttons();
   assert.equal(btn.time, '15:39:12');
@@ -313,7 +313,7 @@ test('a copy button on a saved vital re-enters it as a new vital with the curren
 test('a copied vital ESO refuses is reported and dropped; the card never turns to NO SIGNAL', async () => {
   const id = await app(() => window.app.recordId);
   await app(() => window.app.openTab('Vitals'));
-  const buttons = () => T.page.evaluate(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.esosave-copy')).filter(b => b.style.display !== 'none').map(b => b.getBoundingClientRect().toJSON()));
+  const buttons = () => T.page.evaluate(() => Array.from(window.__qa('.esosave-copy')).filter(b => b.style.display !== 'none').map(b => b.getBoundingClientRect().toJSON()));
   await waitFor(async () => (await buttons()).length === 2, { label: 'copy buttons' });
   const dialogs = [];
   const onDialog = (d) => { dialogs.push(d.message()); d.dismiss().catch(() => {}); };
@@ -344,7 +344,7 @@ test('a copied vital ESO refuses is reported and dropped; the card never turns t
 test('with no signal, a copied vital is held and pushed when signal returns', async () => {
   const id = await app(() => window.app.recordId);
   await app(() => window.app.openTab('Vitals'));
-  const buttons = () => T.page.evaluate(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.esosave-copy')).filter(b => b.style.display !== 'none').map(b => b.getBoundingClientRect().toJSON()));
+  const buttons = () => T.page.evaluate(() => Array.from(window.__qa('.esosave-copy')).filter(b => b.style.display !== 'none').map(b => b.getBoundingClientRect().toJSON()));
   await waitFor(async () => (await buttons()).length === 2, { label: 'copy buttons' });
   const dialogs = [];
   const onDialog = (d) => { dialogs.push(d.message()); d.dismiss().catch(() => {}); };
@@ -547,7 +547,7 @@ test('the Not sent list is agency-wide: locked runs from other devices with a de
 test('quick history chips: tap several, one open of ESO\'s Add History list ticks them all and presses OK', async () => {
   const id = await freshRun();
   await app(() => window.app.openTab('Patient'));
-  const chips = () => T.page.evaluate(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .chip[data-group=history]')).map(c => ({ short: c.textContent, name: c.title, cls: c.className, rect: c.getBoundingClientRect().toJSON() })));
+  const chips = () => T.page.evaluate(() => Array.from(window.__qa('.quick .chip[data-group=history]')).map(c => ({ short: c.textContent, name: c.title, cls: c.className, rect: c.getBoundingClientRect().toJSON() })));
   await waitFor(async () => (await chips()).length >= 20, { label: 'chips drawn' });
   const all = (await chips()).filter(c => !/other/.test(c.cls));
   assert.equal((await chips()).filter(c => /other/.test(c.cls)).length, 1, 'one Other… at the end of the row');
@@ -556,7 +556,7 @@ test('quick history chips: tap several, one open of ESO\'s Add History list tick
   assert.ok(all[0].rect.left > btn.right, 'first chip sits to the right of Add History');
   assert.ok(all.some(c => c.rect.top > btn.bottom), 'later chips wrap under the button');
   assert.ok(all.every(c => c.rect.bottom < next.top), 'no chip sits on the next field: the button made room');
-  const tap = async (name) => { await waitFor(() => T.page.evaluate((n) => !!Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .chip')).find(x => x.title === n), name), { label: 'chip ' + name }); await T.page.evaluate((n) => { Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .chip')).find(x => x.title === n).click(); }, name); };
+  const tap = async (name) => { await waitFor(() => T.page.evaluate((n) => !!Array.from(window.__qa('.quick .chip')).find(x => x.title === n), name), { label: 'chip ' + name }); await T.page.evaluate((n) => { Array.from(window.__qa('.quick .chip')).find(x => x.title === n).click(); }, name); };
   // each tap goes straight into ESO's list: open, tick, OK. Two quick taps may share one open.
   await tap('Hypertension (HTN)');
   await tap('Diabetes');
@@ -568,7 +568,7 @@ test('quick history chips: tap several, one open of ESO\'s Add History list tick
   assert.match(await app(() => document.getElementById('histlist').textContent), /Hypertension \(HTN\)Diabetes/);
   await waitFor(async () => (await chips()).filter(c => /added/.test(c.cls)).length === 2, { label: 'chips show added' });
   // "Other…" opens ESO's own Add History list and nothing else
-  await T.page.evaluate(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .chip[data-group=history]')).find(c => /other/.test(c.className)).click());
+  await T.page.evaluate(() => Array.from(window.__qa('.quick .chip[data-group=history]')).find(c => /other/.test(c.className)).click());
   await waitFor(async () => (await app(() => window.app.shelfOpens)) === opens + 1, { label: 'Add History opened by Other…' });
   await app(() => document.querySelector('shelf-panel header button').click());
   await waitFor(async () => (await app(() => document.querySelectorAll('shelf-panel').length)) === 0, { label: 'closed' });
@@ -589,9 +589,9 @@ test('quick history chips: tap several, one open of ESO\'s Add History list tick
 test('quick chips for medications and allergies work the same way, and every quick button hides while a picker is open', async () => {
   const id = await app(() => window.app.recordId);
   await app(() => window.app.openTab('Patient'));
-  const chips = () => T.page.evaluate(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .chip')).map(c => ({ short: c.textContent, name: c.title, cls: c.className, rect: c.getBoundingClientRect().toJSON() })));
+  const chips = () => T.page.evaluate(() => Array.from(window.__qa('.quick .chip')).map(c => ({ short: c.textContent, name: c.title, cls: c.className, rect: c.getBoundingClientRect().toJSON() })));
   await waitFor(async () => (await chips()).length >= 55, { label: 'all three groups drawn' });
-  const tap = async (name) => { await waitFor(() => T.page.evaluate((n) => !!Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .chip')).find(x => x.title === n), name), { label: 'chip ' + name }); await T.page.evaluate((n) => { Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .chip')).find(x => x.title === n).click(); }, name); };
+  const tap = async (name) => { await waitFor(() => T.page.evaluate((n) => !!Array.from(window.__qa('.quick .chip')).find(x => x.title === n), name), { label: 'chip ' + name }); await T.page.evaluate((n) => { Array.from(window.__qa('.quick .chip')).find(x => x.title === n).click(); }, name); };
   // meds: the exact names win over lookalikes ("Insulin" not "Insulin Detemir")
   await tap('Lisinopril'); await tap('Insulin');
   await waitFor(async () => ((await T.record(id)).tree.patient?.patientMedications || []).length === 2, { label: 'two meds on ESO', timeout: 15000 });
@@ -608,7 +608,7 @@ test('quick chips for medications and allergies work the same way, and every qui
   await waitFor(async () => (await chips()).length >= 55, { label: 'chips back' });
   // anything ESO draws over the page (the camera, attachments, a print sheet, a popover) hides the buttons under it
   await app(() => { const o = document.createElement('div'); o.id = 'overlay'; o.setAttribute('style', 'position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:500'); document.body.appendChild(o); });
-  const hist = () => T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .chip[data-group=history]').length);
+  const hist = () => T.page.evaluate(() => window.__qa('.quick .chip[data-group=history]').length);
   await waitFor(async () => (await hist()) === 0, { label: 'nothing under an overlay (the on-screen group)' });
   await app(() => document.getElementById('overlay').remove());
   await waitFor(async () => (await hist()) >= 20, { label: 'back when it goes' });
@@ -624,11 +624,11 @@ test('quick delays: one button presses ESO\'s own None/No Delay on every delay s
   await app(() => { window.app.addScalar('incident', "incident.additionalFactors.sceneDelays.['365']", 365); });
   await waitFor(async () => ((await T.record(id)).tree.incident?.additionalFactors?.sceneDelays || []).length === 1, { label: 'scene delay saved' });
   await app(() => window.app.openTab('Incident'));
-  const btn = () => T.page.evaluate(() => { const b = document.getElementById('esosave-host').shadowRoot.querySelector('.quick .allnone[data-group=delays]'); return b ? { text: b.textContent, cls: b.className, rect: b.getBoundingClientRect().toJSON() } : null; });
+  const btn = () => T.page.evaluate(() => { const b = window.__q('.quick .allnone[data-group=delays]'); return b ? { text: b.textContent, cls: b.className, rect: b.getBoundingClientRect().toJSON() } : null; });
   const b0 = await waitFor(async () => { const b = await btn(); return b && /\(4 left\)/.test(b.text) ? b : null; }, { label: 'All: None/No Delay button, counting the four still empty' });
   const field = await T.page.evaluate(() => document.querySelector('eso-field[data-field-ref=DISPATCHDELAYS]').getBoundingClientRect().toJSON());
   assert.ok(b0.rect.bottom <= field.top && Math.abs(b0.rect.right - field.right) < 4, 'sits just above the first delay field, right-aligned');
-  await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.quick .allnone[data-group=delays]').click());
+  await T.page.evaluate(() => window.__q('.quick .allnone[data-group=delays]').click());
   const rec = await waitFor(async () => { const r = await T.record(id); const a = r.tree.incident?.additionalFactors || {}; return a.dispatchDelays && a.responseDelays && a.transportDelays && a.turnAroundDelays ? r : null; }, { label: 'four delays saved by the app', timeout: 15000 });
   const a = rec.tree.incident.additionalFactors;
   assert.deepEqual([a.dispatchDelays, a.responseDelays, a.transportDelays, a.turnAroundDelays].map(x => x.map(Number)), [[6430], [357], [385], [399]]);
@@ -640,14 +640,14 @@ test('quick delays: one button presses ESO\'s own None/No Delay on every delay s
 test('quick transport: chips after each transport field pick in ESO\'s list; a field with a value shows it as added', async () => {
   const id = await freshRun();
   await app(() => window.app.openTab('Narrative'));
-  const chips = (gk) => T.page.evaluate((g) => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll(`.quick .chip[data-group=${g}]:not(.other)`)).map(c => ({ short: c.textContent, name: c.title, cls: c.className, rect: c.getBoundingClientRect().toJSON() })), gk);
+  const chips = (gk) => T.page.evaluate((g) => Array.from(window.__qa(`.quick .chip[data-group=${g}]:not(.other)`)).map(c => ({ short: c.textContent, name: c.title, cls: c.className, rect: c.getBoundingClientRect().toJSON() })), gk);
   await waitFor(async () => (await chips('toStretcher')).length === 7 && (await chips('position')).length === 4 && (await chips('toAmbulance')).length === 1, { label: 'transport chips drawn' });
-  assert.equal(await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .chip.other[data-group=toStretcher]').length), 1, 'Other… on the stretcher row');
+  assert.equal(await T.page.evaluate(() => window.__qa('.quick .chip.other[data-group=toStretcher]').length), 1, 'Other… on the stretcher row');
   const lab = await T.page.evaluate(() => document.querySelector('eso-field[data-field-ref=HOWPATIENTWASMOVEDTOSTRETCHERIDS] label').getBoundingClientRect().toJSON());
   const fld = await T.page.evaluate(() => document.querySelector('eso-field[data-field-ref=HOWPATIENTWASMOVEDTOSTRETCHERIDS]').getBoundingClientRect().toJSON());
   const c0 = (await chips('toStretcher'))[0];
   assert.ok(c0.rect.top >= lab.bottom && Math.abs(c0.rect.left - fld.left) < 4 && c0.rect.right <= fld.right, 'first chip sits under the label, inside the field width');
-  const tap = async (name) => { await waitFor(() => T.page.evaluate((n) => { const c = Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .chip')).find(x => x.title === n); return !!c && !/busy/.test(c.className); }, name), { label: 'chip ' + name }); await T.page.evaluate((n) => { Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .chip')).find(x => x.title === n).click(); }, name); };
+  const tap = async (name) => { await waitFor(() => T.page.evaluate((n) => { const c = Array.from(window.__qa('.quick .chip')).find(x => x.title === n); return !!c && !/busy/.test(c.className); }, name), { label: 'chip ' + name }); await T.page.evaluate((n) => { Array.from(window.__qa('.quick .chip')).find(x => x.title === n).click(); }, name); };
   await tap('Lifted to stretcher via draw-sheet');
   const rec = await waitFor(async () => { const r = await T.record(id); return (r.tree.narrative?.patientTransport?.howPatientWasMovedToStretcherIds || []).length ? r : null; }, { label: 'to-stretcher saved by the app', timeout: 15000 });
   assert.deepEqual(rec.tree.narrative.patientTransport.howPatientWasMovedToStretcherIds.map(Number), [15113]);
@@ -658,8 +658,8 @@ test('quick transport: chips after each transport field pick in ESO\'s list; a f
   // to ambulance: Stretcher; from ambulance: Stretcher (two fields, one after the other)
   await tap('Stretcher');
   await waitFor(async () => ((await T.record(id)).tree.narrative?.patientTransport?.patientMovedFromSceneToAmbulanceMethodIds || []).map(Number).includes(7183), { label: 'to ambulance', timeout: 15000 });
-  await waitFor(() => T.page.evaluate(() => { const cs = Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .chip[data-group=fromAmbulance]:not(.other)')); return cs.length === 1 && !/busy/.test(cs[0].className); }), { label: 'from-ambulance chip free' });
-  await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.quick .chip[data-group=fromAmbulance]:not(.other)').click());
+  await waitFor(() => T.page.evaluate(() => { const cs = Array.from(window.__qa('.quick .chip[data-group=fromAmbulance]:not(.other)')); return cs.length === 1 && !/busy/.test(cs[0].className); }), { label: 'from-ambulance chip free' });
+  await T.page.evaluate(() => window.__q('.quick .chip[data-group=fromAmbulance]:not(.other)').click());
   await waitFor(async () => ((await T.record(id)).tree.narrative?.patientTransport?.patientMovedFromAmbulanceToDestinationMethodIds || []).map(Number).includes(7196), { label: 'from ambulance', timeout: 15000 });
   await tap('Semi-Fowlers');
   await waitFor(async () => ((await T.record(id)).tree.narrative?.patientTransport?.patientPositionDuringTransportIds || []).map(Number).includes(7189), { label: 'position', timeout: 15000 });
@@ -701,13 +701,13 @@ test('facility chips: chosen in Settings from ESO\'s saved facilities, one tap s
   assert.deepEqual(((await T.storage()).facilityTypes || {}).destinationTypes.find(t => t.id === 6577), { id: 6577, name: 'Nursing Home', locationTypeId: 6542 }, 'ESO\'s type tables are kept on the device');
   await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.panel [data-act=close]').click());
   // chips sit under each location's Predefined/Address pills
-  const chips = (g) => T.page.evaluate((gg) => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll(`.quick .chip[data-group=${gg}]:not(.other)`)).map(c => ({ name: c.title, cls: c.className, rect: c.getBoundingClientRect().toJSON() })), g);
+  const chips = (g) => T.page.evaluate((gg) => Array.from(window.__qa(`.quick .chip[data-group=${gg}]:not(.other)`)).map(c => ({ name: c.title, cls: c.className, rect: c.getBoundingClientRect().toJSON() })), g);
   await waitFor(async () => (await chips('fac-destination')).length === 2 && (await chips('fac-sending')).length === 1, { label: 'facility chips' });
   const pills = await T.page.evaluate(() => document.querySelector('eso-location[view-model="vm.destination"] .button-group').getBoundingClientRect().toJSON());
   const c0 = (await chips('fac-destination'))[0];
   assert.ok(c0.rect.top >= pills.bottom && Math.abs(c0.rect.left - pills.left) < 4, 'under the pills, left-aligned with them');
-  assert.equal(await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .chip[data-group^=fac-].other').length), 0, 'no Other… of ours: ESO\'s Location Type has one');
-  const tap = async (g, name) => { await waitFor(async () => (await chips(g)).some(c => c.name === name && !/busy/.test(c.cls)), { label: 'chip free' }); await T.page.evaluate(([gg, n]) => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll(`.quick .chip[data-group=${gg}]`)).find(c => c.title === n).click(), [g, name]); };
+  assert.equal(await T.page.evaluate(() => window.__qa('.quick .chip[data-group^=fac-].other').length), 0, 'no Other… of ours: ESO\'s Location Type has one');
+  const tap = async (g, name) => { await waitFor(async () => (await chips(g)).some(c => c.name === name && !/busy/.test(c.cls)), { label: 'chip free' }); await T.page.evaluate(([gg, n]) => Array.from(window.__qa(`.quick .chip[data-group=${gg}]`)).find(c => c.title === n).click(), [g, name]); };
   // destination: already in Predefined mode; type then name
   await tap('fac-destination', 'Breese Nursing Home');
   const rec = await waitFor(async () => { const r = await T.record(id); const d = r.tree.incident?.destination?.predefinedAddress; return d && d.predefinedLocationID ? r : null; }, { label: 'destination saved by the app', timeout: 15000 });
@@ -752,12 +752,12 @@ test('assessment: "All normal" presses No Abnormalities on every category in ESO
   await app(() => document.getElementById('addax').click());
   const rec0 = await waitFor(async () => { const r = await T.record(id); const a = r.tree.assessments?.assessmentsV2?.[0]; return a && (a.findings || []).length === 26 ? r : null; }, { label: 'assessment with 26 Not Assessed findings', timeout: 15000 });
   assert.ok(rec0.tree.assessments.assessmentsV2[0].findings.every(f => f.findingId === 'Not_Assessed'));
-  const btns = () => T.page.evaluate(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick [data-group^=assess-]')).map(b => ({ g: b.dataset.group, text: b.textContent, cls: b.className, rect: b.getBoundingClientRect().toJSON() })));
+  const btns = () => T.page.evaluate(() => Array.from(window.__qa('.quick [data-group^=assess-]')).map(b => ({ g: b.dataset.group, text: b.textContent, cls: b.className, rect: b.getBoundingClientRect().toJSON() })));
   await waitFor(async () => (await btns()).length === 2, { label: 'All normal and A&Ox4 buttons' });
   const edit = await T.page.evaluate(() => document.querySelector('assessment-record .ax-edit-buttons').getBoundingClientRect().toJSON());
   const all = (await btns()).find(b => b.g === 'assess-all');
   assert.ok(all.rect.right < edit.left && Math.abs(all.rect.top + all.rect.height / 2 - (edit.top + edit.height / 2)) < 10, 'sits just left of ESO\'s edit buttons on the record header');
-  await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.quick [data-group=assess-all]').click());
+  await T.page.evaluate(() => window.__q('.quick [data-group=assess-all]').click());
   const rec = await waitFor(async () => { const r = await T.record(id); const a = r.tree.assessments?.assessmentsV2?.[0]; return a && (a.findings || []).length === 26 && a.findings.every(f => f.findingId === 'No_Abnormalities') ? r : null; }, { label: 'every location No Abnormalities', timeout: 20000 });
   assert.equal(await app(() => window.app.quickAxOpens), 1, 'one Quick Ax open');
   await waitFor(async () => (await app(() => document.querySelectorAll('shelf-panel').length)) === 0, { label: 'Quick Ax closed with OK' });
@@ -766,14 +766,14 @@ test('assessment: "All normal" presses No Abnormalities on every category in ESO
   await waitFor(async () => /done/.test((await btns()).find(b => b.g === 'assess-all').cls), { label: 'All normal shows done' });
   // A&Ox4
   await waitFor(async () => { const b = await btns(); return b.length === 2 && !b.some(x => /busy/.test(x.cls)); }, { label: 'free' });
-  await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.quick [data-group=assess-ao]').click());
+  await T.page.evaluate(() => window.__q('.quick [data-group=assess-ao]').click());
   await waitFor(async () => { const a = (await T.record(id)).tree.assessments.assessmentsV2[0]; return ['Oriented_Person', 'Oriented_Place', 'Oriented_Time', 'Oriented_Event'].every(x => a.findings.some(f => f.findingId === x && f.findingLocationId === 'MentalStatus')); }, { label: 'oriented x4 saved', timeout: 15000 });
   assert.equal(await app(() => window.app.mentalOpens), 1);
   await waitFor(async () => (await app(() => document.querySelectorAll('shelf-panel').length)) === 0, { label: 'Mental Status closed with OK' });
   // a second press of All normal on an already-normal record presses nothing and still closes cleanly
   await waitFor(async () => { const b = await btns(); return b.length === 2 && !b.some(x => /busy/.test(x.cls)); }, { label: 'free again' });
   const before = (await T.record(id)).ops.length;
-  await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.quick [data-group=assess-all]').click());
+  await T.page.evaluate(() => window.__q('.quick [data-group=assess-all]').click());
   await waitFor(async () => (await app(() => window.app.quickAxOpens)) === 2, { label: 'opened again' });
   await waitFor(async () => (await app(() => document.querySelectorAll('shelf-panel').length)) === 0, { label: 'closed again' });
   await sleep(800);
@@ -783,26 +783,26 @@ test('assessment: "All normal" presses No Abnormalities on every category in ESO
 test('disposition buttons set the whole set through ESO\'s pickers and quick-picks; red outline until Transport Mode or the refusal reason is answered', async () => {
   const id = await freshRun();
   await app(() => window.app.openTab('Incident'));
-  const btns = () => T.page.evaluate(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick [data-group^=dispo-]')).map(b => ({ g: b.dataset.group, text: b.textContent, cls: b.className, rect: b.getBoundingClientRect().toJSON() })));
+  const btns = () => T.page.evaluate(() => Array.from(window.__qa('.quick [data-group^=dispo-]')).map(b => ({ g: b.dataset.group, text: b.textContent, cls: b.className, rect: b.getBoundingClientRect().toJSON() })));
   await waitFor(async () => (await btns()).length === 6, { label: 'five disposition buttons and Other…' });
   // Other… opens ESO's Unit Disposition list
-  await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.quick [data-group=dispo-other]').click());
+  await T.page.evaluate(() => window.__q('.quick [data-group=dispo-other]').click());
   await waitFor(() => T.page.evaluate(() => !!document.querySelector('shelf-panel')), { label: 'unit disposition list opened' });
   assert.match(await app(() => document.querySelector('shelf-panel h1').textContent), /Unit Disposition/);
   await app(() => document.querySelector('shelf-panel header button').click());
   await waitFor(async () => (await btns()).length === 6, { label: 'buttons back' });
   // no row of ours over Response Mode to Scene: ESO shows Emergent / Non-Emergent / Other itself
-  assert.equal(await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick [data-group=sr-resp]').length), 0);
+  assert.equal(await T.page.evaluate(() => window.__qa('.quick [data-group=sr-resp]').length), 0);
   // (the layout settles a moment after rows above reserve their room)
   await waitFor(async () => { const unit = await T.page.evaluate(() => { const f = document.querySelector('eso-field[data-field-ref=UNITDISPOSITIONITEMID]'); return { f: f.getBoundingClientRect().toJSON(), lab: f.querySelector('label').getBoundingClientRect().toJSON(), area: (f.querySelector('eso-control') || f.querySelector('.field-area')).getBoundingClientRect().toJSON() }; }); const first = (await btns())[0]; return first && first.rect.top >= unit.lab.bottom && first.rect.bottom <= unit.area.top && Math.abs(first.rect.left - unit.f.left) < 4; }, { label: 'row sits under the Unit Disposition label, above its value' });
-  const press = async (g) => { await waitFor(async () => { const b = (await btns()).find(x => x.g === g); return b && !/busy/.test(b.cls); }, { label: g }); await T.page.evaluate((gg) => document.getElementById('esosave-host').shadowRoot.querySelector(`.quick [data-group=${gg}]`).click(), g); };
+  const press = async (g) => { await waitFor(async () => { const b = (await btns()).find(x => x.g === g); return b && !/busy/.test(b.cls); }, { label: g }); await T.page.evaluate((gg) => window.__q(`.quick [data-group=${gg}]`).click(), g); };
   const dispo = async () => (await T.record(id)).tree.incident?.disposition || {};
   // Transported ALS
   await press('dispo-als');
   await waitFor(async () => (await dispo()).levelOfServiceId === 8196, { label: 'ALS set', timeout: 20000 });
   const d1 = await dispo();
   assert.equal(d1.unitDispositionItemID, 14402); assert.equal(d1.patientEvaluationCareDispositionItemID, 14410); assert.equal(d1.crewDispositionItemID, 14415); assert.equal(d1.transportDispositionItemID, 14435);
-  const need = () => T.page.evaluate(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .need')).map(n => n.dataset.msg));
+  const need = () => T.page.evaluate(() => Array.from(window.__qa('.quick .need')).map(n => n.dataset.msg));
   await waitFor(async () => (await need()).includes('Transport Mode needed'), { label: 'Transport Mode outlined in red' });
   assert.equal(await app(() => document.querySelectorAll('shelf-panel').length), 0);
   // the crew picks Transport Mode Emergent by hand; the follow-ons fill themselves and the outline goes
@@ -872,7 +872,7 @@ test('choosing a response mode fills the follow-on fields that are empty and set
 test('Run Type, Mutual Aid, EMD Complaint and Requested By rows; Mutual Aid only once the run type is mutual aid', async () => {
   const id = await freshRun();
   await app(() => window.app.openTab('Incident'));
-  const row = (g) => T.page.evaluate((gg) => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll(`.quick [data-group=${gg}]`)).map(b => ({ text: b.textContent, cls: b.className, rect: b.getBoundingClientRect().toJSON() })), g);
+  const row = (g) => T.page.evaluate((gg) => Array.from(window.__qa(`.quick [data-group=${gg}]`)).map(b => ({ text: b.textContent, cls: b.className, rect: b.getBoundingClientRect().toJSON() })), g);
   // only what ESO's own quick-picks do not offer, and no Other… of ours (ESO has one)
   await waitFor(async () => (await row('sr-runtype')).length === 4 && (await row('sr-emd')).length === 15 && (await row('sr-reqby')).length === 4, { label: 'rows drawn' });
   assert.deepEqual((await row('sr-runtype')).map(b => b.text), ['Hosp-Hosp', 'Mutual Aid', 'Hosp-NonHosp', 'NonHosp-Hosp']);
@@ -883,10 +883,10 @@ test('Run Type, Mutual Aid, EMD Complaint and Requested By rows; Mutual Aid only
   await waitFor(async () => { const fld = await geom(); const emd = await row('sr-emd'); return emd.length === 15 && emd.every(c => c.rect.top >= fld.lab.bottom && c.rect.bottom <= fld.area.top + 2 && c.rect.right <= fld.f.right + 2); }, { label: 'EMD chips wrap into rows under the label, above the value, within the field width' });
   const emd = await row('sr-emd');
   assert.ok(new Set(emd.map(c => Math.round(c.rect.top))).size >= 2, 'more than one row');
-  const tap = async (g, text) => { await waitFor(async () => (await row(g)).some(b => b.text === text && !/busy/.test(b.cls)), { label: text }); await T.page.evaluate(([gg, t]) => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll(`.quick [data-group=${gg}]`)).find(b => b.textContent === t).click(), [g, text]); };
+  const tap = async (g, text) => { await waitFor(async () => (await row(g)).some(b => b.text === text && !/busy/.test(b.cls)), { label: text }); await T.page.evaluate(([gg, t]) => Array.from(window.__qa(`.quick [data-group=${gg}]`)).find(b => b.textContent === t).click(), [g, text]); };
   const resp = async () => (await T.record(id)).tree.incident?.response || {};
   // a dialog of ESO's (CAD import) hides every quick button until it closes
-  const allQuick = () => T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .sheet > *').length);
+  const allQuick = () => T.page.evaluate(() => window.__qa('.quick .sheet > *').length);
   await app(() => document.getElementById('cadimport').click());
   await waitFor(async () => (await allQuick()) === 0, { label: 'nothing while the CAD import dialog is up' });
   await app(() => document.querySelector('eso-modal button').click());
@@ -911,14 +911,14 @@ test('Run Type, Mutual Aid, EMD Complaint and Requested By rows; Mutual Aid only
 test('mechanism of injury: all four as chips, more than one allowed', async () => {
   const id = await app(() => window.app.recordId);
   await app(() => window.app.openTab('Narrative'));
-  const chips = () => T.page.evaluate(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .chip[data-group=mechanism]')).map(c => ({ short: c.textContent, cls: c.className })));
+  const chips = () => T.page.evaluate(() => Array.from(window.__qa('.quick .chip[data-group=mechanism]')).map(c => ({ short: c.textContent, cls: c.className })));
   // ESO keeps Mechanism of Injury disabled until Possible Patient Injury? is Yes or Unknown: no chips until then
-  await waitFor(async () => (await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .chip[data-group=toStretcher]').length)) > 0, { label: 'the tab is drawn' });
+  await waitFor(async () => (await T.page.evaluate(() => window.__qa('.quick .chip[data-group=toStretcher]').length)) > 0, { label: 'the tab is drawn' });
   assert.equal((await chips()).length, 0, 'no chips while ESO keeps the field disabled');
   await app(() => document.querySelector('eso-field[data-field-ref="ISINJUREDID"] [data-injured="Yes"]').click());
   await waitFor(async () => (await chips()).length === 4, { label: 'four chips, no extra Other…' });
   assert.deepEqual((await chips()).map(c => c.short), ['Blunt', 'Burn', 'Penetrating', 'Other']);
-  const tap = async (t) => { await waitFor(async () => (await chips()).some(c => c.short === t && !/busy/.test(c.cls)), { label: t }); await T.page.evaluate((tt) => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .chip[data-group=mechanism]')).find(c => c.textContent === tt).click(), t); };
+  const tap = async (t) => { await waitFor(async () => (await chips()).some(c => c.short === t && !/busy/.test(c.cls)), { label: t }); await T.page.evaluate((tt) => Array.from(window.__qa('.quick .chip[data-group=mechanism]')).find(c => c.textContent === tt).click(), t); };
   await tap('Blunt'); await tap('Penetrating');
   await waitFor(async () => ((await T.record(id)).tree.narrative?.injuries?.mechanismOfInjuryIds || []).length === 2, { label: 'both saved', timeout: 15000 });
   assert.deepEqual((await T.record(id)).tree.narrative.injuries.mechanismOfInjuryIds.map(Number).sort(), [7117, 7120]);
@@ -928,11 +928,11 @@ test('mechanism of injury: all four as chips, more than one allowed', async () =
 test('Narrative rows: impressions, care level, duration units and every anatomic location', async () => {
   const id = await freshRun();
   await app(() => window.app.openTab('Narrative'));
-  const row = (g) => T.page.evaluate((gg) => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll(`.quick [data-group=${gg}]`)).map(b => ({ text: b.textContent, cls: b.className })), g);
+  const row = (g) => T.page.evaluate((gg) => Array.from(window.__qa(`.quick [data-group=${gg}]`)).map(b => ({ text: b.textContent, cls: b.className })), g);
   await waitFor(async () => (await row('sr-primary')).length === 11 && (await row('sr-secondary')).length === 11 && (await row('sr-care')).length === 3 && (await row('sr-units')).length === 4 && (await row('sr-anatomic')).length === 9 && (await row('sr-system')).length === 7, { label: 'rows drawn' });
   assert.deepEqual((await row('sr-anatomic')).map(b => b.text), ['Head', 'Neck', 'Chest', 'Abd', 'Back', 'Upper Ext', 'Lower Ext', 'Genitalia', 'General'], 'every location, abbreviated, no Other…');
   assert.equal((await row('sr-primary')).at(-1).text, 'Other…');
-  const tap = async (g, text) => { await waitFor(async () => (await row(g)).some(b => b.text === text && !/busy/.test(b.cls)), { label: text }); await T.page.evaluate(([gg, t]) => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll(`.quick [data-group=${gg}]`)).find(b => b.textContent === t).click(), [g, text]); };
+  const tap = async (g, text) => { await waitFor(async () => (await row(g)).some(b => b.text === text && !/busy/.test(b.cls)), { label: text }); await T.page.evaluate(([gg, t]) => Array.from(window.__qa(`.quick [data-group=${gg}]`)).find(b => b.textContent === t).click(), [g, text]); };
   const nar = async () => (await T.record(id)).tree.narrative || {};
   await tap('sr-primary', 'Chest Pain');
   await waitFor(async () => (await nar()).clinicalImpression?.primaryImpressionId === 582, { label: 'primary impression', timeout: 15000 });
@@ -950,10 +950,10 @@ test('Narrative rows: impressions, care level, duration units and every anatomic
 test('Patient tab: Race row; allergies keep only NKDA and Other…', async () => {
   const id = await app(() => window.app.recordId);
   await app(() => window.app.openTab('Patient'));
-  const row = (g) => T.page.evaluate((gg) => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll(`.quick [data-group=${gg}]`)).map(b => ({ text: b.textContent, cls: b.className })), g);
+  const row = (g) => T.page.evaluate((gg) => Array.from(window.__qa(`.quick [data-group=${gg}]`)).map(b => ({ text: b.textContent, cls: b.className })), g);
   await waitFor(async () => (await row('sr-race')).length === 7 && (await row('allergies')).length === 2, { label: 'rows drawn' });
   assert.deepEqual((await row('allergies')).map(b => b.text), ['NKDA', 'Other…']);
-  const tap = async (g, text) => { await waitFor(async () => (await row(g)).some(b => b.text === text && !/busy/.test(b.cls)), { label: text }); await T.page.evaluate(([gg, t]) => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll(`.quick [data-group=${gg}]`)).find(b => b.textContent === t).click(), [g, text]); };
+  const tap = async (g, text) => { await waitFor(async () => (await row(g)).some(b => b.text === text && !/busy/.test(b.cls)), { label: text }); await T.page.evaluate(([gg, t]) => Array.from(window.__qa(`.quick [data-group=${gg}]`)).find(b => b.textContent === t).click(), [g, text]); };
   const demo = async () => (await T.record(id)).tree.patient?.demographics || {};
   assert.deepEqual((await row('sr-race')).map(b => b.text), ['White', 'Black', 'Asian', 'Latino', 'Am Indian', 'Mid East', 'Pac Islander']);
   await tap('sr-race', 'Latino'); // no ESO quick-pick for this one: through the picker (a multi-select, so OK is pressed)
@@ -972,7 +972,7 @@ test('refusal form: chips inside ESO\'s Patient Refusal Form tick its own lists;
   await waitFor(async () => (await chips('rfLegal')).length === 3 && (await chips('rfDecision')).length === 4 && (await chips('rfMedical')).length === 2 && (await chips('rfNotify')).length === 2 && (await chips('rfRefusals')).length === 4, { label: 'chips in the form' });
   assert.deepEqual((await chips('rfLegal')).map(c => c.text), ['18+', 'Guardian', 'Other…']);
   assert.deepEqual((await chips('rfRefusals')).map(c => c.text), ['Assessment', 'Treatment', 'Transport by EMS', 'Recommended Destination']);
-  const tap = async (g, text) => { await waitFor(async () => (await chips(g)).some(b => b.text === text && !/busy/.test(b.cls)), { label: text }); await T.page.evaluate(([gg, t]) => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll(`.quick .chip[data-group=${gg}]`)).find(b => b.textContent === t).click(), [g, text]); };
+  const tap = async (g, text) => { await waitFor(async () => (await chips(g)).some(b => b.text === text && !/busy/.test(b.cls)), { label: text }); await T.page.evaluate(([gg, t]) => Array.from(window.__qa(`.quick .chip[data-group=${gg}]`)).find(b => b.textContent === t).click(), [g, text]); };
   const rf = async () => (await T.record(id)).tree.signatures?.standardSignatures?.standardRefusal || {};
   await tap('rfLegal', '18+');
   await waitFor(async () => ((await rf()).capacityAssessment?.legalIds || []).includes('e8baca53-0bd8-4041-9761-392b38716aed'), { label: 'legal', timeout: 15000 });
@@ -997,36 +997,39 @@ test('refusal form: chips inside ESO\'s Patient Refusal Form tick its own lists;
 
 test('every quick button scrolls under ESO\'s banner: the layers are clipped at the banner\'s bottom edge', async () => {
   await app(() => window.app.openTab('Narrative'));
-  const layer = () => T.page.evaluate(() => { const l = document.getElementById('esosave-host').shadowRoot.querySelector('.quick'); return l ? l.style.clipPath : null; });
+  const layer = () => T.page.evaluate(() => { const l = window.__q('.quick'); return l ? l.style.clipPath : null; });
   await waitFor(async () => (await layer()) === 'inset(64px 0px 0px)', { label: 'clipped at the sticky top bar' }); // the mock's bar is 64px tall
   const bar = await T.page.evaluate(() => document.getElementById('topbar').getBoundingClientRect().bottom);
   assert.equal(bar, 64);
-  await app(() => window.scrollTo(0, 400));
+  await app(() => document.getElementById('scroller').scrollTo(0, 400));
   await sleep(300);
   assert.equal(await layer(), 'inset(64px 0px 0px)', 'still clipped after a scroll');
+  // the rows ride inside ESO's scrolling container (no script moves them during a scroll), so the
+  // container's own edge takes them under the bar
+  assert.ok(await T.page.evaluate(() => { const r = window.__q('.quick [data-group=sr-primary]'); return r && r.getRootNode().host.classList.contains('esosave-ride') && r.getRootNode().host.parentElement === document.getElementById('scroller'); }), 'the row lives in the scroller');
   // after the scroll settles, and after the regular re-layout ticks, a row still sits under its label
-  const under = () => T.page.evaluate(() => { const f = document.querySelector('eso-field[data-field-ref=PRIMARYIMPRESSIONID]'); const lab = f.querySelector('label').getBoundingClientRect(); const c = document.getElementById('esosave-host').shadowRoot.querySelector('.quick [data-group=sr-primary]').getBoundingClientRect(); return Math.round(c.top - lab.bottom); });
+  const under = () => T.page.evaluate(() => { const f = document.querySelector('eso-field[data-field-ref=PRIMARYIMPRESSIONID]'); const lab = f.querySelector('label').getBoundingClientRect(); const c = window.__q('.quick [data-group=sr-primary]').getBoundingClientRect(); return Math.round(c.top - lab.bottom); });
   await sleep(900);
   const d1 = await under(); await sleep(800); const d2 = await under();
   assert.ok(d1 >= 2 && d1 <= 12 && d1 === d2, `row stays put under its label: ${d1} then ${d2}`);
   // the field's top edge slides under the bar: its row is still drawn (clipped), not dropped as "covered"
-  await app(() => { const f = document.querySelector('eso-field[data-field-ref=PRIMARYIMPRESSIONID]'); window.scrollTo(0, window.scrollY + f.getBoundingClientRect().top - 40); });
+  await app(() => { const sc = document.getElementById('scroller'); const f = document.querySelector('eso-field[data-field-ref=PRIMARYIMPRESSIONID]'); sc.scrollTo(0, sc.scrollTop + f.getBoundingClientRect().top - 40); });
   await sleep(1200);
   const fieldTop = await T.page.evaluate(() => Math.round(document.querySelector('eso-field[data-field-ref=PRIMARYIMPRESSIONID]').getBoundingClientRect().top));
   assert.ok(fieldTop < 64 && fieldTop > 0, `field partly under the bar: top at ${fieldTop}`);
-  assert.ok(await T.page.evaluate(() => !!document.getElementById('esosave-host').shadowRoot.querySelector('.quick [data-group=sr-primary]')), 'the row is still there while its field is half under the bar');
-  await app(() => window.scrollTo(0, 0));
+  assert.ok(await T.page.evaluate(() => !!window.__q('.quick [data-group=sr-primary]')), 'the row is still there while its field is half under the bar');
+  await app(() => document.getElementById('scroller').scrollTo(0, 0));
 });
 
 test('crew roles: every role, shortened, above each crew member; a tap opens the member, the Roles list, ticks, OK, OK; a second tap takes it out', async () => {
   const id = await freshRun();
   await app(() => window.app.openTab('Incident'));
-  const chips = () => T.page.evaluate(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .chip[data-group=crew]')).map(c => ({ text: c.textContent, member: c.dataset.member, cls: c.className, rect: c.getBoundingClientRect().toJSON() })));
+  const chips = () => T.page.evaluate(() => Array.from(window.__qa('.quick .chip[data-group=crew]')).map(c => ({ text: c.textContent, member: c.dataset.member, cls: c.className, rect: c.getBoundingClientRect().toJSON() })));
   await waitFor(async () => (await chips()).length === 7, { label: 'seven role chips for the one crew member' });
   assert.deepEqual((await chips()).map(c => c.text), ['Lead Scene', 'Lead Trans', 'Drv Resp', 'Drv Trans', 'Other Scene', 'Other Trans', 'Other']);
   assert.equal((await chips())[0].member, 'TEST, MEDIC');
   await waitFor(async () => { const row = await T.page.evaluate(() => document.querySelector('crew-list grid-row').getBoundingClientRect().toJSON()); const cs = await chips(); return cs.length === 7 && cs.every(c => c.rect.bottom <= row.top + 2); }, { label: 'above the member' });
-  const tap = async (t) => { await waitFor(async () => (await chips()).some(c => c.text === t && !/busy/.test(c.cls)), { label: t }); await T.page.evaluate((tt) => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .chip[data-group=crew]')).find(c => c.textContent === tt).click(), t); };
+  const tap = async (t) => { await waitFor(async () => (await chips()).some(c => c.text === t && !/busy/.test(c.cls)), { label: t }); await T.page.evaluate((tt) => Array.from(window.__qa('.quick .chip[data-group=crew]')).find(c => c.textContent === tt).click(), t); };
   const roles = async () => { const c = ((await T.record(id)).tree.incident?.crew || [])[0]; return (c && c.roleIds || []).map(Number).sort(); };
   await tap('Lead Trans');
   await waitFor(async () => (await roles()).join() === '14108', { label: 'Lead - Transport saved through the app', timeout: 15000 });
@@ -1046,15 +1049,15 @@ test('crew roles: every role, shortened, above each crew member; a tap opens the
 test('quick acuity: red, yellow, green next to each acuity field, one tap picks it in ESO\'s list', async () => {
   const id = await app(() => window.app.recordId);
   await app(() => window.app.openTab('Narrative'));
-  const sws = () => T.page.evaluate(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .sw')).map(c => ({ title: c.title, cls: c.className, rect: c.getBoundingClientRect().toJSON() })));
+  const sws = () => T.page.evaluate(() => Array.from(window.__qa('.quick .sw')).map(c => ({ title: c.title, cls: c.className, rect: c.getBoundingClientRect().toJSON() })));
   await waitFor(async () => (await sws()).length === 6, { label: 'six swatches' });
-  assert.equal(await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .chip.other:not([data-group])').length), 2, 'an Other… after each acuity row');
+  assert.equal(await T.page.evaluate(() => window.__qa('.quick .chip.other:not([data-group])').length), 2, 'an Other… after each acuity row');
   const lab = await T.page.evaluate(() => document.querySelector('#narrative label').getBoundingClientRect().toJSON());
   const first = (await sws())[0];
   assert.ok(first.rect.left > lab.right && Math.abs(first.rect.top + first.rect.height / 2 - (lab.top + lab.height / 2)) < 8, 'swatches sit right after the label, on its line');
   const tapSw = async (i) => {
-    await waitFor(() => T.page.evaluate((n) => { const b = document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .sw')[n]; return !!b && !/busy/.test(b.className); }, i), { label: 'swatch free' });
-    await T.page.evaluate((n) => document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .sw')[n].click(), i);
+    await waitFor(() => T.page.evaluate((n) => { const b = window.__qa('.quick .sw')[n]; return !!b && !/busy/.test(b.className); }, i), { label: 'swatch free' });
+    await T.page.evaluate((n) => window.__qa('.quick .sw')[n].click(), i);
   };
   await tapSw(0); // initial red
   await waitFor(async () => (await T.record(id)).tree.narrative?.patientComplaint?.initialPatientAcuityId === 10586, { label: 'initial red saved by the app' });
@@ -1378,10 +1381,10 @@ test('the agency settings: locked for everyone, changed only by the agency owner
 test('Transport Due To chips (Incident): tick through ESO\'s list, a second tap unticks', async () => {
   const id = await freshRun();
   await app(() => window.app.openTab('Incident'));
-  const chips = () => T.page.evaluate(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .chip[data-group=transportDueTo]')).map(c => ({ text: c.textContent, cls: c.className })));
+  const chips = () => T.page.evaluate(() => Array.from(window.__qa('.quick .chip[data-group=transportDueTo]')).map(c => ({ text: c.textContent, cls: c.className })));
   await waitFor(async () => (await chips()).length === 6, { label: 'five chips and Other…' });
   assert.deepEqual((await chips()).map(c => c.text), ['Closest Facility', 'Diversion', 'Family Choice', "Patient's Choice", 'Protocol', 'Other…']);
-  const tap = async (t) => { await waitFor(async () => (await chips()).some(c => c.text === t && !/busy/.test(c.cls)), { label: t }); await T.page.evaluate((tt) => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.quick .chip[data-group=transportDueTo]')).find(c => c.textContent === tt).click(), t); };
+  const tap = async (t) => { await waitFor(async () => (await chips()).some(c => c.text === t && !/busy/.test(c.cls)), { label: t }); await T.page.evaluate((tt) => Array.from(window.__qa('.quick .chip[data-group=transportDueTo]')).find(c => c.textContent === tt).click(), t); };
   const due = async () => ((await T.record(id)).tree.incident?.disposition?.transportDueToItemIDs || []).map(Number).sort();
   await tap('Closest Facility'); await tap('Protocol');
   await waitFor(async () => (await due()).join() === '427,429', { label: 'both in', timeout: 15000 });
@@ -1581,9 +1584,10 @@ const FACESHEET_B = [
   'ENCOUNTER',
   'Patient Class: | Emergency | Unit: | SAE EMERGENCY R*',
   'PATIENT',
-  'Name: | ROE, LOUISE M | DOB: | 10/24/1931 (94 yrs)',
-  'Address: | 707 S Oak St | Sex: | female',
-  'City: | EFFINGHAM, IL 62401-1954 | White Or Caucasian',
+  'Name: ROE, LOUISE M DOB:',
+  '10/24/1931 (94 yrs)',
+  'Address: | 707 S Oak St | Sex: female White Or Caucasian',
+  'City: | EFFINGHAM, IL 62401-1954 | Ethnicity: | Not Hispanic or Latino',
   'Primary Care Provider: | Jeffrey Brummer, DO | Primary Phone: | 217-343-9134',
   'Work Phone:',
   'Mobile Phone: | 217-343-9134',
@@ -1617,7 +1621,8 @@ test('facesheet: a scanned facesheet is read and, on a yes, fills the Patient an
   await T.control({ scanner: true });
   await fetch(T.base + '/__native_reset', { method: 'POST' });
   const jpeg = Buffer.from('ffd8ffe000104a46494600010100000100010000ffd9', 'hex').toString('base64');
-  const box = () => T.page.evaluate(() => { const b = document.getElementById('esosave-host').shadowRoot.querySelector('.veil .askbox'); return b ? b.textContent : null; });
+  // the question's own words (the raw text it can show on request is left out)
+  const box = () => T.page.evaluate(() => { const b = document.getElementById('esosave-host').shadowRoot.querySelector('.veil .askbox'); if (!b) return null; const pre = b.querySelector('pre'); return pre ? b.textContent.replace(pre.textContent, '') : b.textContent; });
   const choose = (label) => T.page.evaluate((l) => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.askbox button')).find(x => x.textContent.trim() === l).click(), label);
   const scanFacesheet = async (id, text, scanId) => {
     await app(() => document.getElementById('attachments').click());
@@ -1633,11 +1638,11 @@ test('facesheet: a scanned facesheet is read and, on a yes, fills the Patient an
   const id = await freshRun();
   await app(() => window.app.openTab('Patient'));
   let q = await scanFacesheet(id, FACESHEET_A, 'fs-a');
-  for (const t of ['Name: DOE, JANE Q', 'Sex: Female', 'DOB: 09/22/1947', 'PO BOX 337, BROWNSTOWN, IL, 62418', 'Home phone: (618) 699-1518', 'Physician: Deidre Langston', 'Primary insurance: UHC Complete Care Medicare, policy 916615452, group 84506, (877) 842-3210', 'Secondary insurance: ILLINOIS MEDICAID, policy 366900232', 'Method of payment: Medicare', 'Medicaid number: 366900232', 'Insured: DOE, JANE (Self), DOB 09/22/1947', 'SSN (masked on the facesheet)']) assert.ok(q.includes(t), `question lists ${t}: ${q}`);
-  assert.ok(!/Medicare number/.test(q), 'a Medicare Advantage member id is not a Medicare number');
+  for (const t of ['Name: DOE, JANE Q', 'Sex: Female', 'DOB: 09/22/1947', 'PO BOX 337, BROWNSTOWN, IL, 62418', 'Home phone: (618) 699-1518', 'Physician: Deidre Langston', 'Insured (Billing page): DOE, JANE (Self), DOB 09/22/1947', 'SSN (masked on the facesheet)', 'insurance (left to the billing office)']) assert.ok(q.includes(t), `question lists ${t}: ${q}`);
+  assert.ok(!/Medicare|policy|UHC/.test(q), 'the insurance itself is never filled');
   await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('[data-act=fill-yes]').click());
   const tree = async () => (await T.record(id)).tree;
-  await waitFor(async () => { const t = await tree(); return t.patient?.demographics?.lastName === 'DOE' && t.billing?.payment?.methodOfPaymentId === 6505 && t.patient?.contact?.address?.placeId; }, { label: 'both pages written', timeout: 20000 });
+  await waitFor(async () => { const t = await tree(); return t.patient?.demographics?.lastName === 'DOE' && t.billing?.contactForPayment?.insuredLastName === 'DOE' && t.patient?.contact?.address?.placeId; }, { label: 'both pages written', timeout: 20000 });
   const t = await tree();
   const d = t.patient.demographics, c = t.patient.contact, b = t.billing;
   assert.equal(d.firstName, 'JANE'); assert.equal(d.middleName, 'Q'); assert.equal(d.sexId, 15359); assert.equal(d.genderId, 314); assert.equal(d.dob, '09/22/1947 00:00:00'); assert.equal(d.ssn, undefined, 'masked SSN left alone');
@@ -1645,9 +1650,7 @@ test('facesheet: a scanned facesheet is read and, on a yes, fills the Patient an
   const phones = Object.values(c.patientPhoneNumbers?.items || {});
   assert.deepEqual(phones.map(p => [p.phoneTypeId, p.phoneNumber]), [[12830, '6186991518']]);
   assert.equal(c.physicianFirstName, 'Deidre'); assert.equal(c.physicianLastName, 'Langston');
-  assert.equal(b.payment.primaryInsuranceId, '837a41ec-8038-4835-ab43-5c3807219a7f'); assert.equal(b.payment.primaryCompanyName, 'UHC Complete Care Medicare'); assert.equal(b.payment.primaryPolicyNumber, '916615452'); assert.equal(b.payment.primaryGroupNumber, '84506');
-  assert.deepEqual(Object.values(b.payment.primaryInsurancePhoneNumbers.items).map(p => [p.phoneTypeId, p.phoneNumber]), [[12827, '8778423210']]);
-  assert.equal(b.payment.secondaryCompanyName, 'ILLINOIS MEDICAID'); assert.equal(b.payment.secondaryPolicyNumber, '366900232'); assert.equal(b.payment.medicaidName, '366900232'); assert.equal(b.payment.medicareName, undefined);
+  assert.equal(b.payment, undefined, 'nothing about the insurance was written');
   assert.equal(b.contactForPayment.relationshipToTheInsuredId, 5780); assert.equal(b.contactForPayment.insuredLastName, 'DOE'); assert.equal(b.contactForPayment.insuredFirstName, 'JANE'); assert.equal(b.contactForPayment.dob, '09/22/1947 00:00:00');
   assert.equal(b.contactForPayment.address.address1, 'PO BOX 337'); assert.equal(b.contactForPayment.address.city, 'BROWNSTOWN'); assert.equal(b.contactForPayment.address.stateId, 260); assert.equal(b.contactForPayment.address.zip, '62418'); assert.equal(b.contactForPayment.address.county, 'Fayette');
   await waitFor(() => T.page.evaluate(() => /pages filled/.test((document.getElementById('esosave-host').shadowRoot.querySelector('.veil') || {}).textContent || '')), { label: 'the notice' });
@@ -1657,8 +1660,8 @@ test('facesheet: a scanned facesheet is read and, on a yes, fills the Patient an
   const id2 = await freshRun();
   await app(() => window.app.openTab('Incident'));
   q = await scanFacesheet(id2, FACESHEET_B, 'fs-b');
-  for (const t of ['Name: ROE, LOUISE M', 'Sex: Female', 'DOB: 10/24/1931', 'Race: White', '707 S Oak St, EFFINGHAM, IL, 62401', 'Home phone: (217) 343-9134', 'Mobile phone: (217) 343-9134', 'Physician: Jeffrey Brummer', 'Primary insurance: MEDICARE (MEDICARE PART A&B), policy 4M41X00GG90', 'Method of payment: Medicare', 'Medicare number: 4M41X00GG90', 'Insured: ROE, LOUISE (Self), DOB 10/24/1931']) assert.ok(q.includes(t), `question lists ${t}: ${q}`);
-  assert.ok(!/Secondary insurance/.test(q) && !/Medicaid/.test(q), 'an empty secondary block is nothing');
+  for (const t of ['Name: ROE, LOUISE M', 'Sex: Female', 'DOB: 10/24/1931', 'Race: White', 'Ethnicity: Not Hispanic or Latino', '707 S Oak St, EFFINGHAM, IL, 62401', 'Home phone: (217) 343-9134', 'Mobile phone: (217) 343-9134', 'Physician: Jeffrey Brummer', 'Insured (Billing page): ROE, LOUISE (Self), DOB 10/24/1931']) assert.ok(q.includes(t), `question lists ${t}: ${q}`);
+  assert.ok(!/MEDICARE|policy/.test(q), 'the insurance is never filled');
   await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('[data-act=fill-no]').click());
   await sleep(800);
   assert.equal((await T.record(id2)).tree.patient?.demographics?.lastName, undefined, 'Not now wrote nothing');
