@@ -2974,7 +2974,7 @@
     const sorted = key ? members.slice().sort((a, b) => (a.rel === key ? -1 : b.rel === key ? 1 : 0)) : members;
     return sorted.map(m => fieldRow(m, it.fields[m.rel], String(i))).join('');
   }
-  const itemTitle = (it) => { const k = ITEM_KEY[it.kind]; const f = k && it.fields[k]; if (it.kind === 'assessment') return `Assessment (${(it.findings || []).length} findings)`; if (it.kind === 'vital') return 'Vital'; return f && f.v != null ? nameOf(f.l, f.v) : humanize(it.kind); };
+  const itemTitle = (it) => { const k = ITEM_KEY[it.kind]; const f = k && it.fields[k]; if (it.kind === 'assessment') { const ab = (it.findings || []).filter(x => x.id !== 'No_Abnormalities' && x.id !== 'Not_Assessed').length; const na = (it.findings || []).filter(x => x.id === 'Not_Assessed').length; return `Assessment: ${ab ? ab + ' finding' + (ab === 1 ? '' : 's') : 'no abnormalities'}${na ? `, ${na} area${na === 1 ? '' : 's'} not assessed` : ''}`; } if (it.kind === 'vital') return 'Vital'; return f && f.v != null ? nameOf(f.l, f.v) : humanize(it.kind); };
   function inputFor(f, v) {
     const val = v == null ? '' : v;
     if (f.t === 'boolean') return `<select data-in><option value="">—</option><option value="true" ${val === true || val === 'true' ? 'selected' : ''}>Yes</option><option value="false" ${val === false || val === 'false' ? 'selected' : ''}>No</option></select>`;
@@ -3002,26 +3002,40 @@
     if (t === 'datetime') { const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/.exec(v); return m ? `${m[2]}/${m[3]}/${m[1]} ${m[4]}:${m[5]}:${m[6] || '00'}` : null; }
     return v;
   }
+  // The assessment, the way the report is done: everything No Abnormalities to start, then only
+  // what is wrong is marked, area by area, from the findings ESO offers for that area.
   function assessmentUi(it) {
     const A = typeof ESOSAVE_ASSESS !== 'undefined' ? ESOSAVE_ASSESS : null;
     if (!A) return '<div class="muted">The assessment layout is not available.</div>';
-    const find = (loc) => (it.findings || []).find(f => f.loc === loc);
-    const fname = (id) => (A.findings.find(f => f.id === id) || {}).n || id;
-    const opts = (loc) => { const cur = find(loc); const basic = [['', '—'], ['No_Abnormalities', 'No Abnormalities'], ['Not_Assessed', 'Not Assessed']]; const extra = cur && !basic.some(b => b[0] === cur.id) ? [[cur.id, fname(cur.id)]] : []; return basic.concat(extra).map(([id, n]) => `<option value="${esc(id)}" ${cur && cur.id === id ? 'selected' : ''}>${esc(n)}</option>`).join('') + `<option value="__other">Other finding…</option>`; };
-    let html = `<div class="ax"><div class="muted" style="margin:4px 0 8px">The areas ESO's Quick Ax has. Each: No Abnormalities, Not Assessed, or open it and set its parts one by one; an area left blank is written Not Assessed, as ESO itself starts every assessment. "All normal" does every area at once.</div>`;
+    const fname = (id) => (A.findings.find(f => f.id === id) || {}).n || id.replace(/_/g, ' ');
+    const at = (loc) => (it.findings || []).filter(f => f.loc === loc);
+    const state = (loc) => { const fs = at(loc); if (!fs.length) return ['', 'Not set (written Not Assessed)']; if (fs.length === 1 && fs[0].id === 'No_Abnormalities') return ['ok', 'No abnormalities']; if (fs.length === 1 && fs[0].id === 'Not_Assessed') return ['na', 'Not assessed']; return ['ab', fs.map(f => fname(f.id)).join(', ')]; };
+    const open = it._open || null;
+    let html = `<div class="ax"><div class="muted" style="margin:4px 0 10px">Everything starts as No Abnormalities. Tap an area to mark what is wrong there, from the findings ESO has for that area, or set it Not Assessed.</div>`;
     for (const c of A.categories) {
       const subs = A.subCategories.filter(s => s.categoryId === c.id);
       const locs = A.top.map(id => A.locations.find(l => l.id === id)).filter(l => l && subs.some(s => s.id === l.sub));
       if (!locs.length) continue;
-      const ids = locs.map(l => (find(l.id) || {}).id || '');
-      const all = ids.every(x => x === ids[0]) ? ids[0] : (ids.some(Boolean) ? 'mixed' : '');
-      const set = ids.filter(Boolean).length;
-      html += `<details class="sec" ${all === 'mixed' ? 'open' : ''} style="margin:6px 0"><summary><span style="flex:1">${esc(c.name)}${set ? ` <span class="muted">(${set} of ${locs.length} set)</span>` : ''}</span>
-        <select data-cat="${esc(c.id)}" style="font:inherit;padding:8px;border:1px solid #cbd5e1;border-radius:8px;min-height:40px"><option value="" ${all === '' ? 'selected' : ''}>—</option><option value="No_Abnormalities" ${all === 'No_Abnormalities' ? 'selected' : ''}>No Abnormalities</option><option value="Not_Assessed" ${all === 'Not_Assessed' ? 'selected' : ''}>Not Assessed</option>${all === 'mixed' ? '<option value="mixed" selected>Mixed</option>' : ''}</select></summary>`
-        + locs.map(l => `<div class="loc"><span>${esc(l.n)}</span><select data-loc="${esc(l.id)}">${opts(l.id)}</select></div>`).join('') + '</details>';
+      html += `<h4 style="margin:12px 0 4px">${esc(c.name)}</h4>`;
+      for (const l of locs) {
+        const [cls, text] = state(l.id);
+        const colour = cls === 'ok' ? '#15803d' : cls === 'ab' ? '#b91c1c' : cls === 'na' ? '#64748b' : '#b45309';
+        html += `<div class="loc" style="grid-template-columns:minmax(140px,1fr) minmax(160px,2fr) auto"><span>${esc(locs.length > 1 || l.n !== c.name ? l.n : c.name)}</span><span style="color:${colour};font-weight:600">${esc(text)}</span><button type="button" class="tb sec" data-area="${esc(l.id)}" style="padding:6px 12px;min-height:36px">${open === l.id ? 'Close' : 'Change'}</button></div>`;
+        if (open === l.id) {
+          const chosen = new Set(at(l.id).map(f => f.id));
+          const offered = (A.byArea && A.byArea[l.id]) || [];
+          const orient = l.id === 'MentalStatus' ? (A.orientation || []) : [];
+          html += `<div style="background:#fff;border:1px solid #cbd5e1;border-radius:10px;padding:10px;margin:4px 0 10px">
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px"><button type="button" class="tb ${chosen.has('No_Abnormalities') ? 'pri' : 'sec'}" data-set="${esc(l.id)}|No_Abnormalities">No abnormalities</button><button type="button" class="tb ${chosen.has('Not_Assessed') ? 'pri' : 'sec'}" data-set="${esc(l.id)}|Not_Assessed">Not assessed</button></div>
+            ${orient.length ? `<div style="font-weight:700;margin:6px 0 4px">Oriented to</div><div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">${orient.map(id => `<label style="display:flex;gap:6px;align-items:center;border:1px solid #cbd5e1;border-radius:20px;padding:6px 12px"><input type="checkbox" data-find="${esc(l.id)}|${esc(id)}" ${chosen.has(id) ? 'checked' : ''}> ${esc(fname(id).replace(/^Oriented /i, ''))}</label>`).join('')}</div>` : ''}
+            <div style="font-weight:700;margin:6px 0 4px">What is wrong</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">${offered.filter(id => !orient.includes(id)).map(id => `<label style="display:flex;gap:6px;align-items:center;border:1px solid #cbd5e1;border-radius:20px;padding:6px 12px;background:${chosen.has(id) ? '#fee2e2' : '#fff'}"><input type="checkbox" data-find="${esc(l.id)}|${esc(id)}" ${chosen.has(id) ? 'checked' : ''}> ${esc(fname(id))}</label>`).join('')}</div>
+          </div>`;
+        }
+      }
     }
     const cm = memberFields('assessments.assessmentsV2').filter(m => /comments$/i.test(m.rel));
-    if (cm.length) html += '<h4>Comments</h4>' + cm.map(m => `<div class="tf ${it.fields[m.rel] ? 'on' : ''}" data-key="${esc(String(ed.items.indexOf(it)))}|${esc(m.rel)}"><input type="checkbox" data-sel ${it.fields[m.rel] ? 'checked' : ''}><div class="fl">${esc(humanize(m.rel.split('.')[0]))}</div><div>${inputFor(m, it.fields[m.rel] ? it.fields[m.rel].v : null)}</div></div>`).join('');
+    if (cm.length) html += '<h4>Comments</h4>' + cm.map(m => `<div class="tf ${it.fields[m.rel] ? 'on' : ''}" data-key="${esc(String(ed.items.indexOf(it)))}|${esc(m.rel)}"><input type="checkbox" data-sel ${it.fields[m.rel] ? 'checked' : ''}><div class="fl">${esc(humanize(m.rel.split('.')[0].replace(/Section$/, '')))}</div><div>${inputFor(m, it.fields[m.rel] ? it.fields[m.rel].v : null)}</div></div>`).join('');
     return html + '</div>';
   }
   function fieldDef(key) {
@@ -3053,7 +3067,8 @@
     W.querySelectorAll('[data-additem]').forEach(b => b.addEventListener('click', () => {
       const root = b.dataset.additem, kind = b.dataset.kind, rootField = null;
       const rootDef = { r: rootRef(root), t: rootType(kind) };
-      ed.items.push({ root, kind, r: rootDef.r, t: rootDef.t, fields: {}, findings: [] });
+      const A = typeof ESOSAVE_ASSESS !== 'undefined' ? ESOSAVE_ASSESS : null;
+      ed.items.push({ root, kind, r: rootDef.r, t: rootDef.t, fields: {}, findings: kind === 'assessment' && A ? A.top.map(id => ({ loc: id, id: 'No_Abnormalities' })) : [] });
       renderEditor();
       const last = tplWin.querySelectorAll('.item'); if (last.length) last[last.length - 1].scrollIntoView({ block: 'nearest' });
     }));
@@ -3068,19 +3083,19 @@
     W.querySelectorAll('[data-remove]').forEach(b => b.addEventListener('click', () => { const i = Number(b.closest('.item').dataset.item); ed.items.splice(i, 1); renderEditor(); }));
     W.querySelectorAll('[data-allnormal]').forEach(b => b.addEventListener('click', () => { const it = ed.items[Number(b.closest('.item').dataset.item)]; const A = ESOSAVE_ASSESS; it.findings = A.top.map(id => ({ loc: id, id: 'No_Abnormalities' })); renderEditor(); }));
     W.querySelectorAll('[data-allna]').forEach(b => b.addEventListener('click', () => { const it = ed.items[Number(b.closest('.item').dataset.item)]; const A = ESOSAVE_ASSESS; it.findings = A.top.map(id => ({ loc: id, id: 'Not_Assessed' })); renderEditor(); }));
-    W.querySelectorAll('select[data-cat]').forEach(sel => { sel.addEventListener('click', (e) => e.stopPropagation()); sel.addEventListener('change', () => {
-      const it = ed.items[Number(sel.closest('.item').dataset.item)]; const A = ESOSAVE_ASSESS;
-      const subs = A.subCategories.filter(x => x.categoryId === sel.dataset.cat); const locs = A.top.filter(id => { const l = A.locations.find(x => x.id === id); return l && subs.some(x => x.id === l.sub); });
-      it.findings = (it.findings || []).filter(f => !locs.includes(f.loc));
-      if (sel.value && sel.value !== 'mixed') for (const loc of locs) it.findings.push({ loc, id: sel.value });
+    W.querySelectorAll('[data-area]').forEach(b => b.addEventListener('click', () => { const it = ed.items[Number(b.closest('.item').dataset.item)]; it._open = it._open === b.dataset.area ? null : b.dataset.area; renderEditor(); }));
+    W.querySelectorAll('[data-set]').forEach(b => b.addEventListener('click', () => {
+      const it = ed.items[Number(b.closest('.item').dataset.item)]; const [loc, id] = b.dataset.set.split('|');
+      it.findings = (it.findings || []).filter(f => f.loc !== loc).concat([{ loc, id }]);
       renderEditor();
-    }); });
-    W.querySelectorAll('select[data-loc]').forEach(sel => sel.addEventListener('change', () => {
-      const it = ed.items[Number(sel.closest('.item').dataset.item)]; const loc = sel.dataset.loc;
-      it.findings = (it.findings || []).filter(f => f.loc !== loc);
-      if (sel.value === '__other') { pickFinding(it, loc); return; }
-      if (sel.value) it.findings.push({ loc, id: sel.value });
-      updateItemTitle(sel.closest('.item'), it);
+    }));
+    W.querySelectorAll('[data-find]').forEach(cb => cb.addEventListener('change', () => {
+      const it = ed.items[Number(cb.closest('.item').dataset.item)]; const [loc, id] = cb.dataset.find.split('|');
+      // a finding replaces No Abnormalities / Not Assessed on that area; the last one taken off puts No Abnormalities back
+      it.findings = (it.findings || []).filter(f => !(f.loc === loc && (f.id === id || f.id === 'No_Abnormalities' || f.id === 'Not_Assessed')));
+      if (cb.checked) it.findings.push({ loc, id });
+      if (!it.findings.some(f => f.loc === loc)) it.findings.push({ loc, id: 'No_Abnormalities' });
+      renderEditor();
     }));
     // field rows
     W.querySelectorAll('.tf').forEach(row => {
@@ -3132,17 +3147,6 @@
   }
   function wireUnpick(row, d, setVal, cur) { row.querySelectorAll('[data-unpick]').forEach(a => a.addEventListener('click', () => { setVal(cur().filter(x => String(x) !== a.dataset.unpick)); a.parentElement.remove(); })); }
   function updateItemTitle(card, it) { const h = card && card.querySelector('.ih'); if (h) h.firstChild.textContent = itemTitle(it); }
-  function pickFinding(it, loc) {
-    const A = ESOSAVE_ASSESS;
-    askBox('Which finding?', 'Type to search ESO\'s findings.', [['Cancel', null]]);
-    const box = veil && veil.querySelector('.askbox'); if (!box) return;
-    const wrap = document.createElement('div'); wrap.className = 'pick'; wrap.style.cssText = 'text-align:left;margin:6px 0 12px;position:relative';
-    wrap.innerHTML = '<input type="text" class="search" placeholder="Search…" style="width:100%;box-sizing:border-box;font:inherit;padding:10px;border:1px solid #cbd5e1;border-radius:8px"><div class="picklist" style="position:static;max-height:260px;overflow:auto;border:1px solid #cbd5e1;border-radius:8px;margin-top:6px"></div>';
-    box.insertBefore(wrap, box.querySelector('.actions'));
-    const inp = wrap.querySelector('input'), list = wrap.querySelector('.picklist');
-    const show = () => { const q = inp.value.trim().toLowerCase(); list.innerHTML = A.findings.filter(f => !q || f.n.toLowerCase().includes(q)).slice(0, 150).map(f => `<button type="button" data-fid="${esc(f.id)}" style="display:block;width:100%;text-align:left;border:0;border-bottom:1px solid #f1f5f9;background:#fff;padding:10px;font:inherit;cursor:pointer">${esc(f.n)}</button>`).join(''); list.querySelectorAll('[data-fid]').forEach(b => b.addEventListener('click', () => { it.findings.push({ loc, id: b.dataset.fid }); hideVeil(); renderEditor(); })); };
-    inp.addEventListener('input', show); show(); inp.focus();
-  }
   const rootRef = (root) => { const f = (catalog.fields || []).find(x => x.i === root); return ({ 'vitals.vitalSigns': 'VITALSIGN', 'flowchartTreatments.treatments': 'FLOWCHARTTREATMENT', 'assessments.assessmentsV2': 'ASSESSMENT2', 'patient.patientMedicalHistories': 'PATIENTMEDICALHISTORY', 'patient.patientAllergies': 'PATIENTALLERGIES', 'patient.patientMedications': 'PATIENTMEDICATIONS', 'patient.patientPersonalItems': 'PATIENTPERSONALITEMS', 'narrative.supportingSignsAndSymptomsEnhanced.signsAndSymptomsEnhanced': 'SIGNSANDSYMPTOMSENHANCED', 'narrative.clinicalImpression.protocolsUsed.items': 'PROTOCOLSUSED', 'patient.patientImmunizations.items': 'PATIENTIMMUNIZATIONS' })[root] || (f ? f.r : root.toUpperCase()); };
   const rootType = (kind) => ['history', 'allergy', 'medication', 'belonging'].includes(kind) ? 'fieldGroup' : ['protocol', 'immunization'].includes(kind) ? 'collection' : 'collectionWithData';
   async function saveEditor() {
@@ -3152,7 +3156,7 @@
     // an item without its key (a treatment with no treatment picked, an empty vital) cannot be written
     const empty = ed.items.filter(it => !(it.kind === 'vital' || it.kind === 'assessment' ? (it.kind === 'assessment' ? (it.findings || []).length || Object.keys(it.fields).length : Object.keys(it.fields).length) : it.fields[ITEM_KEY[it.kind]]));
     if (empty.length) { alert(`ESO Save: ${empty.length === 1 ? 'one item is' : empty.length + ' items are'} empty (${empty.map(it => ITEM_ONE[it.kind] || it.kind).join(', ')}): pick ${empty.some(it => ITEM_KEY[it.kind]) ? 'what it is' : 'at least one value'}, or remove it.`); return; }
-    const items = ed.items;
+    const items = ed.items.map(it => { const { _open, ...rest } = it; return rest; });
     let body = { v: 1, fields: ed.fields, items };
     if (!isAdmin()) { const r = applyLocks(body); body = r.body; }
     if (!Object.keys(body.fields).length && !body.items.length) { alert('ESO Save: the template is empty. Tick at least one field.'); return; }

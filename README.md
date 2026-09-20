@@ -137,8 +137,9 @@ to bad signal or a hung page.
   list): tick a field, give it a value (a search-and-scroll picker for lists, a tick list for
   multi-picks, a date or time picker, yes/no, text; one "No delays" button puts ESO's own
   None/No Delay on all five delay fields), and add items too: a vital, a treatment
-  (its measure and route narrow to the treatment), an assessment (every Quick Ax location set
-  to No Abnormalities with one button, or any finding), a history entry, an allergy, a home
+  (its measure and route narrow to the treatment), an assessment (the way the report is done:
+  every area No Abnormalities to start, then tap an area to mark what is wrong from the findings
+  ESO offers for that area, or set it Not Assessed), a history entry, an allergy, a home
   medication, a sign or symptom, a protocol. What is the call's own (incident number, unit,
   vehicle, shift, crew, times, the addresses, the patient's name, DOB and SSN, signatures) is
   never offered. Templates are kept in the agency's table under the person's ESO id (so a name

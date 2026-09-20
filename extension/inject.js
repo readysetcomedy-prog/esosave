@@ -27,7 +27,7 @@
   if (ext) return;
   if (window.__esosave) return;
 
-  const VERSION = '0.15.4';
+  const VERSION = '0.15.5';
   const API_PREFIX_RE = /^\/ehr\/api\/+/i;
   const FAKE_OK_TEXT = '{"result":"Success","data":[]}';
   const PROBE_PATH = '/ehr/api/thirdpartydata/partners';
@@ -1373,8 +1373,8 @@
         // as ESO starts one: a finding on each of its areas, Not Assessed where the template says nothing
         const chosen = (it.findings || []).filter(fd => fd && fd.loc && fd.id && ASSESS_TOP.includes(fd.loc));
         for (const loc of ASSESS_TOP) {
-          const fd = chosen.find(x => x.loc === loc);
-          push({ verb: 'ADD', address: `${base}.findings.['${uuid()}']`, fieldRef: 'ASSESSMENT2FINDINGS', value: { findingId: fd ? fd.id : 'Not_Assessed', findingLocationId: loc, present: true }, dataType: 'binary', isComplexType: true });
+          const fds = chosen.filter(x => x.loc === loc);
+          for (const fd of (fds.length ? fds : [{ loc, id: 'Not_Assessed' }])) push({ verb: 'ADD', address: `${base}.findings.['${uuid()}']`, fieldRef: 'ASSESSMENT2FINDINGS', value: { findingId: fd.id, findingLocationId: loc, present: true }, dataType: 'binary', isComplexType: true });
         }
       }
     }

@@ -1776,7 +1776,13 @@ test('templates: made from ESO\'s own field catalog, saved under the person\'s i
   // Assessments: one assessment, all normal, with a comment
   await twClick('[data-page=assessments]');
   await twClick('[data-additem="assessments.assessmentsV2"]');
-  await twClick('.item [data-allnormal]');
+  // a new assessment starts with every area No Abnormalities; the skin is marked cold and clammy
+  assert.match(await tw('.item .ih'), /no abnormalities/);
+  await twClick('[data-area="Skin"]');
+  await waitFor(() => T.page.evaluate(() => !!document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin [data-find="Skin|Cold"]')), { label: "the skin's own findings" });
+  assert.equal(await T.page.evaluate(() => !!document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin [data-find="Skin|Agitation"]')), false, 'only the findings of that area');
+  await T.page.evaluate(() => { for (const id of ['Skin|Cold', 'Skin|Clammy']) { const cb = document.getElementById('esosave-host').shadowRoot.querySelector(`.tplwin [data-find="${id}"]`); cb.checked = true; cb.dispatchEvent(new Event('change', { bubbles: true })); } });
+  await waitFor(async () => /2 findings/.test((await tw('.item .ih')) || ''), { label: 'two findings on the skin' });
   await twType(rowSel('3|abdomenSection.comments') + ' [data-in]', 'Soft, non-tender');
   
   // Narrative: an impression and text
@@ -1794,7 +1800,7 @@ test('templates: made from ESO\'s own field catalog, saved under the person\'s i
   assert.equal(saved.body.items.length, 4);
   assert.equal(saved.body.items.find(i => i.kind === 'treatment').fields.doseUnitId.v, 9001);
   const ax = saved.body.items.find(i => i.kind === 'assessment');
-  assert.equal(ax.findings.length, 26, "ESO's own areas, no more"); assert.ok(ax.findings.every(f => f.id === 'No_Abnormalities'), 'every area marked no abnormalities');
+  assert.equal(ax.findings.length, 27, "ESO's own areas, no more; the skin carries two"); assert.deepEqual(ax.findings.filter(f => f.loc === 'Skin').map(f => f.id).sort(), ['Clammy', 'Cold']); assert.ok(ax.findings.filter(f => f.loc !== 'Skin').every(f => f.id === 'No_Abnormalities'), 'every other area no abnormalities');
   await waitFor(() => tw('h2'), { label: 'back on the list' });
   assert.match(await tw('.body'), /Chest pain[\s\S]*private/);
   // fill the run from it: a question, then a progress bar, then the run carries it all
@@ -1812,7 +1818,7 @@ test('templates: made from ESO\'s own field catalog, saved under the person\'s i
   assert.equal(Object.values(t.patient.patientMedicalHistories)[0].itemId, 1337168);
   const v = t.vitals.vitalSigns[0]; assert.equal(v.bloodPressure.bloodPressureSystolic, '120'); assert.equal(v.pulse.pulseRate, '80'); assert.match(v.vitalSignDateTime, /^\d\d\/\d\d\/\d{4} \d\d:\d\d:\d\d$/);
   const tr = t.flowchartTreatments.treatments[0]; assert.equal(tr.flowchartTreatmentRegistryId, 1416); assert.equal(tr.dose, '15'); assert.equal(tr.doseUnitId, 9001); assert.ok(tr.treatmentDate);
-  const a = t.assessments.assessmentsV2[0]; assert.equal(a.abdomenSection.comments, 'Soft, non-tender'); assert.equal(Object.values(a.findings).length, ax.findings.length); assert.ok(Object.values(a.findings).every(f => f.findingId === 'No_Abnormalities' && f.present === true));
+  const a = t.assessments.assessmentsV2[0]; assert.equal(a.abdomenSection.comments, 'Soft, non-tender'); const fs = Object.values(a.findings); assert.equal(fs.length, 27); assert.deepEqual(fs.filter(f => f.findingLocationId === 'Skin').map(f => f.findingId).sort(), ['Clammy', 'Cold']); assert.ok(fs.filter(f => f.findingLocationId !== 'Skin').every(f => f.findingId === 'No_Abnormalities' && f.present === true));
   assert.equal(t.narrative.clinicalImpression.primaryImpressionId, 500);
   const run = await T.run(id);
   assert.ok(run.batches.filter(b => b.synthetic === 'facesheet' || b.synthetic === 'template').length >= 6, 'one batch per tab');
