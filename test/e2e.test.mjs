@@ -484,6 +484,9 @@ test('lock: email-only destination offers email only; Not now leaves it in the N
     await waitFor(async () => { const s = await T.status(); return s.unsent && s.unsent.items.some(i => i.pcrId === id && i.email && !i.fax); }, { label: 'listed as not sent', timeout: 20000 });
     // send it from the list
     await shClick('.bar [data-act=open]');
+    await waitFor(() => sh('.unsent .head'), { label: 'the Not sent fold' });
+    assert.equal(await sh('.urow'), null, 'folded by default');
+    await shClick('.unsent [data-act=unsent-toggle]');
     await waitFor(() => sh('.urow[data-pcr="' + id + '"] [data-act=send-email]'), { label: 'email button in the list' });
     await shClick('.urow[data-pcr="' + id + '"] [data-act=send-email]');
     await waitFor(async () => (await T.faxes()).emails.some(e => e.pcrId === id), { label: 'emailed' });
@@ -538,7 +541,9 @@ test('the Not sent list is agency-wide: locked runs from other devices with a de
   assert.ok(!s.unsent.items.some(i => i.pcrId === nowhere), 'run with no destination not listed');
   const item = s.unsent.items.find(i => i.pcrId === unsent);
   assert.equal(item.destinationName, 'Gateway Regional Med Center'); assert.equal(item.fax, true); assert.equal(item.email, true);
-  const text = await sh('.run.unsent');
+  assert.match(await sh('.run.unsent'), /Not sent yet \(1\)/, 'folded, with the count');
+  await shClick('.unsent [data-act=unsent-toggle]');
+  const text = await waitFor(async () => { const t = await sh('.run.unsent'); return t && /Gateway/.test(t) ? t : null; }, { label: 'unfolded' });
   assert.match(text, /Gateway Regional Med Center/);
   assert.match(await sh('.bar'), /1 run not faxed/);
   await shClick('.panel [data-act=close]');
@@ -1588,9 +1593,9 @@ const FACESHEET_B = [
   'ENCOUNTER',
   'Patient Class: | Emergency | Unit: | SAE EMERGENCY R*',
   'PATIENT',
-  'Name: ROE, LOUISE M DOB:',
+  'Name: ROE, LOUISE M',
   '10/24/1931 (94 yrs)',
-  'Address: | 707 S Oak St | Sex: female White Or Caucasian',
+  'Address: | 707 S Oak St | female | White Or Caucasian',
   'City: | EFFINGHAM, IL 62401-1954 | Ethnicity: | Not Hispanic or Latino',
   'Primary Care Provider: | Jeffrey Brummer, DO | Primary Phone: | 217-343-9134',
   'Work Phone:',
@@ -1642,33 +1647,60 @@ test('facesheet: a scanned facesheet is read and, on a yes, fills the Patient an
   const id = await freshRun();
   await app(() => window.app.openTab('Patient'));
   let q = await scanFacesheet(id, FACESHEET_A, 'fs-a');
-  for (const t of ['Name: DOE, JANE Q', 'Sex: Female', 'DOB: 09/22/1947', 'PO BOX 337, BROWNSTOWN, IL, 62418', 'Home phone: (618) 699-1518', 'Physician: Deidre Langston', 'Insured (Billing page): DOE, JANE (Self), DOB 09/22/1947', 'SSN (masked on the facesheet)', 'insurance (left to the billing office)']) assert.ok(q.includes(t), `question lists ${t}: ${q}`);
-  assert.ok(!/Medicare|policy|UHC/.test(q), 'the insurance itself is never filled');
+  for (const t of ['Name: DOE, JANE Q', 'Sex: Female', 'DOB: 09/22/1947', 'PO BOX 337, BROWNSTOWN, IL, 62418', 'Home phone: (618) 699-1518', 'SSN (masked on the facesheet)', 'insurance and the insured']) assert.ok(q.includes(t), `question lists ${t}: ${q}`);
+  assert.ok(!/Medicare|policy|UHC|Physician|Insured \(/.test(q), 'only the patient: no insurance, no insured, no physician');
   await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('[data-act=fill-yes]').click());
   const tree = async () => (await T.record(id)).tree;
-  await waitFor(async () => { const t = await tree(); return t.patient?.demographics?.lastName === 'DOE' && t.billing?.contactForPayment?.insuredLastName === 'DOE' && t.patient?.contact?.address?.placeId; }, { label: 'both pages written', timeout: 20000 });
+  await waitFor(async () => { const t = await tree(); return t.patient?.demographics?.lastName === 'DOE' && t.patient?.contact?.address?.placeId; }, { label: 'the Patient page written', timeout: 20000 });
   const t = await tree();
-  const d = t.patient.demographics, c = t.patient.contact, b = t.billing;
+  const d = t.patient.demographics, c = t.patient.contact;
   assert.equal(d.firstName, 'JANE'); assert.equal(d.middleName, 'Q'); assert.equal(d.sexId, 15359); assert.equal(d.genderId, 314); assert.equal(d.dob, '09/22/1947 00:00:00'); assert.equal(d.ssn, undefined, 'masked SSN left alone');
   assert.equal(c.address.address1, 'PO BOX 337'); assert.equal(c.address.city, 'BROWNSTOWN'); assert.equal(c.address.stateId, 260); assert.equal(c.address.zip, '62418'); assert.equal(c.address.placeId.county, 'Fayette');
   const phones = Object.values(c.patientPhoneNumbers?.items || {});
   assert.deepEqual(phones.map(p => [p.phoneTypeId, p.phoneNumber]), [[12830, '6186991518']]);
-  assert.equal(c.physicianFirstName, 'Deidre'); assert.equal(c.physicianLastName, 'Langston');
-  assert.equal(b.payment, undefined, 'nothing about the insurance was written');
-  assert.equal(b.contactForPayment.relationshipToTheInsuredId, 5780); assert.equal(b.contactForPayment.insuredLastName, 'DOE'); assert.equal(b.contactForPayment.insuredFirstName, 'JANE'); assert.equal(b.contactForPayment.dob, '09/22/1947 00:00:00');
-  assert.equal(b.contactForPayment.address.address1, 'PO BOX 337'); assert.equal(b.contactForPayment.address.city, 'BROWNSTOWN'); assert.equal(b.contactForPayment.address.stateId, 260); assert.equal(b.contactForPayment.address.zip, '62418'); assert.equal(b.contactForPayment.address.county, 'Fayette');
-  await waitFor(() => T.page.evaluate(() => /pages filled/.test((document.getElementById('esosave-host').shadowRoot.querySelector('.veil') || {}).textContent || '')), { label: 'the notice' });
+  assert.equal(c.physicianFirstName, undefined, 'the physician is not filled');
+  assert.equal(t.billing, undefined, 'the Billing page is never touched');
+  await waitFor(() => T.page.evaluate(() => /Patient page filled/.test((document.getElementById('esosave-host').shadowRoot.querySelector('.veil') || {}).textContent || '')), { label: 'the notice' });
   assert.equal((await T.record(id)).attachments.length, 1, 'and the facesheet itself is attached');
   // ---- the right-aligned "PATIENT / GUARANTOR / COVERAGE" facesheet; Not now leaves the pages alone
   await fetch(T.base + '/__native_reset', { method: 'POST' });
   const id2 = await freshRun();
   await app(() => window.app.openTab('Incident'));
   q = await scanFacesheet(id2, FACESHEET_B, 'fs-b');
-  for (const t of ['Name: ROE, LOUISE M', 'Sex: Female', 'DOB: 10/24/1931', 'Race: White', 'Ethnicity: Not Hispanic or Latino', '707 S Oak St, EFFINGHAM, IL, 62401', 'Home phone: (217) 343-9134', 'Mobile phone: (217) 343-9134', 'Physician: Jeffrey Brummer', 'Insured (Billing page): ROE, LOUISE (Self), DOB 10/24/1931']) assert.ok(q.includes(t), `question lists ${t}: ${q}`);
+  for (const t of ['Name: ROE, LOUISE M', 'Sex: Female', 'DOB: 10/24/1931', 'Race: White', 'Ethnicity: Not Hispanic or Latino', '707 S Oak St, EFFINGHAM, IL, 62401', 'Home phone: (217) 343-9134', 'Mobile phone: (217) 343-9134']) assert.ok(q.includes(t), `question lists ${t}: ${q}`);
   assert.ok(!/MEDICARE|policy/.test(q), 'the insurance is never filled');
   await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('[data-act=fill-no]').click());
   await sleep(800);
   assert.equal((await T.record(id2)).tree.patient?.demographics?.lastName, undefined, 'Not now wrote nothing');
   assert.equal(await box(), null);
   await T.control({ scanner: false });
+});
+
+test('vitals copy: the groups the crew unticks in Settings are left out of the copy', async () => {
+  await T.setStorage({ settings: { ...(await T.storage()).settings, vitalCopySkip: ['bloodPressure', 'glasgowComaScale'] } });
+  await fetch(T.base + '/__db_set', { method: 'POST', body: JSON.stringify({ name: 'TEST, MEDIC', settings: { vitalCopySkip: ['bloodPressure', 'glasgowComaScale'] } }) });
+  const id = await freshRun();
+  const k = await app(() => window.app.uuid());
+  await app((k) => {
+    window.app.add('vitals', `vitals.vitalSigns.['${k}']`, { vitalSignDateTime: '09/16/2026 15:39:12' });
+    window.app.edit('vitals', `vitals.vitalSigns.['${k}'].bloodPressure.bloodPressureSystolic`, '120');
+    window.app.edit('vitals', `vitals.vitalSigns.['${k}'].bloodPressure.bloodPressureDiastolic`, '80');
+    window.app.edit('vitals', `vitals.vitalSigns.['${k}'].pulse.pulseRate`, '72');
+    window.app.edit('vitals', `vitals.vitalSigns.['${k}'].glasgowComaScale.glascowComaTotalScore`, 15, 'integer');
+  }, k);
+  await waitFor(async () => (await T.record(id)).tree.vitals?.vitalSigns?.[0]?.pulse?.pulseRate === '72', { label: 'vital saved' });
+  await app(() => window.app.openTab('Vitals'));
+  const buttons = () => T.page.evaluate(() => Array.from(window.__qa('.esosave-copy')).filter(b => b.style.display !== 'none').map(b => ({ time: b.dataset.time, rect: b.getBoundingClientRect().toJSON() })));
+  await waitFor(async () => (await buttons()).length === 1, { label: 'copy button' });
+  await sleep(800);
+  const [first] = await buttons();
+  await T.page.mouse.click(first.rect.x + first.rect.width / 2, first.rect.y + first.rect.height / 2);
+  const rec = await waitFor(async () => { const r = await T.record(id); return r.tree.vitals.vitalSigns.length === 2 ? r : null; }, { label: 'copied', timeout: 20000 });
+  const c = rec.tree.vitals.vitalSigns[1];
+  assert.equal(c.pulse.pulseRate, '72', 'pulse still copied');
+  assert.equal(c.bloodPressure?.bloodPressureSystolic ?? null, null, 'blood pressure left out');
+  assert.equal(c.glasgowComaScale?.glascowComaTotalScore ?? null, null, 'GCS left out');
+  assert.ok(!rec.ops.some(o => o.address.includes(c.itemId) && /bloodPressure|glasgowComaScale/.test(o.address)), 'never sent');
+  await T.setStorage({ settings: { ...(await T.storage()).settings, vitalCopySkip: [] } });
+  await fetch(T.base + '/__db_set', { method: 'POST', body: JSON.stringify({ name: 'TEST, MEDIC', settings: {} }) });
 });

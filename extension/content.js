@@ -43,7 +43,7 @@
   const sget = (keys) => new Promise(res => storage.get(keys, (v) => res(v || {})));
   const sset = (obj) => new Promise(res => storage.set(obj, () => res()));
   const sremove = (keys) => new Promise(res => storage.remove(keys, () => res()));
-  const DEFAULT_SETTINGS = { purgeHoursAfterLock: 0, probeSec: 20, heldProbeSec: 8, warmTabs: true, cardCollapsed: false, showTimes: true, sendPrompt: true, unsentList: true, quickHistory: true, quickMeds: true, quickAllergies: true, quickAcuity: true, quickDelays: true, quickTransport: true, quickAssess: true, quickDisposition: true, autoResponse: true, quickIncident: true, quickMechanism: true, quickFacilities: true, quickNarrative: true, quickPatient: true, quickRefusal: true, autoMileage: true, askBeforeLock: true, cadGate: true, scanDocs: true, facilitySending: [], facilityDestination: [] };
+  const DEFAULT_SETTINGS = { purgeHoursAfterLock: 0, probeSec: 20, heldProbeSec: 8, warmTabs: true, cardCollapsed: false, showTimes: true, sendPrompt: true, unsentList: true, quickHistory: true, quickMeds: true, quickAllergies: true, quickAcuity: true, quickDelays: true, quickTransport: true, quickAssess: true, quickDisposition: true, autoResponse: true, quickIncident: true, quickMechanism: true, quickFacilities: true, quickNarrative: true, quickPatient: true, quickRefusal: true, autoMileage: true, askBeforeLock: true, cadGate: true, scanDocs: true, vitalCopySkip: [], facilitySending: [], facilityDestination: [] };
   // The agency's standard facility chips (ids and names from ESO's saved facilities). Every install
   // starts with these; Settings can add or remove per device.
   const FAC = {
@@ -68,7 +68,10 @@
 
   // Settings the crew may change; everything else in Settings is locked (set in the code).
   // Ask the owner whether a new setting is locked or open before adding it (see CLAUDE.md).
-  const OPEN_SETTINGS = ['quickHistory', 'quickMeds', 'quickAllergies', 'quickAcuity', 'quickDelays', 'quickTransport', 'quickAssess', 'quickDisposition', 'autoResponse', 'quickIncident', 'quickMechanism', 'quickFacilities', 'quickNarrative', 'quickPatient', 'quickRefusal', 'autoMileage', 'scanDocs', 'facilitySending', 'facilityDestination'];
+  // the groups a saved vital is made of, as ESO's own view lays them out; the copy can leave any out
+  const VITAL_GROUPS = [['bloodPressure', 'Blood pressure'], ['pulse', 'Pulse'], ['respiration', 'Respirations'], ['etCO2SPO2CO', 'SpO2, EtCO2 and CO'], ['glucoseAndTemp', 'Glucose and temperature'],
+    ['pain', 'Pain scale'], ['avpu', 'AVPU'], ['position', 'Patient side and posture'], ['glasgowComaScale', 'Glasgow Coma Scale'], ['revisedTraumaScore', 'Revised trauma score'], ['cardiacMonitoring', 'Cardiac monitoring (ECG)']];
+  const OPEN_SETTINGS = ['quickHistory', 'quickMeds', 'quickAllergies', 'quickAcuity', 'quickDelays', 'quickTransport', 'quickAssess', 'quickDisposition', 'autoResponse', 'quickIncident', 'quickMechanism', 'quickFacilities', 'quickNarrative', 'quickPatient', 'quickRefusal', 'autoMileage', 'scanDocs', 'vitalCopySkip', 'facilitySending', 'facilityDestination'];
   // The open settings follow the ESO login: one row per login in the agency's table, written when
   // the login is first seen and whenever they change something. Only these settings go there;
   // never a run, nor which runs were worked. The key is the project's public one.
@@ -447,16 +450,18 @@
         `<label class="s"><input type="checkbox" id="qrefusal" ${settings.quickRefusal === false ? '' : 'checked'}> Refusal form: chips for Legal, Decision-Making, Medical, Check All notifications and the four Patient Refusals inside ESO's Patient Refusal Form (Signatures tab)</label>` +
         `<label class="s"><input type="checkbox" id="qmileage" ${settings.autoMileage === false ? '' : 'checked'}> Loaded mileage: press ESO's Calculate Mileage once the scene and destination both have an address (Incident tab)</label>` +
         `<label class="s"><input type="checkbox" id="qscan" ${settings.scanDocs === false ? '' : 'checked'}> Paperwork scanner: when you press Camera or Add Attachment in ESO's Attachments dialog, ESO Save first asks what the paperwork is (Facesheet, Physician Certification, Med List, Monitor Printout or Other) and names the attachment after it, for example "260918-021:Facesheet". A run keeps one Facesheet and one Physician Certification: adding a second asks whether to replace the first. On an iPad with the ESO Save app, Camera opens the app's document scanner, which straightens and crops each page; the pages come back and attach themselves. A facesheet, scanned or uploaded, is read and offered to fill the Patient and Billing pages. Off: ESO's own camera and Add Attachment work as they always have.</label>` +
+        `<div class="fac"><b>Vitals copy: what the copy button carries over</b><div class="muted" style="font-size:12px;margin:2px 0 4px">Untick anything that changes every time (blood pressure, say) so the copied vital comes in without it and nobody has to erase it.</div>` +
+        VITAL_GROUPS.map(([k, label]) => `<label class="s"><input type="checkbox" data-vc="${k}" ${(settings.vitalCopySkip || []).includes(k) ? '' : 'checked'}> ${esc(label)}</label>`).join('') + `</div>` +
         facilityPicker('facilitySending', 'Sending facility chips (Scene)') + facilityPicker('facilityDestination', 'Destination facility chips') +
         `<div class="actions"><button class="a" data-act="save-settings">Save</button></div></div>`);
     }
     if (settings.unsentList !== false) {
       const u = s.unsent;
       const items = u ? u.items : [];
-      parts.push(`<div class="run unsent"><div class="head"><span class="num">Not sent yet</span><span class="muted">${u ? `locked in the last 15 days · checked ${fmtTime(u.at)}` : 'checking…'}</span></div>` +
-        (items.length ? items.map(i => `<div class="urow" data-pcr="${esc(i.pcrId)}"><div><b>${esc(i.incidentNumber || '')}</b> · ${esc(fmtWhen(i.incidentDateTime))}<br><span class="muted">${esc(i.patientName || '')} → ${esc(i.destinationName || '')}</span></div><div class="actions">${i.fax ? '<button class="a" data-act="send-fax">Fax</button>' : ''}${i.email ? '<button class="a sec" data-act="send-email">Email</button>' : ''}</div></div>`).join('')
+      parts.push(`<div class="run unsent"><div class="head" data-act="unsent-toggle" style="cursor:pointer"><span class="num">${unsentOpen ? '▾' : '▸'} Not sent yet${items.length ? ` (${items.length})` : ''}</span><span class="muted">${u ? `locked in the last 15 days · checked ${fmtTime(u.at)}` : 'checking…'}</span></div>` +
+        (!unsentOpen ? '' : items.length ? items.map(i => `<div class="urow" data-pcr="${esc(i.pcrId)}"><div><b>${esc(i.incidentNumber || '')}</b> · ${esc(fmtWhen(i.incidentDateTime))}<br><span class="muted">${esc(i.patientName || '')} → ${esc(i.destinationName || '')}</span></div><div class="actions">${i.fax ? '<button class="a" data-act="send-fax">Fax</button>' : ''}${i.email ? '<button class="a sec" data-act="send-email">Email</button>' : ''}</div></div>`).join('')
           : `<p class="muted">${u ? 'Every locked run with a fax or email destination has been sent.' : 'Looking at ESO\'s fax history and the locked runs…'}</p>`) +
-        `<div class="actions"><button class="a sec" data-act="rescan">Check again</button></div></div>`);
+        (unsentOpen ? `<div class="actions"><button class="a sec" data-act="rescan">Check again</button></div>` : '') + `</div>`);
     }
     const listed = s.runs.filter(r => mine(r) && (r.counts.total || r.pendingCreate) && !(r.locked && !r.counts.held && !r.counts.rejected && !r.sends.some(x => x.status === 'held')));
     if (!listed.length) parts.push(`<p class="muted">No runs recorded yet. Open a run in ESO and every save will be recorded here.</p>`);
@@ -548,6 +553,7 @@
   }
   const openLogs = new Set();
   let settingsOpen = false;
+  let unsentOpen = false; // the Not sent list stays folded until asked for
   const facSearch = {};
   function facilityPicker(key, title) {
     const chosen = settings[key] || [];
@@ -597,12 +603,14 @@
       settings.quickRefusal = !!panel.querySelector('#qrefusal').checked;
       settings.autoMileage = !!panel.querySelector('#qmileage').checked;
       settings.scanDocs = !!panel.querySelector('#qscan').checked;
+      settings.vitalCopySkip = Array.from(panel.querySelectorAll('[data-vc]')).filter(c => !c.checked).map(c => c.dataset.vc);
       layoutQuick();
       await sset({ settings }); toPage('settings', settings); settingsOpen = false; renderPanel(); renderTimes();
       pushUser();
     }
     else if (act === 'toggle-log') { if (openLogs.has(id)) openLogs.delete(id); else openLogs.add(id); renderPanel(); }
     else if (act === 'rescan') { toPage('action', { name: 'scanUnsent' }); }
+    else if (act === 'unsent-toggle') { unsentOpen = !unsentOpen; renderPanel(); }
     else if (act === 'fac-add' || act === 'fac-remove') {
       const key = el.closest('.fac').dataset.key; const fid = el.dataset.id;
       const list = (settings[key] || []).filter(c => c.id !== fid);
@@ -2428,17 +2436,17 @@
     veil.className = 'veil';
     veil.style.cursor = 'default';
     veil.innerHTML = `<div class="box askbox fillask" style="max-width:560px;text-align:left"><h2>Fill from the facesheet?</h2>
-      <div class="why" style="font-size:14px;margin:8px 0 4px">These go onto the Patient and Billing pages, replacing what is there for these fields:</div>
+      <div class="why" style="font-size:14px;margin:8px 0 4px">These go onto the Patient page, replacing what is there for these fields:</div>
       <ul style="margin:4px 0 10px 18px;padding:0;font-size:14px;line-height:1.45">${plan.lines.map(l => `<li>${esc(l)}</li>`).join('')}</ul>
-      ${plan.lines.length ? '' : '<div class="why" style="font-size:14px;margin:0 0 10px">Nothing on it could be read into the Patient or Billing page.</div>'}
+      ${plan.lines.length ? '' : '<div class="why" style="font-size:14px;margin:0 0 10px">Nothing on it could be read into the Patient page.</div>'}
       ${plan.skipped.length ? `<div class="why" style="font-size:13px;margin:0 0 10px">Left blank: ${esc(plan.skipped.join('; '))}.</div>` : ''}
       <details style="font-size:12px;margin:0 0 10px"><summary style="cursor:pointer">Show the text that was read</summary><pre style="white-space:pre-wrap;max-height:220px;overflow:auto;background:#f1f5f9;padding:8px;border-radius:6px;margin:6px 0 0">${esc(plan.text || '')}</pre></details>
-      <div class="actions">${plan.lines.length ? '<button class="a" data-act="fill-yes">Fill both pages</button>' : ''}<button class="a sec" data-act="fill-no">${plan.lines.length ? 'Not now' : 'Close'}</button></div></div>`;
+      <div class="actions">${plan.lines.length ? '<button class="a" data-act="fill-yes">Fill the Patient page</button>' : ''}<button class="a sec" data-act="fill-no">${plan.lines.length ? 'Not now' : 'Close'}</button></div></div>`;
     veil.querySelector('[data-act=fill-no]').addEventListener('click', () => hideVeil());
     const yes = veil.querySelector('[data-act=fill-yes]');
     if (yes) yes.addEventListener('click', () => {
-      showVeilMessage('Filling the Patient and Billing pages…', `${plan.patient.length + plan.billing.length} fields`);
-      toPage('action', { name: 'fillFacesheet', recordId: run.recordId, patient: plan.patient, billing: plan.billing, places: plan.places });
+      showVeilMessage('Filling the Patient page…', `${plan.patient.length} fields`);
+      toPage('action', { name: 'fillFacesheet', recordId: run.recordId, patient: plan.patient, billing: [], places: plan.places.filter(p => p.scope === 'patient') });
     });
     shadow.appendChild(veil);
   }
@@ -2447,12 +2455,12 @@
     if (!p.ok) { alert('ESO Save: could not fill from the facesheet. ' + (p.error || '')); return; }
     // the app only shows what it has loaded: step off the tab and back so it re-reads the page
     const id = lastStatus && lastStatus.currentRecordId;
-    const here = ['Patient', 'Billing'].find(v => onTab(v));
+    const here = ['Patient'].find(v => onTab(v));
     if (here && id) {
       const away = tabElement('INCIDENT'), back = tabElement(TAB_LABELS[here]);
       if (away && back) { away.click(); await waitViewLoaded('Incident', id, 1500).catch(() => {}); back.click(); await waitViewLoaded(here, id, 3000).catch(() => {}); }
     }
-    notice('Patient and Billing pages filled', `${p.patient} patient fields and ${p.billing} billing fields${p.held ? ', held until ESO answers' : ''}. Check them over.`, 4000);
+    notice('Patient page filled', `${p.patient} fields${p.held ? ', held until ESO answers' : ''}. Check them over.`, 4000);
   }
   // Facesheets come in two shapes around here: "Patient Information / Guarantor Information /
   // Primary Insurance / Secondary Insurance" blocks with "Label: value" pairs in two columns, and
@@ -2466,7 +2474,7 @@
   // mistaken for part of the next label)
   const KNOWN = new Set(['pcp', 'primarycareprovider', 'primarycarephysician', 'primaryphysician', 'pcpname', 'familyphysician', 'primarydoctor',
     'patientname', 'name', 'patient', 'legalname', 'homeaddress', 'address', 'address1', 'streetaddress', 'street', 'patientaddress', 'mailingaddress', 'city', 'citystatezip', 'citystzip', 'citystate',
-    'sex', 'birthsex', 'sexatbirth', 'legalsex', 'gender', 'genderidentity', 'dob', 'dateofbirth', 'birthdate', 'born', 'birthday', 'ssn', 'socialsecurity', 'socialsecuritynumber', 'ss', 'ssno',
+    'sex', 'birthsex', 'sexatbirth', 'legalsex', 'sexgender', 'gendersex', 'gender', 'genderidentity', 'dob', 'dobage', 'birthdateage', 'dateofbirth', 'birthdate', 'born', 'birthday', 'ssn', 'socialsecurity', 'socialsecuritynumber', 'ss', 'ssno',
     'race', 'raceethnicity', 'patientrace', 'ethnicity', 'ethnicgroup', 'ethnic', 'homephone', 'primaryphone', 'phone', 'phonenumber', 'homephonenumber', 'patientphone', 'telephone',
     'mobilephone', 'cellphone', 'cell', 'mobile', 'cellular', 'workphone', 'businessphone', 'guarantorname', 'guarantor', 'patientsreltn', 'relationtopatient', 'relationship', 'reltn',
     'relationshiptopatient', 'relationtothepatient', 'patientrelationship', 'relation', 'reltopatient', 'billingaddress', 'guarantoraddress', 'subscribername', 'subscriber', 'insuredname', 'insured',
@@ -2523,7 +2531,12 @@
     const unlabelled = (sec, cell, r) => {
       const city = cityLine(cell);
       if (city && lastAddressSection === sec && r - lastAddressRow <= 2) { take(sec, 'city', cell, r); return; }
-      if ((sec === 'patient' || sec === 'head') && RACES.some(([re]) => re.test(cell)) && cell.length < 45) set('patient', 'race', cell);
+      if (sec !== 'patient' && sec !== 'head') return;
+      if (RACES.some(([re]) => re.test(cell)) && cell.length < 45) set('patient', 'race', cell);
+      // the label went missing: a date with an age after it can only be the birth date; a bare
+      // Female / Male the sex
+      if (/^\d{1,2}\/\d{1,2}\/\d{4}\s*\(?\s*\d{1,3}\s*(yrs?|years?|y\.?o\.?)\b/i.test(cell)) set('patient', 'dobLoose', cell);
+      if (/^(female|male|f|m)$/i.test(cell.trim())) set('patient', 'sexLoose', cell.trim());
     };
     rows.forEach((row, r) => {
       const cells = row.split(/\s\|\s|\t/).map(c => c.trim()).filter(Boolean);
@@ -2554,9 +2567,9 @@
         else if (is('middlename')) set('patient', 'middle', value);
         else if (is('homeaddress', 'address', 'address1', 'streetaddress', 'street', 'patientaddress', 'mailingaddress')) { set('patient', 'address', value); lastAddressRow = r; lastAddressSection = sec; }
         else if (is('city', 'citystatezip', 'citystzip', 'citystate')) set('patient', 'city', value);
-        else if (is('sex', 'birthsex', 'sexatbirth', 'legalsex')) { const w = value.split(/\s+/); set('patient', 'sex', w[0]); if (w.length > 1) unlabelled(sec, w.slice(1).join(' '), r); }
+        else if (is('sex', 'birthsex', 'sexatbirth', 'legalsex', 'sexgender', 'gendersex')) { const w = value.split(/\s+/); set('patient', 'sex', w[0]); if (w.length > 1) unlabelled(sec, w.slice(1).join(' '), r); }
         else if (is('gender', 'genderidentity')) set('patient', 'gender', value);
-        else if (is('dob', 'dateofbirth', 'birthdate', 'birthdate', 'born', 'birthday')) set('patient', 'dob', value);
+        else if (is('dob', 'dateofbirth', 'birthdate', 'born', 'birthday', 'dobage', 'birthdateage')) set('patient', 'dob', value);
         else if (is('ssn', 'socialsecurity', 'socialsecuritynumber', 'ss', 'ssno')) set('patient', 'ssn', value);
         else if (is('race', 'raceethnicity', 'patientrace')) set('patient', 'race', value);
         else if (is('ethnicity', 'ethnicgroup', 'ethnic')) set('patient', 'ethnicity', value);
@@ -2629,13 +2642,13 @@
       lines.push(`Name: ${name.last}, ${name.first}${name.middle ? ' ' + name.middle : ''}`);
     }
     const sexOf = (t) => /^f/i.test(t || '') ? 'Female' : /^m/i.test(t || '') ? 'Male' : null;
-    const sex = sexOf(P.sex);
+    const sex = sexOf(P.sex) || sexOf(P.gender) || sexOf(P.sexLoose);
     if (sex) { ed(patient, 'patient.demographics.sexId', 'PATIENTSEXID', exact(L.sex, sex), 'singleselect'); lines.push(`Sex: ${sex}`); }
     // gender: the sex, unless the sheet names a gender of its own
     const gender = P.gender ? (exact(L.gender, P.gender) ? P.gender : sexOf(P.gender)) : sex;
     if (gender) { const gid = exact(L.gender, gender); if (gid) ed(patient, 'patient.demographics.genderId', 'PATIENTGENDERID', gid, 'singleselect'); if (gid && gender !== sex) lines.push(`Gender: ${gender}`); }
     else if (P.gender) skipped.push(`gender "${P.gender}" (not one of ESO's)`);
-    const dob = dateOf(P.dob);
+    const dob = dateOf(P.dob) || dateOf(P.dobLoose);
     if (dob) { ed(patient, 'patient.demographics.dob', 'PATIENTDOB', dob + ' 00:00:00', 'date'); lines.push(`DOB: ${dob}`); }
     if (P.ssn) { const d = P.ssn.replace(/\D/g, ''); if (/x|\*/i.test(P.ssn) || d.length !== 9) skipped.push('SSN (masked on the facesheet)'); else { ed(patient, 'patient.demographics.ssn', 'PATIENTSSN', d, 'ssn'); lines.push('SSN: ***-**-' + d.slice(-4)); } }
     if (P.race) {
@@ -2665,34 +2678,7 @@
       phoneOps(patient, 'patient.contact.patientPhoneNumbers', ['PATIENTPHONENUMBERS', 'PATIENTPHONETYPEID', 'PATIENTPHONENUMBER'], ptype(re), n);
       lines.push(`${what} phone: ${fmtPhone(n)}`);
     }
-    if (P.pcp) {
-      const doc = P.pcp.split(',')[0].replace(/^\s*dr\.?\s+/i, '').trim().split(/\s+/).filter(Boolean);
-      if (doc.length >= 2) { ed(patient, 'patient.contact.physicianFirstName', 'PATIENTPHYSICIANFIRSTNAME', doc[0]); ed(patient, 'patient.contact.physicianLastName', 'PATIENTPHYSICIANLASTNAME', doc[doc.length - 1]); lines.push(`Physician: ${doc[0]} ${doc[doc.length - 1]}`); }
-    }
-    // ---- Billing page: the insured (the guarantor on the sheet; the patient when it says Self)
-    const relText = G.rel || f.primary.rel || f.secondary.rel || null;
-    const rel = relText ? (RELS.find(([re]) => re.test(relText.trim())) || [])[1] : null;
-    const gname = splitName(G.name || f.primary.subscriber || null);
-    const self = rel === 'Self' || (!rel && gname && name && gname.last === name.last && gname.first === name.first);
-    if (gname || self) {
-      const who = self && name ? name : gname;
-      if (who) { ed(billing, 'billing.contactForPayment.insuredLastName', 'INSUREDLASTNAME', who.last); ed(billing, 'billing.contactForPayment.insuredFirstName', 'INSUREDFIRSTNAME', who.first); ed(billing, 'billing.contactForPayment.insuredMiddleName', 'INSUREDMIDDLENAME', who.middle); }
-      const rid = rel ? exact(L.relationship, rel) : (self ? exact(L.relationship, 'Self') : null);
-      if (rid) ed(billing, 'billing.contactForPayment.relationshipToTheInsuredId', 'RELATIONSHIPTOTHEINSUREDID', rid, 'singleselect');
-      else if (relText) skipped.push(`relationship to the insured "${relText}"`);
-      const gd = dateOf(G.dob) || (self ? dob : null);
-      if (gd) ed(billing, 'billing.contactForPayment.dob', 'BILLINGDOB', gd + ' 00:00:00', 'datetime');
-      const ga = G.address || G.city ? addr(G) : (self ? pa : null);
-      if (ga && (ga.line1 || ga.city)) {
-        ed(billing, 'billing.contactForPayment.address.address1', 'BILLINGCONTACTADDRESS1', ga.line1); ed(billing, 'billing.contactForPayment.address.city', 'BILLINGCONTACTCITY', ga.city);
-        if (ga.stateId) ed(billing, 'billing.contactForPayment.address.stateId', 'BILLINGCONTACTSTATEID', ga.stateId, 'singleselect');
-        ed(billing, 'billing.contactForPayment.address.zip', 'BILLINGCONTACTZIP', ga.zip);
-        if (ga.city && ga.stateId && ga.zip) places.push({ scope: 'billing', city: ga.city, stateId: ga.stateId, zip: ga.zip });
-      }
-      if (who) lines.push(`Insured (Billing page): ${who.last}, ${who.first}${rel || self ? ' (' + (rel || 'Self') + ')' : ''}${gd ? ', DOB ' + gd : ''}`);
-      if (G.ssn && /x|\*/i.test(G.ssn)) skipped.push('insured SSN (masked on the facesheet)');
-    }
-    if (f.primary.company || f.secondary.company) skipped.push('insurance (left to the billing office)');
+    if (f.primary.company || f.secondary.company || G.name) skipped.push('insurance and the insured (the billing office\'s)');
     return { patient, billing, places, lines, skipped };
   }
   // a short notice in our overlay that goes by itself

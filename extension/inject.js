@@ -27,7 +27,7 @@
   if (ext) return;
   if (window.__esosave) return;
 
-  const VERSION = '0.14.4';
+  const VERSION = '0.14.5';
   const API_PREFIX_RE = /^\/ehr\/api\/+/i;
   const FAKE_OK_TEXT = '{"result":"Success","data":[]}';
   const PROBE_PATH = '/ehr/api/thirdpartydata/partners';
@@ -930,10 +930,14 @@
     const skipped = [];
     // the app sends text fields as text even when they hold a number; the view returns numbers
     const coerce = (v, type) => type === 'string' ? String(v) : type === 'integer' && typeof v === 'string' && v.trim() !== '' && !isNaN(Number(v)) ? Number(v) : v;
+    // groups the crew chose to leave out of a copy (a setting)
+    const skip = new Set(Array.isArray(S.settings.vitalCopySkip) ? S.settings.vitalCopySkip : []);
+    const groupOf = (k) => /^pain/i.test(k) ? 'pain' : /^avpu/i.test(k) ? 'avpu' : /^patient(Side|Posture)/i.test(k) ? 'position' : k;
     const walk = (obj, path) => {
       for (const [k, v] of Object.entries(obj)) {
         if (v === null || v === undefined || v === '') continue;
         if (!path && VITAL_META.has(k)) continue;
+        if (!path && skip.has(groupOf(k))) continue;
         const p = path ? path + '.' + k : k;
         const def = S.fieldDefs[p];
         if (Array.isArray(v)) {

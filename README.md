@@ -123,11 +123,11 @@ to bad signal or a hung page.
   with the same request ESO's dialog sends, named `…Photo1.jpg`, `…Photo2.jpg` as ESO names them.
   A scan is claimed by one tab before it is used, so it can never attach twice. A facesheet
   (scanned, or a picture uploaded on the iPad) is read by the iPad's own text recognition and the
-  crew shown what was found, name, sex (and gender, unless the sheet names one of its own), DOB,
-  race, ethnicity, address, phones, physician, and the insured on the Billing page (the guarantor
-  the sheet names, or the patient again), before anything is written; "Fill both pages" writes
-  both with the same saves ESO's app makes (the address is looked up in ESO's places table first,
-  so the county comes too). The insurance itself is never filled: that is the billing office's.
+  crew shown what was found, name, sex and gender (the same unless the sheet names a gender of
+  its own), DOB, race, ethnicity, address and phones, before anything is written; "Fill the
+  Patient page" writes them with the same saves ESO's app makes (the address is looked up in
+  ESO's places table first, so the county comes too). Nothing else: the insurance, the insured
+  and the Billing page are the billing office's.
   A masked SSN and anything not on ESO's lists is left blank and named, and "Show the text that
   was read" shows what the text recognition produced. A setting, on by
   default; off, ESO's camera and Add Attachment work untouched. On a desktop the facesheet is
@@ -135,7 +135,10 @@ to bad signal or a hung page.
 - **Copy a vital.** A small copy button floats just left of each saved vital's time in the Vitals
   tab; tapping it re-enters that vital as a new one with the current time, every other value the
   same. Only fields the app itself has been seen saving are copied, and the run log names any that
-  were not.
+  were not. Settings lists the groups a vital is made of (blood pressure, pulse, respirations,
+  SpO2/EtCO2/CO, glucose and temperature, pain, AVPU, side and posture, GCS, trauma score, ECG):
+  untick one and the copy leaves it out, for things that change every time.
+- **Not sent list.** Folded in the panel until tapped.
 
 Nothing is invented. The extension only replays what ESO's own app tried to send.
 
