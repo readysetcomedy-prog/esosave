@@ -135,7 +135,8 @@ to bad signal or a hung page.
 - **Templates.** A Templates button on the card. Anyone can make their own fill-ins from ESO's own
   field list (the configuration bundle names every field on every tab, its type and its pick
   list): tick a field, give it a value (a search-and-scroll picker for lists, a tick list for
-  multi-picks, a date or time picker, yes/no, text), and add items too: a vital, a treatment
+  multi-picks, a date or time picker, yes/no, text; one "No delays" button puts ESO's own
+  None/No Delay on all five delay fields), and add items too: a vital, a treatment
   (its measure and route narrow to the treatment), an assessment (every Quick Ax location set
   to No Abnormalities with one button, or any finding), a history entry, an allergy, a home
   medication, a sign or symptom, a protocol. What is the call's own (incident number, unit,

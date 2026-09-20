@@ -1749,6 +1749,10 @@ test('templates: made from ESO\'s own field catalog, saved under the person\'s i
   await pick('incident.response.runTypeId', '911 Response (Scene)');
   await pick('incident.response.priorityId', 'Emergent');
   assert.match(await tw(rowSel('incident.response.runTypeId') + ' .chosen'), /911 Response/);
+  // one press puts ESO's own None/No Delay on every delay field
+  await twClick('[data-nodelays]');
+  await waitFor(async () => /None\/No Delay/.test((await tw(rowSel('incident.additionalFactors.sceneDelays') + ' .chosen')) || ''), { label: 'no delays' });
+  assert.match(await tw(rowSel('incident.additionalFactors.dispatchDelays') + ' .chosen'), /None\/No Delay/);
   // Patient: a number, a multiselect, a history item
   await twClick('[data-page=patient]');
   await twType(rowSel('patient.demographics.weight') + ' [data-in]', '180');
@@ -1779,13 +1783,14 @@ test('templates: made from ESO\'s own field catalog, saved under the person\'s i
   await twClick('[data-page=narrative]');
   await pick('narrative.clinicalImpression.primaryImpressionId', 'Chest Pain');
   await twType(rowSel('narrative.narrative.narrativeText') + ' [data-in]', 'Pt c/o chest pain.');
-  assert.match(await tw('.pages'), /Incident2/);
+  assert.match(await tw('.pages'), /Incident4/);
   await twClick('[data-act=save]');
   await waitFor(async () => (await tplDb()).templates.length === 1, { label: 'saved to the table' });
   const saved = (await tplDb()).templates[0];
   assert.equal(saved.owner_id, 'person-1'); assert.equal(saved.owner_name, 'TEST, MEDIC'); assert.equal(saved.name, 'Chest pain'); assert.equal(saved.share, 'private');
   assert.deepEqual(saved.body.fields['incident.response.runTypeId'], { r: 'RUNTYPEID', t: 'singleselect', v: 326, l: 'SL.RUNTYPE' });
   assert.deepEqual(saved.body.fields['patient.demographics.raceIds'].v, [319]);
+  assert.deepEqual(saved.body.fields['incident.additionalFactors.dispatchDelays'].v, [350]); assert.deepEqual(saved.body.fields['incident.additionalFactors.sceneDelays'].v, [372]);
   assert.equal(saved.body.items.length, 4);
   assert.equal(saved.body.items.find(i => i.kind === 'treatment').fields.doseUnitId.v, 9001);
   const ax = saved.body.items.find(i => i.kind === 'assessment');
@@ -1802,6 +1807,7 @@ test('templates: made from ESO\'s own field catalog, saved under the person\'s i
   await waitFor(() => T.page.evaluate(() => /Filled from "Chest pain"/.test((document.getElementById('esosave-host').shadowRoot.querySelector('.veil') || {}).textContent || '')), { label: 'the notice', timeout: 15000 });
   const t = await tree();
   assert.equal(t.incident.response.priorityId, 330);
+  assert.deepEqual(t.incident.additionalFactors.dispatchDelays, [350]); assert.deepEqual(t.incident.additionalFactors.sceneDelays, [372]);
   assert.equal(t.patient.demographics.weight, '180'); assert.deepEqual(t.patient.demographics.raceIds, [319]);
   assert.equal(Object.values(t.patient.patientMedicalHistories)[0].itemId, 1337168);
   const v = t.vitals.vitalSigns[0]; assert.equal(v.bloodPressure.bloodPressureSystolic, '120'); assert.equal(v.pulse.pulseRate, '80'); assert.match(v.vitalSignDateTime, /^\d\d\/\d\d\/\d{4} \d\d:\d\d:\d\d$/);

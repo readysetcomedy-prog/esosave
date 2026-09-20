@@ -2882,7 +2882,10 @@
       const shown = q ? fields.filter(f => f.n.toLowerCase().includes(q) || sec.toLowerCase().includes(q)) : fields;
       if (!shown.length) continue;
       const n = shown.filter(f => ed.fields[f.a]).length;
-      content += `<details class="sec" ${q || n ? 'open' : ''}><summary>${esc(humanize(sec.includes('.') ? sec.split('.')[1] : sec))}${n ? ` <span class="cnt" style="background:#fbbf24;border-radius:10px;padding:0 7px;font-size:12px">${n}</span>` : ''}</summary>${shown.map(f => fieldRow(f, ed.fields[f.a], null)).join('')}</details>`;
+      // the delay fields: one press sets every one of them to ESO's own None/No Delay
+      const delays = fields.filter(f => f.t === 'multiselect' && /Delays$/.test(f.a) && listOf(f.l).some(e => /none\/no delay/i.test(e.n)));
+      const delayBtn = delays.length ? `<button class="tb sec" data-nodelays style="margin:6px 0">No delays (None/No Delay on all ${delays.length})</button>` : '';
+      content += `<details class="sec" ${q || n ? 'open' : ''}><summary>${esc(humanize(sec.includes('.') ? sec.split('.')[1] : sec))}${n ? ` <span class="cnt" style="background:#fbbf24;border-radius:10px;padding:0 7px;font-size:12px">${n}</span>` : ''}</summary>${delayBtn}${shown.map(f => fieldRow(f, ed.fields[f.a], null)).join('')}</details>`;
     }
     for (const [root, kind] of roots) {
       const items = ed.items.map((it, i) => ({ it, i })).filter(x => x.it.root === root);
@@ -2969,6 +2972,14 @@
       ed.items.push({ root, kind, r: rootDef.r, t: rootDef.t, fields: {}, findings: [] });
       renderEditor();
       const last = tplWin.querySelectorAll('.item'); if (last.length) last[last.length - 1].scrollIntoView({ block: 'nearest' });
+    }));
+    W.querySelectorAll('[data-nodelays]').forEach(b => b.addEventListener('click', () => {
+      for (const f of fieldsOfPage(ed.page)) {
+        if (!(f.t === 'multiselect' && /Delays$/.test(f.a))) continue;
+        const none = listOf(f.l).find(e => /none\/no delay/i.test(e.n)); if (!none) continue;
+        ed.fields[f.a] = { r: f.r, t: f.t, v: [none.id], l: f.l };
+      }
+      renderEditor();
     }));
     W.querySelectorAll('[data-remove]').forEach(b => b.addEventListener('click', () => { const i = Number(b.closest('.item').dataset.item); ed.items.splice(i, 1); renderEditor(); }));
     W.querySelectorAll('[data-allnormal]').forEach(b => b.addEventListener('click', () => { const it = ed.items[Number(b.closest('.item').dataset.item)]; const A = ESOSAVE_ASSESS; it.findings = A.locations.map(l => ({ loc: l.id, id: 'No_Abnormalities' })); renderEditor(); }));
