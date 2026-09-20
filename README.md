@@ -134,10 +134,15 @@ to bad signal or a hung page.
   attached and named but not read (no text recognition there).
 - **Templates.** A Templates button on the card. Anyone can make their own fill-ins from ESO's own
   field list (the configuration bundle names every field on every tab, its type and its pick
-  list): tick a field, give it a value (a search-and-scroll picker for lists, a tick list for
-  multi-picks, a date or time picker, yes/no, text; one "No delays" button puts ESO's own
-  None/No Delay on all five delay fields), and add items too: a vital, a treatment
-  (its measure and route narrow to the treatment), an assessment laid out like ESO's own
+  list): the editor is a mock chart, laid out as close to ESO's own as it can be. Tick a
+  field, give it a value (a short list is a row of quick-pick buttons like ESO's own, a long one
+  a search-and-scroll picker, a tick list for multi-picks, a date or time picker, yes/no, text;
+  every list that has a None puts it first, one tap), a field that ESO only shows once another
+  is answered (Mutual Aid agency, Transport Mode, the injury details, the refusal reasons) is
+  shown and filled the same way, only once that answer is picked; and add items too: a vital
+  laid out as ESO's vitals card (Blood Pressure, Pulse, Respirations, SpO2, GCS with its total
+  worked out, and the rest), a treatment (its measure and route quick picks narrow to the
+  treatment), an assessment laid out like ESO's own
   Assessments screen (the categories down the side, each section with No Abnormalities and Not
   Assessed, its findings each with a check or an X, the category's comments; everything starts
   No Abnormalities, one button does all of it, one does Alert and Oriented x4), a history entry,
@@ -154,7 +159,9 @@ to bad signal or a hung page.
   say, and the table's own unique indexes hold the line. The agency owner can lock any field, any
   kind of item (vitals as a whole) or a part of one (blood pressure) from any template's editor
   (Lock fields): the crew sees the lock, cannot set it, and a fill leaves it out, so a template
-  can never make up what the crew must measure themselves. Filling needs an open, unlocked
+  can never make up what the crew must measure themselves. A narrative can be prewritten per
+  call type with blanks (____) to fill on the run; {incident}, {unit}, {date} and {time} are
+  filled in from the run. Filling needs an open, unlocked
   run: a question first, then a progress bar as each tab is written with the same saves ESO's
   app makes, replacing what is there; with no signal it is held like any save and pushed
   later. The list seen last is kept on the device, so it works with no signal.

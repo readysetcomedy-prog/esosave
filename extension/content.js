@@ -2866,10 +2866,30 @@
   }
   const lockBtn = (key, extra) => lockMode && isAdmin() ? `<button type="button" class="tb sec" data-lock="${esc(key)}" title="${tplLocked(key) ? 'Locked: the crew cannot set this' : 'Open: lock it'}" style="padding:6px 10px;min-height:36px;${extra || ''}">${tplLocks().includes(key) ? '🔒 Locked' : tplLocked(key) ? '🔒 (in a locked group)' : '🔓 Lock'}</button>` : '';
   const lockNote = () => `<span class="muted" style="font-weight:600">🔒 Locked by the agency</span>`;
-  // what a fill leaves out: locked fields, items and parts
+  // Fields ESO shows only once something else is picked (the mutual aid agency once the run type is
+  // mutual aid, the injury fields once there is an injury, the transport fields once the patient
+  // is transported...). Kept out of sight, and out of a fill, until their trigger is set the
+  // same way in the template.
+  const SHOW_WHEN = [
+    { when: 'incident.response.runTypeId', test: /mutual aid/i, show: /^incident\.response\.mutualAidID$/, why: 'the run type is Mutual Aid' },
+    { when: 'incident.response.priorityId', test: null, show: /^incident\.response\.responseMode/, why: 'a Response Mode to Scene is chosen' },
+    { when: 'incident.disposition.transportDispositionItemID', test: /transport by/i, show: /^incident\.disposition\.(transportMode|transportMethodID|transportDueToItemIDs|divertedFrom|levelOfServiceId|transferredTo)/, why: 'the Transport Disposition is a transport' },
+    { when: 'incident.disposition.patientEvaluationCareDispositionItemID', test: /refus/i, show: /^incident\.disposition\.refusalReleaseItemIDs$/, why: 'the Patient Evaluation/Care Disposition is a refusal' },
+    { when: 'narrative.injuries.injuredId', test: /^(yes|unknown)/i, show: /^narrative\.injuries\.(?!injuredId$)/, why: 'Possible Patient Injury is Yes or Unknown' },
+  ];
+  const ruleFor = (a) => SHOW_WHEN.find(r => r.show.test(a));
+  const ruleMet = (r, fields) => { const f = fields[r.when]; if (!f) return false; if (!r.test) return true; const names = (Array.isArray(f.v) ? f.v : [f.v]).map(v => nameOf(f.l, v)); return names.some(n => r.test.test(n)); };
+  const fieldShown = (a, fields) => { const r = ruleFor(a); return !r || ruleMet(r, fields); };
+  // the crew's blanks: {incident}, {unit}, {date}, {time} filled in on the run
+  function fillBlanks(text, run) {
+    const d = new Date(); const pad = (n) => String(n).padStart(2, '0');
+    const unit = (() => { try { return norm(fieldValue('UNITID') || ''); } catch (e) { return ''; } })();
+    return String(text).replace(/\{incident\}/gi, run.incidentNumber || '').replace(/\{unit\}/gi, unit).replace(/\{date\}/gi, `${pad(d.getMonth() + 1)}/${pad(d.getDate())}/${d.getFullYear()}`).replace(/\{time\}/gi, `${pad(d.getHours())}:${pad(d.getMinutes())}`);
+  }
+  // what a fill leaves out: locked fields, items and parts, and fields whose trigger is not set
   function applyLocks(body) {
     const out = { v: body.v || 1, fields: {}, items: [] }; let dropped = 0;
-    for (const [a, f] of Object.entries(body.fields || {})) { if (tplLocked(a)) dropped++; else out.fields[a] = f; }
+    for (const [a, f] of Object.entries(body.fields || {})) { if (tplLocked(a)) dropped++; else if (!fieldShown(a, body.fields || {})) continue; else out.fields[a] = f; }
     for (const it of (body.items || [])) {
       if (tplLocked(it.root)) { dropped++; continue; }
       const copy = { ...it, fields: {} };
@@ -2917,10 +2937,12 @@
       const on = !!cur; const key = prefix ? `${prefix}|${f.rel}` : f.a;
       const locked = tplLocked(f.a);
       const shut = locked && !isAdmin();
-      return `<div class="tf ${on ? 'on' : ''} ${shut ? 'shut' : ''}" data-key="${esc(key)}"><input type="checkbox" data-sel ${on ? 'checked' : ''} ${shut ? 'disabled' : ''}><div class="fl">${esc(f.n)}<div class="muted" style="font-weight:400">${esc(f.t === 'pertinentNegative' ? 'reason unable to obtain' : '')}${locked ? lockNote() : ''}</div></div><div>${shut ? '' : inputFor(f, cur ? cur.v : null)}${lockBtn(f.a, 'margin-top:4px')}</div></div>`;
+      const rule = prefix ? null : ruleFor(f.a); const unmet = rule && !ruleMet(rule, ed.fields);
+      const blanks = f.t === 'string' && /narrative/i.test(f.a) && /narrativeText|narrative$/i.test(f.a) ? '<div class="muted" style="font-weight:400">Leave blanks like ____ to fill on the run; {incident}, {unit}, {date} and {time} are filled in for you.</div>' : '';
+      return `<div class="tf ${on ? 'on' : ''} ${shut ? 'shut' : ''}" data-key="${esc(key)}"><input type="checkbox" data-sel ${on ? 'checked' : ''} ${shut ? 'disabled' : ''}><div class="fl">${esc(f.n)}<div class="muted" style="font-weight:400">${esc(f.t === 'pertinentNegative' ? 'reason unable to obtain' : '')}${locked ? lockNote() : ''}${unmet ? `<div style="color:#b45309">Only on the run when ${esc(rule.why)}; left out until then.</div>` : ''}</div>${blanks}</div><div>${shut ? '' : inputFor(f, cur ? cur.v : null, key)}${lockBtn(f.a, 'margin-top:4px')}</div></div>`;
     };
     for (const [sec, fields] of secs) {
-      const shown = q ? fields.filter(f => f.n.toLowerCase().includes(q) || sec.toLowerCase().includes(q)) : fields;
+      const shown = (q ? fields.filter(f => f.n.toLowerCase().includes(q) || sec.toLowerCase().includes(q)) : fields).filter(f => fieldShown(f.a, ed.fields) || ed.fields[f.a]);
       if (!shown.length) continue;
       const n = shown.filter(f => ed.fields[f.a]).length;
       // the delay fields: one press sets every one of them to ESO's own None/No Delay
@@ -2958,10 +2980,18 @@
   const groupFields = (it, g) => memberFields(it.root).filter(m => vitalGroup(m.rel) === g).map(m => it.root + '.' + m.rel);
   function groupedRows(members, it, i, fieldRow, kind) {
     if (kind === 'vital') {
+      // what ESO works out itself, or takes from a figure, is not typed into a template
+      const skip = /shockIndex|temperatureC$|etCO2mmHg|etCO2Percentage|etCO2kPa|coDecimal|patientSide|patientPosture|glascowComaTotalScore|revisedTrauma/;
       const groups = new Map();
-      for (const m of members) { const g = vitalGroup(m.rel); if (!groups.has(g)) groups.set(g, []); groups.get(g).push(m); }
+      for (const m of members) { if (skip.test(m.rel)) continue; const g = /PertinentNegativeId$/.test(m.rel) ? vitalGroup(m.rel.replace(/PertinentNegativeId$/, '').replace(/^(bloodPressure|pulse|respiration|glasgowComaScale(Eyes|Verbal|Motor)?|painScale).*/, (x, g1) => g1.startsWith('glasgow') ? 'glasgowComaScale' : g1 === 'painScale' ? 'pain' : g1)) : vitalGroup(m.rel); if (!groups.has(g)) groups.set(g, []); groups.get(g).push(m); }
       const keys = [...groups.keys()].sort((a, b) => (VITAL_ORDER.indexOf(a) + 1 || 99) - (VITAL_ORDER.indexOf(b) + 1 || 99));
-      return keys.map(g => { const gk = g === 'other' ? null : `${it.root}.${g}`; const gl = gk && tplLocked(gk); return `<div style="margin:8px 0 2px;font-weight:700;color:#334155;display:flex;gap:10px;align-items:center">${esc(VITAL_GROUP_NAMES[g] || humanize(g))}${gl ? lockNote() : ''}${gk ? lockBtn(gk) : ''}</div>` + (gl && !isAdmin() ? '' : groups.get(g).map(m => fieldRow(m, it.fields[m.rel], String(i))).join('')); }).join('');
+      const gcs = ['glascowComaEyesId', 'glascowComaVerbalId', 'glascowComaMotorId'].map(k => it.fields['glasgowComaScale.' + k]).map(f => f ? Number((nameOf(f.l, f.v).match(/^(\d)/) || [])[1]) : NaN);
+      const total = gcs.every(n => !isNaN(n)) ? gcs.reduce((a, b) => a + b, 0) : null;
+      return `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:10px">` + keys.map(g => {
+        const gk = g === 'other' ? null : `${it.root}.${g}`; const gl = gk && tplLocked(gk);
+        const rows = gl && !isAdmin() ? '' : groups.get(g).filter(m => !/PertinentNegativeId$/.test(m.rel)).map(m => fieldRow(m, it.fields[m.rel], String(i))).join('') + groups.get(g).filter(m => /PertinentNegativeId$/.test(m.rel)).map(m => fieldRow({ ...m, n: 'Unable to obtain' }, it.fields[m.rel], String(i))).join('');
+        return `<div style="border:1px solid #e2e8f0;border-radius:10px;background:#fff"><div style="padding:8px 12px;background:#f1f5f9;border-radius:10px 10px 0 0;font-weight:700;color:#334155;display:flex;gap:10px;align-items:center">${esc(VITAL_GROUP_NAMES[g] || humanize(g))}${g === 'glasgowComaScale' && total ? ` <span class="muted">total ${total}</span>` : ''}${gl ? lockNote() : ''}${gk ? lockBtn(gk) : ''}</div><div style="padding:4px 12px 8px">${rows}</div></div>`;
+      }).join('') + '</div>';
     }
     if (kind === 'treatment') {
       const first = ['flowchartTreatmentRegistryId', 'dose', 'doseUnitId', 'routeId', 'provider', 'successful', 'comments', 'indicationForGivingIds', 'responseId'];
@@ -2975,7 +3005,17 @@
     return sorted.map(m => fieldRow(m, it.fields[m.rel], String(i))).join('');
   }
   const itemTitle = (it) => { const k = ITEM_KEY[it.kind]; const f = k && it.fields[k]; if (it.kind === 'assessment') { const fs = it.findings || []; const ab = fs.filter(x => x.id !== 'No_Abnormalities' && x.id !== 'Not_Assessed').length; const na = fs.filter(x => x.id === 'Not_Assessed').length; const blank = (typeof ESOSAVE_ASSESS !== 'undefined' ? ESOSAVE_ASSESS.top : []).filter(loc => !fs.some(x => x.loc === loc)).length; return `Assessment: ${ab ? ab + ' finding' + (ab === 1 ? '' : 's') : fs.length ? 'no abnormalities' : 'nothing set'}${na ? `, ${na} not assessed` : ''}${blank && fs.length ? `, ${blank} blank (written Not Assessed)` : ''}`; } if (it.kind === 'vital') return 'Vital'; return f && f.v != null ? nameOf(f.l, f.v) : humanize(it.kind); };
-  function inputFor(f, v) {
+  // a list with parents (a medication's measures, a treatment's routes) narrows to the item's other choices, as ESO's own dropdown does
+  function entriesFor(f, key) {
+    const entries = listOf(f.l);
+    if (!key || !key.includes('|') || !entries.some(e => e.p != null)) return entries;
+    const it = ed && ed.items[Number(key.split('|')[0])]; if (!it) return entries;
+    const parents = new Set(Object.values(it.fields).map(x => String(x.v)));
+    const narrowed = entries.filter(e => parents.has(String(e.p)));
+    return narrowed.length ? narrowed : entries;
+  }
+  const siblingsNarrow = (key) => { const it = ed && ed.items[Number(key.split('|')[0])]; if (!it) return false; return memberFields(it.root).some(f => f.l && f.rel !== key.split('|')[1] && listOf(f.l).some(e => e.p != null)); };
+  function inputFor(f, v, key) {
     const val = v == null ? '' : v;
     if (f.t === 'boolean') return `<select data-in><option value="">—</option><option value="true" ${val === true || val === 'true' ? 'selected' : ''}>Yes</option><option value="false" ${val === false || val === 'false' ? 'selected' : ''}>No</option></select>`;
     if (f.t === 'date') return `<input type="date" data-in value="${esc(esoToInput(val, 'date'))}">`;
@@ -2983,6 +3023,12 @@
     if (f.t === 'time') return `<input type="time" data-in step="1" value="${esc(esoToInput(val, 'time'))}">`;
     const none = f.l ? noneOf(f.l) : null;
     const noneBtn = none ? `<button type="button" class="tb sec" data-none="${esc(none.id)}" style="padding:8px 12px;min-height:38px;margin-top:4px">${esc(none.n)}</button>` : '';
+    // a short list is laid out as ESO's own quick picks: one button per choice
+    if (f.l && (f.t === 'singleselect' || f.t === 'pertinentNegative' || f.t === 'multiselect') && listOf(f.l).length && listOf(f.l).length <= 8) {
+      const arr = f.t === 'multiselect' ? (Array.isArray(val) ? val : (val === '' ? [] : [val])) : (val === '' ? [] : [val]);
+      const on = (id) => arr.map(String).includes(String(id));
+      return `<div class="pills" data-pills="${f.t === 'multiselect' ? 'multi' : 'one'}" style="display:flex;flex-wrap:wrap;gap:6px">${entriesFor(f, key).map(e => `<button type="button" data-pill="${esc(e.id)}" style="border:1px solid ${on(e.id) ? '#1d4ed8' : '#cbd5e1'};background:${on(e.id) ? '#1d4ed8' : '#fff'};color:${on(e.id) ? '#fff' : '#1e293b'};border-radius:20px;padding:8px 14px;font:inherit;font-weight:600;cursor:pointer;min-height:40px">${esc(e.n)}</button>`).join('')}</div>`;
+    }
     if (f.l && (f.t === 'singleselect' || f.t === 'pertinentNegative')) return `<div class="pick"><input type="text" data-pick placeholder="Search or scroll…"><div class="picklist" hidden></div><div class="chosen">${val !== '' ? esc(nameOf(f.l, val)) : ''}</div>${noneBtn}</div>`;
     if (f.l && f.t === 'multiselect') { const arr = Array.isArray(val) ? val : (val === '' ? [] : [val]); return `<div class="pick"><input type="text" data-pick data-multi placeholder="Search or scroll…"><div class="picklist" hidden></div><div class="chosen">${arr.map(x => `<span>${esc(nameOf(f.l, x))} <a data-unpick="${esc(x)}" style="cursor:pointer">✕</a></span>`).join('')}</div>${noneBtn}</div>`; }
     if (f.t === 'string' && /narrative|comment|note|description|statement/i.test(f.n + f.a)) return `<textarea data-in rows="3">${esc(val)}</textarea>`;
@@ -3118,15 +3164,26 @@
         inp.addEventListener('change', () => { let v = inp.value; if (d.f.t === 'boolean') v = v === '' ? null : v === 'true'; else if (['date', 'time', 'datetime'].includes(d.f.t)) v = inputToEso(v, d.f.t); setVal(v); });
         box.addEventListener('change', () => { if (!box.checked) { inp.value = ''; setVal(null); } else if (!inp.value) { box.checked = false; inp.focus(); } });
       }
+      const pills = row.querySelector('[data-pills]');
+      if (pills) {
+        const multi = pills.dataset.pills === 'multi';
+        const cur = () => { const c = d.get(); return c ? (Array.isArray(c.v) ? c.v : [c.v]) : []; };
+        pills.querySelectorAll('[data-pill]').forEach(b => b.addEventListener('click', () => {
+          const e = listOf(d.f.l).find(x => String(x.id) === b.dataset.pill); const id = e ? e.id : b.dataset.pill;
+          const now = cur(); const has = now.map(String).includes(String(id));
+          if (multi) setVal(has ? now.filter(x => String(x) !== String(id)) : (NONE_RE.test(e ? e.n : '') ? [id] : now.filter(x => { const y = listOf(d.f.l).find(z => String(z.id) === String(x)); return !(y && NONE_RE.test(y.n)); }).concat([id])));
+          else setVal(has ? null : id);
+          renderEditor();
+        }));
+        box.addEventListener('change', () => { if (!box.checked) { setVal(null); renderEditor(); } else box.checked = !!cur().length; });
+      }
       const pk = row.querySelector('[data-pick]');
       if (pk) {
         const list = row.querySelector('.picklist'); const multi = pk.hasAttribute('data-multi');
         const cur = () => { const c = d.get(); return c ? (Array.isArray(c.v) ? c.v : [c.v]) : []; };
         const show = () => {
           const q = pk.value.trim().toLowerCase();
-          let entries = listOf(d.f.l);
-          // a list with parents (a medication's measures) narrows to the item's other choices
-          if (entries.some(e => e.p != null) && key.includes('|')) { const it = ed.items[Number(key.split('|')[0])]; const parents = new Set(Object.values(it.fields).map(x => String(x.v))); const narrowed = entries.filter(e => parents.has(String(e.p))); if (narrowed.length) entries = narrowed; }
+          const entries = entriesFor(d.f, key);
           const chosen = cur().map(String);
           const hits = entries.filter(e => !q || e.n.toLowerCase().includes(q)).slice(0, 200);
           list.innerHTML = hits.map(e => `<button type="button" data-id="${esc(e.id)}" class="${chosen.includes(String(e.id)) ? 'sel' : ''}">${esc(e.n)}</button>`).join('') || '<div class="muted" style="padding:8px">Nothing matches.</div>';
@@ -3134,7 +3191,7 @@
           list.querySelectorAll('[data-id]').forEach(b => b.addEventListener('click', () => {
             const raw = b.dataset.id; const e = entries.find(x => String(x.id) === raw); const id = e ? e.id : raw;
             if (multi) { const now = cur(); const has = now.map(String).includes(String(id)); setVal(has ? now.filter(x => String(x) !== String(id)) : now.concat([id])); }
-            else { setVal(id); list.hidden = true; pk.value = ''; }
+            else { setVal(id); list.hidden = true; pk.value = ''; if (key.includes('|') && siblingsNarrow(key)) { renderEditor(); return; } }
             row.querySelector('.chosen').innerHTML = multi ? cur().map(x => `<span>${esc(nameOf(d.f.l, x))} <a data-unpick="${esc(x)}" style="cursor:pointer">✕</a></span>`).join('') : esc(nameOf(d.f.l, id));
             wireUnpick(row, d, setVal, cur);
             if (multi) show();
@@ -3194,6 +3251,8 @@
     const run = currentRun();
     if (!run || run.locked) { alert('ESO Save: open an unlocked run first.'); return; }
     const { body, dropped } = applyLocks(t.body || {});
+    for (const f of Object.values(body.fields)) if (f && f.t === 'string' && typeof f.v === 'string') f.v = fillBlanks(f.v, run);
+    for (const it of body.items) for (const f of Object.values(it.fields || {})) if (f && f.t === 'string' && typeof f.v === 'string') f.v = fillBlanks(f.v, run);
     const nf = Object.keys(body.fields).length, ni = body.items.length;
     if (!nf && !ni) { alert(`ESO Save: everything in "${t.name}" is locked by the agency, so there is nothing to fill.`); return; }
     const before = run.tplFilled && run.tplFilled[t.id];

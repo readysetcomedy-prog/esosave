@@ -209,6 +209,7 @@ export function createMockEso() {
     'incident.response.unitId': F('UNITID', 'singleselect', 'Unit', 'UDL.UNIT'),
     'incident.response.runTypeId': F('RUNTYPEID', 'singleselect', 'Run Type', 'SL.RUNTYPE'),
     'incident.response.priorityId': F('PRIORITYID', 'singleselect', 'Priority', 'SL.RESPONSEPRIORITY'),
+    'incident.response.mutualAidID': F('MUTUALAIDID', 'singleselect', 'Mutual Aid', 'SL.MUTUALAID'),
     'incident.response.emdPerformedID': F('EMDPERFORMEDID', 'singleselect', 'EMD Performed', 'SL.EMDPERFORMED'),
     'incident.additionalFactors.dispatchDelays': F('DISPATCHDELAYS', 'multiselect', 'Dispatch Delays', 'SL.DISPATCHDELAY'),
     'incident.additionalFactors.sceneDelays': F('SCENEDELAYS', 'multiselect', 'Scene Delays', 'SL.SCENEDELAY'),
@@ -249,7 +250,8 @@ export function createMockEso() {
   };
   const V = (pairs, extra) => ({ values: pairs.map(([itemId, itemName], i) => ({ itemId, itemName, parentItemId: null, ...(extra ? extra(itemId, i) : {}) })) });
   const TPL_LISTS = {
-    'SL.RUNTYPE': V([[325, 'Emergency Interfacility Transfer'], [326, '911 Response (Scene)'], [327, 'Mutual Aid']]),
+    'SL.RUNTYPE': V([[325, 'Emergency Interfacility Transfer'], [326, '911 Response (Scene)'], [328, 'Emergency Response (Mutual Aid)']]),
+    'SL.MUTUALAID': V([[6480, 'Mutual Aid Given'], [6481, 'Mutual Aid Received']]),
     'SL.RESPONSEPRIORITY': V([[330, 'Emergent'], [331, 'Non-Emergent']]),
     'SL.EMDPERFORMED': V([[340, 'Yes'], [341, 'No']]),
     'SL.DISPATCHDELAY': V([[350, 'None/No Delay'], [351, 'Weather'], [352, 'Traffic']]),

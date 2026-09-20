@@ -1725,13 +1725,19 @@ const twClickText = (sel, text) => T.page.evaluate(([s, t]) => { const el = Arra
 const twType = (sel, text) => T.page.evaluate(([s, t]) => { const el = document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin ' + s); if (!el) throw new Error('no ' + s); el.focus(); el.value = t; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); }, [sel, text]);
 // the field row for a catalog field (or an item member: "<item index>|<rel>")
 const rowSel = (key) => `.tf[data-key="${key}"]`;
-const pick = async (key, text) => { await twType(rowSel(key) + ' [data-pick]', text); await waitFor(() => T.page.evaluate((s) => !!document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin ' + s + ' .picklist button'), rowSel(key)), { label: 'list for ' + key }); await twClickText(rowSel(key) + ' .picklist button', text); };
+// a choice: a short list is ESO-style quick-pick buttons, a long one a search-and-scroll picker
+const pick = async (key, text) => {
+  const pills = await T.page.evaluate((s) => !!document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin ' + s + ' [data-pill]'), rowSel(key));
+  if (pills) { await twClickText(rowSel(key) + ' [data-pill]', text); return; }
+  await twType(rowSel(key) + ' [data-pick]', text); await waitFor(() => T.page.evaluate((s) => !!document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin ' + s + ' .picklist button'), rowSel(key)), { label: 'list for ' + key }); await twClickText(rowSel(key) + ' .picklist button', text);
+};
 const tplDb = () => fetch(T.base + '/__db_tpl_dump').then(r => r.json());
 
 test('templates: made from ESO\'s own field catalog, saved under the person\'s id, and filled into a run tab by tab with a progress bar', async () => {
   await fetch(T.base + '/__db_tpl_reset', { method: 'POST' });
   await T.control({ userName: 'TEST, MEDIC', userId: 'person-1' });
   const id = await freshRun();
+  const inc = (await T.record(id)).incidentNumber;
   await app(() => window.app.openTab('Incident'));
   await waitFor(async () => !!(await T.storage()).catalog, { label: 'the field catalog kept on the device' });
   const cat = (await T.storage()).catalog;
@@ -1746,13 +1752,20 @@ test('templates: made from ESO\'s own field catalog, saved under the person\'s i
   await twType('[data-name]', 'Chest pain');
   // Incident: two pick lists
   await twClick('[data-page=incident]');
+  // Mutual Aid is not offered until the run type calls for it, as on ESO's own screen
+  assert.equal(await T.page.evaluate((s) => !!document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin ' + s), rowSel('incident.response.mutualAidID')), false, 'mutual aid hidden');
+  await pick('incident.response.runTypeId', 'Emergency Response (Mutual Aid)');
+  await waitFor(() => T.page.evaluate((s) => !!document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin ' + s), rowSel('incident.response.mutualAidID')), { label: 'mutual aid shown once the run type is mutual aid' });
+  await pick('incident.response.runTypeId', 'Emergency Response (Mutual Aid)'); // the same button again takes it off
+  await waitFor(() => T.page.evaluate((s) => !document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin ' + s), rowSel('incident.response.mutualAidID')), { label: 'hidden again' });
   await pick('incident.response.runTypeId', '911 Response (Scene)');
   await pick('incident.response.priorityId', 'Emergent');
-  assert.match(await tw(rowSel('incident.response.runTypeId') + ' .chosen'), /911 Response/);
+  assert.ok(await T.page.evaluate((s) => /29, 78, 216/.test(Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.tplwin ' + s + ' [data-pill]')).find(b => b.textContent === '911 Response (Scene)').style.background), rowSel('incident.response.runTypeId')), 'the chosen quick pick is lit');
   // one press puts ESO's own None/No Delay on every delay field
   await twClick('[data-nodelays]');
-  await waitFor(async () => /None\/No Delay/.test((await tw(rowSel('incident.additionalFactors.sceneDelays') + ' .chosen')) || ''), { label: 'no delays' });
-  assert.match(await tw(rowSel('incident.additionalFactors.dispatchDelays') + ' .chosen'), /None\/No Delay/);
+  const lit = (key, text) => T.page.evaluate(([s, t]) => { const b = Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.tplwin ' + s + ' [data-pill]')).find(x => x.textContent === t); return !!b && /29, 78, 216/.test(b.style.background); }, [rowSel(key), text]);
+  await waitFor(() => lit('incident.additionalFactors.sceneDelays', 'None/No Delay'), { label: 'no delays' });
+  assert.ok(await lit('incident.additionalFactors.dispatchDelays', 'None/No Delay'));
   // Patient: a number, a multiselect, a history item
   await twClick('[data-page=patient]');
   await twType(rowSel('patient.demographics.weight') + ' [data-in]', '180');
@@ -1769,10 +1782,8 @@ test('templates: made from ESO\'s own field catalog, saved under the person\'s i
   await twClick('[data-additem="flowchartTreatments.treatments"]');
   await pick('2|flowchartTreatmentRegistryId', 'Oxygen');
   await twType(rowSel('2|dose') + ' [data-in]', '15');
-  await twType(rowSel('2|doseUnitId') + ' [data-pick]', '');
-  await waitFor(() => T.page.evaluate((s) => !!document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin ' + s + ' .picklist button'), rowSel('2|doseUnitId')), { label: 'measure list' });
-  assert.deepEqual(await T.page.evaluate((s) => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.tplwin ' + s + ' .picklist button')).map(b => b.textContent), rowSel('2|doseUnitId')), ['L/min'], 'only the measures of the chosen treatment');
-  await twClickText(rowSel('2|doseUnitId') + ' .picklist button', 'L/min');
+  assert.deepEqual(await T.page.evaluate((s) => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.tplwin ' + s + ' [data-pill]')).map(b => b.textContent), rowSel('2|doseUnitId')), ['L/min'], 'only the measures of the chosen treatment, as quick picks');
+  await pick('2|doseUnitId', 'L/min');
   // Assessments: one assessment, all normal, with a comment
   await twClick('[data-page=assessments]');
   await twClick('[data-additem="assessments.assessmentsV2"]');
@@ -1796,7 +1807,7 @@ test('templates: made from ESO\'s own field catalog, saved under the person\'s i
   // Narrative: an impression and text
   await twClick('[data-page=narrative]');
   await pick('narrative.clinicalImpression.primaryImpressionId', 'Chest Pain');
-  await twType(rowSel('narrative.narrative.narrativeText') + ' [data-in]', 'Pt c/o chest pain.');
+  await twType(rowSel('narrative.narrative.narrativeText') + ' [data-in]', 'Unit {unit} responded to {incident} on {date}. Pt c/o chest pain. Pt is ____ y/o.');
   assert.match(await tw('.pages'), /Incident4/);
   await twClick('[data-act=save]');
   await waitFor(async () => (await tplDb()).templates.length === 1, { label: 'saved to the table' });
@@ -1818,7 +1829,8 @@ test('templates: made from ESO\'s own field catalog, saved under the person\'s i
   assert.match(await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.veil .askbox').textContent), /replaced/);
   await T.page.evaluate(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.askbox button')).find(b => /Yes, fill it/.test(b.textContent)).click());
   const tree = async () => (await T.record(id)).tree;
-  await waitFor(async () => { const t = await tree(); return t.narrative?.narrative?.narrativeText === 'Pt c/o chest pain.' && t.incident?.response?.runTypeId === 326; }, { label: 'filled', timeout: 30000 });
+  await waitFor(async () => { const t = await tree(); return /Pt c\/o chest pain/.test(t.narrative?.narrative?.narrativeText || '') && t.incident?.response?.runTypeId === 326; }, { label: 'filled', timeout: 30000 });
+  assert.equal((await tree()).narrative.narrative.narrativeText, `Unit  responded to ${inc} on ${new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })}. Pt c/o chest pain. Pt is ____ y/o.`, 'the blanks the run knows are filled, the rest left for the medic');
   await waitFor(() => T.page.evaluate(() => /Filled from "Chest pain"/.test((document.getElementById('esosave-host').shadowRoot.querySelector('.veil') || {}).textContent || '')), { label: 'the notice', timeout: 15000 });
   const t = await tree();
   assert.equal(t.incident.response.priorityId, 330);
