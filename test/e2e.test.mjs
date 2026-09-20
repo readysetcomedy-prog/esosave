@@ -1500,6 +1500,7 @@ test('paperwork on an iPad: Camera hops to the ESO Save scanner and the pages co
   await waitFor(async () => (await native()).opened.length === 1, { label: 'hopped to the app' });
   const url = new URL((await native()).opened[0]);
   assert.equal(url.protocol, 'esosave:'); assert.equal(url.searchParams.get('type'), 'Monitor Printout'); assert.equal(url.searchParams.get('record'), id); assert.equal(url.searchParams.get('incident'), inc); assert.equal(url.searchParams.get('pages'), '12');
+  assert.equal(url.searchParams.get('back'), await T.page.evaluate(() => location.href), "the app's Attach button brings Safari back to this page");
   assert.equal(await app(() => window.app.cameraClicks), 0, "ESO's camera stayed shut");
   // the app scans two pages and leaves them for the extension
   const jpeg = Buffer.from('ffd8ffe000104a46494600010100000100010000ffd9', 'hex').toString('base64');
@@ -1510,6 +1511,7 @@ test('paperwork on an iPad: Camera hops to the ESO Save scanner and the pages co
   assert.deepEqual(l.map(a => a.name), [`${inc}Photo1.jpg`, `${inc}Photo2.jpg`]);
   assert.ok(l.every(a => a.bytes === 22 && /image\/jpeg/.test(a.contentType)), 'the bytes ESO got are the scanned pages');
   await waitFor(async () => (await native()).consumed.includes('scan-1') && (await native()).scans.length === 0, { label: 'the scan was consumed' });
+  assert.deepEqual((await native()).claimed, ['scan-1'], 'claimed once before it was used');
   await waitFor(() => T.page.evaluate(() => /attached/.test((document.getElementById('esosave-host').shadowRoot.querySelector('.veil') || {}).textContent || '')), { label: 'the notice' });
   // a facesheet replacing one that came back: the old one goes
   await waitFor(async () => ((await T.status()).runs.find(r => r.recordId === id) || {}).attachments?.length === 2, { label: 'extension knows the list' });

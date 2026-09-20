@@ -2339,9 +2339,11 @@
     attachApproved = true; btn.click(); attachApproved = false;
   }
   async function startScan(run, type, label, replace, pages) {
-    pendingScan = { recordId: run.recordId, label, type, replace, at: Date.now() };
+    pendingScan = { recordId: run.recordId, label, type, replace, at: Date.now(), back: location.href };
     await sset({ pendingScan });
-    const url = `esosave://scan?type=${encodeURIComponent(type)}&record=${encodeURIComponent(run.recordId)}&incident=${encodeURIComponent(run.incidentNumber || '')}&pages=${pages}`;
+    // the page to come back to: the app's Attach button opens it in Safari (a fresh tab; the
+    // extension in that tab then closes this one)
+    const url = `esosave://scan?type=${encodeURIComponent(type)}&record=${encodeURIComponent(run.recordId)}&incident=${encodeURIComponent(run.incidentNumber || '')}&pages=${pages}&back=${encodeURIComponent(location.href)}`;
     if (ON_ESO) location.href = url; else nativeCall({ type: 'open', url });
     watchScans();
   }
@@ -2358,9 +2360,14 @@
     pollingScans = true;
     try {
       const r = await nativeCall({ type: 'scans' });
-      const scans = r && Array.isArray(r.scans) ? r.scans : [];
-      for (const sc of scans) {
-        if (!sc || !sc.id || !Array.isArray(sc.pages) || !sc.pages.length) { if (sc && sc.id) nativeCall({ type: 'consume', id: sc.id }); continue; }
+      const listed = r && Array.isArray(r.scans) ? r.scans : [];
+      for (const item of listed) {
+        if (!item || !item.id) continue;
+        // claimed before it is used: two ESO tabs (the one the scan left from and the one the
+        // app's Attach button opened) never attach the same pages twice
+        const c = await nativeCall({ type: 'claim', id: item.id });
+        const sc = c && c.scan; if (!sc) continue;
+        if (!Array.isArray(sc.pages) || !sc.pages.length) { nativeCall({ type: 'consume', id: sc.id }); continue; }
         const p = pendingScan && (!sc.record || sc.record === pendingScan.recordId) ? pendingScan : null;
         const type = sc.type || (p && p.type) || 'Other';
         const run = p ? currentRun() : null;
@@ -2376,7 +2383,14 @@
     if (!pendingScan) { clearInterval(scanPoll); scanPoll = null; }
   }
   for (const ev of ['visibilitychange', 'focus', 'pageshow']) addEventListener(ev, () => { if (pendingScan && (document.visibilityState !== 'hidden')) pollScans(); });
-  (async () => { const st = await sget('pendingScan'); if (st.pendingScan && Date.now() - st.pendingScan.at < 30 * 60 * 1000) { pendingScan = st.pendingScan; watchScans(); } })();
+  (async () => {
+    const st = await sget('pendingScan');
+    if (!st.pendingScan || Date.now() - st.pendingScan.at > 30 * 60 * 1000) return;
+    pendingScan = st.pendingScan;
+    // this is the tab the app's Attach button opened: the one the scan left from goes
+    if (pendingScan.back && pendingScan.back === location.href && ON_ESO) { try { api.runtime.sendMessage({ type: 'closeTwins', url: location.href }, () => { void api.runtime.lastError; }); } catch (e) { /* ignore */ } }
+    watchScans();
+  })();
   function onAttached(p) {
     endVeil();
     if (p.scanId) nativeCall({ type: 'consume', id: p.scanId });

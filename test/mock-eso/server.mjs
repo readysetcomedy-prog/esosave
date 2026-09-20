@@ -180,7 +180,7 @@ export function createMockEso() {
     };
   }
 
-  const native = { scans: [], opened: [], consumed: [] };
+  const native = { scans: [], opened: [], consumed: [], claimed: [] };
   function multipart(buf, boundary) {
     const out = [];
     const sep = Buffer.from('--' + boundary);
@@ -239,14 +239,15 @@ export function createMockEso() {
       if (path === '/__native' && req.method === 'POST') {
         const m = JSON.parse(body || '{}');
         if (m.type === 'ping') return send(200, { ok: true, native: true, scanner: control.scanner !== false });
-        if (m.type === 'scans') return send(200, { scans: native.scans });
+        if (m.type === 'scans') return send(200, { scans: native.scans.filter(x => !x.taken).map(x => ({ id: x.id, type: x.type, record: x.record, incident: x.incident, at: x.at })) });
+        if (m.type === 'claim') { const x = native.scans.find(y => y.id === m.id && !y.taken); if (!x) return send(200, { scan: null }); x.taken = true; native.claimed.push(m.id); return send(200, { scan: { ...x, taken: undefined } }); }
         if (m.type === 'consume') { native.scans = native.scans.filter(x => x.id !== m.id); native.consumed.push(m.id); return send(200, { ok: true }); }
         if (m.type === 'open') { native.opened.push(m.url); return send(200, { ok: true }); }
         return send(200, { ok: false });
       }
       if (path === '/__native_seed' && req.method === 'POST') { const b = JSON.parse(body || '{}'); native.scans.push(...(b.scans || [])); return send(200, { ok: true }); }
       if (path === '/__native_dump') return send(200, native);
-      if (path === '/__native_reset' && req.method === 'POST') { native.scans = []; native.opened = []; native.consumed = []; return send(200, { ok: true }); }
+      if (path === '/__native_reset' && req.method === 'POST') { native.scans = []; native.opened = []; native.consumed = []; native.claimed = []; return send(200, { ok: true }); }
       if (path === '/__db_seed' && req.method === 'POST') { const b = JSON.parse(body || '{}'); dbTables[b.table] = b.rows || []; return send(200, { ok: true }); }
       // the agency's tables, read the way Supabase's REST answers: ?col=eq.v, ?col=in.(a,b)
       { const m = /^\/__db\/(call_log_entries|users|ambulances)$/.exec(path);

@@ -18,6 +18,17 @@ api.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   } catch (e) { done({ native: false, error: String(e && e.message || e) }); }
   return true;
 });
+// The ESO Save app's Attach button opens the ESO page in a fresh Safari tab; the tab the scan
+// left from (same page) is closed so tabs do not pile up.
+api.runtime.onMessage.addListener((msg, sender) => {
+  if (!msg || msg.type !== 'closeTwins' || !msg.url || !sender || !sender.tab || !api.tabs) return;
+  const same = (a, b) => String(a || '').replace(/\/+$/, '') === String(b || '').replace(/\/+$/, '');
+  const done = (tabs) => { for (const t of tabs || []) if (t.id !== sender.tab.id && same(t.url, msg.url)) { try { const p = api.tabs.remove(t.id, () => { void api.runtime.lastError; }); if (p && p.catch) p.catch(() => {}); } catch (e) { /* ignore */ } } };
+  try {
+    const p = api.tabs.query({ url: ['https://www.esosuite.net/*'] }, done);
+    if (p && typeof p.then === 'function') p.then(done, () => {});
+  } catch (e) { /* no tabs permission */ }
+});
 api.runtime.onMessage.addListener((msg) => {
   if (!msg || msg.type !== 'badge') return;
   const held = Number(msg.held || 0), rejected = Number(msg.rejected || 0);

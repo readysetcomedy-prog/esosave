@@ -24,6 +24,9 @@ class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
             reply = ["ok": true, "scanner": true, "app": Bundle.main.bundleIdentifier ?? ""]
         case "scans":
             reply = ["ok": true, "scans": Scans.list()]
+        case "claim":
+            if let id = message["id"] as? String, let scan = Scans.claim(id) { reply = ["ok": true, "scan": scan] }
+            else { reply = ["ok": true, "scan": NSNull()] }
         case "consume":
             if let id = message["id"] as? String { Scans.consume(id) }
         case "ocr":
@@ -45,28 +48,38 @@ enum Scans {
     static var dir: URL? {
         FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroup)?.appendingPathComponent("scans", isDirectory: true)
     }
-    // Every scan the app left, oldest first. A facesheet gets its text read here, once, and the
-    // file rewritten with it, so a second listing does not read it again.
+    static var takenDir: URL? { dir?.appendingPathComponent("taken", isDirectory: true) }
+    static func safe(_ id: String) -> String { id.replacingOccurrences(of: "/", with: "").replacingOccurrences(of: "..", with: "") }
+    // Every scan the app left and no tab has claimed yet, oldest first, without the pages.
     static func list() -> [[String: Any]] {
         guard let dir = dir, let names = try? FileManager.default.contentsOfDirectory(atPath: dir.path) else { return [] }
         var out: [[String: Any]] = []
         for name in names.sorted() where name.hasSuffix(".json") {
-            let url = dir.appendingPathComponent(name)
-            guard let data = try? Data(contentsOf: url), var scan = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { continue }
-            if (scan["type"] as? String) == "Facesheet", scan["text"] == nil, let pages = scan["pages"] as? [String] {
-                var text = ""
-                for p in pages { if let d = Data(base64Encoded: p), let img = UIImage(data: d) { text += OCR.text(of: img) + "\n" } }
-                scan["text"] = text
-                if let d = try? JSONSerialization.data(withJSONObject: scan) { try? d.write(to: url) }
-            }
-            out.append(scan)
+            guard let data = try? Data(contentsOf: dir.appendingPathComponent(name)), let scan = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { continue }
+            var head: [String: Any] = [:]
+            for k in ["id", "type", "record", "incident", "at"] { if let v = scan[k] { head[k] = v } }
+            out.append(head)
         }
         return out
     }
+    // One tab takes the scan: the file moves aside so no other tab lists it again. A facesheet
+    // gets its text read here, once.
+    static func claim(_ id: String) -> [String: Any]? {
+        guard let dir = dir, let taken = takenDir else { return nil }
+        let from = dir.appendingPathComponent(safe(id) + ".json"), to = taken.appendingPathComponent(safe(id) + ".json")
+        try? FileManager.default.createDirectory(at: taken, withIntermediateDirectories: true)
+        guard (try? FileManager.default.moveItem(at: from, to: to)) != nil else { return nil }
+        guard let data = try? Data(contentsOf: to), var scan = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return nil }
+        if (scan["type"] as? String) == "Facesheet", scan["text"] == nil, let pages = scan["pages"] as? [String] {
+            var text = ""
+            for p in pages { if let d = Data(base64Encoded: p), let img = UIImage(data: d) { text += OCR.text(of: img) + "\n" } }
+            scan["text"] = text
+            if let d = try? JSONSerialization.data(withJSONObject: scan) { try? d.write(to: to) }
+        }
+        return scan
+    }
     static func consume(_ id: String) {
-        guard let dir = dir else { return }
-        let safe = id.replacingOccurrences(of: "/", with: "").replacingOccurrences(of: "..", with: "")
-        try? FileManager.default.removeItem(at: dir.appendingPathComponent(safe + ".json"))
+        for d in [dir, takenDir].compactMap({ $0 }) { try? FileManager.default.removeItem(at: d.appendingPathComponent(safe(id) + ".json")) }
     }
 }
 

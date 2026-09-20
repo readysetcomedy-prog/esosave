@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import DocumentScanner, { ResponseType } from 'react-native-document-scanner-plugin';
 import { Directory, File, Paths } from 'expo-file-system';
 
@@ -21,7 +21,8 @@ function scansDir() {
 function pruneOld() {
   try {
     const dir = scansDir();
-    for (const f of dir.list()) {
+    const taken = new Directory(dir, 'taken');
+    for (const f of [...dir.list(), ...(taken.exists ? taken.list() : [])]) {
       if (!(f instanceof File) || !/\.json$/.test(f.name)) continue;
       const stamp = Number((/^(\d+)-/.exec(f.name) || [])[1]);
       if (stamp && Date.now() - stamp > 24 * 3600 * 1000) f.delete();
@@ -38,7 +39,8 @@ function parseScanUrl(url) {
     const k = decodeURIComponent(i < 0 ? part : part.slice(0, i)), v = i < 0 ? '' : decodeURIComponent(part.slice(i + 1).replace(/\+/g, ' '));
     q[k] = v;
   }
-  return { type: q.type || 'Other', record: q.record || '', incident: q.incident || '', pages: Math.max(1, Math.min(20, Number(q.pages) || 1)) };
+  const back = /^https:\/\/(www\.)?esosuite\.net\//i.test(q.back || '') ? q.back : 'https://www.esosuite.net/ehr/';
+  return { type: q.type || 'Other', record: q.record || '', incident: q.incident || '', pages: Math.max(1, Math.min(20, Number(q.pages) || 1)), back };
 }
 function saveScan(req, pages) {
   const dir = scansDir();
@@ -60,7 +62,7 @@ export default function App() {
     busy.current = true;
     setScan(req); setState('scanning'); setError('');
     try {
-      const r = await DocumentScanner.scanDocument({ responseType: ResponseType.Base64, croppedImageQuality: 70, maxNumDocuments: req.pages });
+      const r = await DocumentScanner.scanDocument({ responseType: ResponseType.Base64, croppedImageQuality: 85, maxNumDocuments: req.pages });
       const pages = (r && r.scannedImages) || [];
       if (r && r.status === 'cancel' || !pages.length) { setState('cancelled'); return; }
       saveScan(req, pages.slice(0, req.pages));
@@ -77,36 +79,46 @@ export default function App() {
     return () => sub.remove();
   }, []);
 
+  // Back to ESO: the page the scan left from opens in Safari (a fresh tab; the extension closes
+  // the old one). iOS offers an app no way to jump back to the tab itself.
+  const backToEso = () => { Linking.openURL(scan && scan.back ? scan.back : 'https://www.esosuite.net/ehr/').catch(() => {}); };
+  if (scan) {
+    return (
+      <View style={styles.scanPage}>
+        <StatusBar style="light" />
+        <Image source={require('./assets/icon.png')} style={styles.logo} />
+        <Text style={styles.scanTitle}>ESO Save</Text>
+        {state === 'scanning' && <Text style={styles.scanLead}>Scanning {scan.type}{scan.incident ? ` for ${scan.incident}` : ''}…</Text>}
+        {state === 'done' && (
+          <>
+            <Text style={styles.scanLead}>{count === 1 ? 'One page' : `${count} pages`} scanned as {scan.incident ? scan.incident + ':' : ''}{scan.type}</Text>
+            <Pressable style={styles.bigBtn} onPress={backToEso}><Text style={styles.bigBtnText}>Attach to ESO</Text></Pressable>
+            <Text style={styles.scanHint}>Opens the run in Safari; the {count === 1 ? 'page attaches itself' : 'pages attach themselves'}.</Text>
+            <Pressable style={styles.linkBtn} onPress={() => runScanner(scan)}><Text style={styles.linkText}>Scan it again instead</Text></Pressable>
+          </>
+        )}
+        {state === 'cancelled' && (
+          <>
+            <Text style={styles.scanLead}>Nothing was scanned.</Text>
+            <Pressable style={styles.bigBtn} onPress={() => runScanner(scan)}><Text style={styles.bigBtnText}>Scan</Text></Pressable>
+            <Pressable style={styles.linkBtn} onPress={backToEso}><Text style={styles.linkText}>Back to ESO without scanning</Text></Pressable>
+          </>
+        )}
+        {state === 'error' && (
+          <>
+            <Text style={styles.scanLead}>The scanner could not run: {error}</Text>
+            <Pressable style={styles.bigBtn} onPress={() => runScanner(scan)}><Text style={styles.bigBtnText}>Try again</Text></Pressable>
+            <Pressable style={styles.linkBtn} onPress={backToEso}><Text style={styles.linkText}>Back to ESO</Text></Pressable>
+          </>
+        )}
+      </View>
+    );
+  }
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <StatusBar style="light" />
       <Text style={styles.title}>ESO Save</Text>
-      {scan ? (
-        <View style={styles.card}>
-          <Text style={styles.h}>{scan.type}{scan.incident ? ` for ${scan.incident}` : ''}</Text>
-          {state === 'scanning' && <Text style={styles.step}>The scanner is open. Line the page up and take the picture; it is straightened and cropped for you.</Text>}
-          {state === 'done' && (
-            <>
-              <Text style={styles.step}>{count === 1 ? 'One page scanned.' : `${count} pages scanned.`} Tap <Text style={styles.b}>‹ Safari</Text> at the top left to go back to ESO. The {count === 1 ? 'page attaches itself' : 'pages attach themselves'} to the run as <Text style={styles.b}>{scan.incident ? scan.incident + ':' : ''}{scan.type}</Text>.</Text>
-              <Pressable style={styles.btn} onPress={() => runScanner(scan)}><Text style={styles.btnText}>Scan it again instead</Text></Pressable>
-            </>
-          )}
-          {state === 'cancelled' && (
-            <>
-              <Text style={styles.step}>Nothing was scanned. Tap <Text style={styles.b}>‹ Safari</Text> at the top left to go back to ESO, or scan now.</Text>
-              <Pressable style={styles.btn} onPress={() => runScanner(scan)}><Text style={styles.btnText}>Scan</Text></Pressable>
-            </>
-          )}
-          {state === 'error' && (
-            <>
-              <Text style={styles.step}>The scanner could not run: {error}</Text>
-              <Pressable style={styles.btn} onPress={() => runScanner(scan)}><Text style={styles.btnText}>Try again</Text></Pressable>
-            </>
-          )}
-        </View>
-      ) : (
-        <Text style={styles.lead}>This app carries the ESO Save extension for Safari and its paperwork scanner. You never need to open it yourself once the extension is turned on.</Text>
-      )}
+      <Text style={styles.lead}>This app carries the ESO Save extension for Safari and its paperwork scanner. You never need to open it yourself once the extension is turned on.</Text>
       <View style={styles.card}>
         <Text style={styles.h}>Turn it on (one time)</Text>
         <Text style={styles.step}>1. Open Settings, then Apps, then Safari, then Extensions.</Text>
@@ -128,6 +140,15 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
+  scanPage: { flex: 1, backgroundColor: '#15803d', alignItems: 'center', justifyContent: 'center', padding: 32 },
+  logo: { width: 180, height: 180, borderRadius: 40, marginBottom: 18 },
+  scanTitle: { fontSize: 40, fontWeight: '800', color: '#fff', marginBottom: 10 },
+  scanLead: { fontSize: 20, color: '#fff', textAlign: 'center', marginBottom: 26, lineHeight: 28 },
+  bigBtn: { backgroundColor: '#fff', borderRadius: 16, paddingVertical: 22, paddingHorizontal: 48, minWidth: 320, alignItems: 'center' },
+  bigBtnText: { color: '#15803d', fontWeight: '800', fontSize: 26 },
+  scanHint: { fontSize: 15, color: '#d1fae5', textAlign: 'center', marginTop: 14 },
+  linkBtn: { marginTop: 28, padding: 10 },
+  linkText: { color: '#fff', fontSize: 16, textDecorationLine: 'underline' },
   container: { padding: 24, paddingTop: 72, backgroundColor: '#15803d', minHeight: '100%' },
   title: { fontSize: 34, fontWeight: '800', color: '#fff' },
   lead: { fontSize: 17, color: '#fff', marginTop: 8, marginBottom: 20, lineHeight: 24 },
