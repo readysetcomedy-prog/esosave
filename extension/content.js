@@ -2821,7 +2821,7 @@
     const run = currentRun();
     const canFill = !!run && !run.locked;
     const held = (t) => { const nf = Object.keys((t.body && t.body.fields) || {}).length, its = (t.body && t.body.items) || []; const kinds = {}; for (const it of its) kinds[it.kind] = (kinds[it.kind] || 0) + 1; return [`${nf} field${nf === 1 ? '' : 's'}`].concat(Object.entries(kinds).map(([k, n]) => `${n} ${n === 1 ? (ITEM_ONE[k] || k).replace(/^(a|an) /, '') : (ITEM_NAMES[k] || k).toLowerCase()}`)).join(' · '); };
-    const row = (t, kind) => `<div class="tpl" data-id="${esc(t.id)}"><div><div class="tn">${esc(t.name)}</div><div class="by">${kind !== 'mine' ? `shared by ${esc(t.owner_name || '')}` : (t.share === 'everyone' ? 'shared with everyone' : t.share === 'some' ? 'shared with some people' : 'private')} · ${esc(held(t))}</div></div>
+    const row = (t, kind) => `<div class="tpl" data-id="${esc(t.id)}"><div><div class="tn">${esc(t.name)}</div><div class="by">${kind !== 'mine' ? `shared by ${esc(t.owner_name || '')}` : (t.share === 'everyone' ? 'yours, shared with everyone' : t.share === 'some' ? 'yours, shared with some people' : 'yours, private')} · ${esc(held(t))}</div></div>
       <button class="tb pri" data-act="fill" ${canFill ? '' : 'disabled title="Open an unlocked run first"'}>Fill this run</button>
       ${kind === 'mine' ? '<button class="tb sec" data-act="edit">Edit</button><button class="tb sec" data-act="copy" title="A new template of your own, starting from this one">Copy</button><button class="tb danger" data-act="delete">Delete</button>' : '<button class="tb sec" data-act="copy" title="A new template of your own, starting from this one">Copy to mine</button>'}</div>`;
     // a copy's name: "(copy)", then "(copy 2)", "(copy 3)"... among the person's own
@@ -2831,8 +2831,8 @@
         ${note ? `<div class="muted">${esc(note)}</div>` : ''}
         ${canFill ? '' : `<div class="muted">Open a run in ESO to fill one; templates can be made at any time.</div>`}
         <h2>My templates</h2>${tpls.mine.length ? tpls.mine.map(t => row(t, 'mine')).join('') : '<div class="muted">None yet. New template makes one.</div>'}
-        <h2>Templates shared with you</h2>${tpls.shared.length ? tpls.shared.map(t => row(t, 'shared')).join('') : '<div class="muted">None.</div>'}
-        <h2>Templates shared to everyone</h2>${tpls.everyone.length ? tpls.everyone.map(t => row(t, 'everyone')).join('') : '<div class="muted">None.</div>'}
+        <h2>Templates others shared with you</h2>${tpls.shared.length ? tpls.shared.map(t => row(t, 'shared')).join('') : '<div class="muted">None.</div>'}
+        <h2>Templates others shared to everyone</h2>${tpls.everyone.length ? tpls.everyone.map(t => row(t, 'everyone')).join('') : '<div class="muted">None.</div>'}
       </div>`;
     tplWin.querySelectorAll('[data-act]').forEach(b => b.addEventListener('click', async (e) => {
       const act = b.dataset.act; const id = b.closest('.tpl') && b.closest('.tpl').dataset.id;
@@ -2893,6 +2893,9 @@
     return String(text).replace(/\{incident\}/gi, run.incidentNumber || '').replace(/\{unit\}/gi, unit).replace(/\{date\}/gi, `${pad(d.getMonth() + 1)}/${pad(d.getDate())}/${d.getFullYear()}`).replace(/\{time\}/gi, `${pad(d.getHours())}:${pad(d.getMinutes())}`);
   }
   // what a fill leaves out: locked fields, items and parts, and fields whose trigger is not set
+  // the Unable to obtain that stands in for a list: with it set, ESO refuses entries on that list, so a fill leaves them out
+  const ITEM_PN = { 'patient.patientMedicalHistories': 'patient.patientHistoriesPertinentNegativeId', 'patient.patientAllergies': 'patient.patientAllergiesPertinentNegativeId', 'patient.patientMedications': 'patient.patientMedicationsPertinentNegativeId', 'patient.patientImmunizations.items': 'patient.patientImmunizations.pertinentNegativeId' };
+  const utoSet = (fields, root) => { const a = ITEM_PN[root]; const f = a && fields && fields[a]; return !!(f && f.v !== null && f.v !== undefined && f.v !== ''); };
   // a saved template may carry a field the catalog no longer offers (one ESO turned out to set itself); it is dropped quietly
   function onlyOffered(body) {
     const fields = {}; const known = new Set((catalog && catalog.fields || []).map(f => f.a));
@@ -2904,6 +2907,7 @@
     for (const [a, f] of Object.entries(body.fields || {})) { if (tplLocked(a)) dropped++; else if (!fieldShown(a, body.fields || {})) continue; else out.fields[a] = f; }
     for (const it of (body.items || [])) {
       if (tplLocked(it.root)) { dropped++; continue; }
+      if (utoSet(body.fields, it.root)) continue; // the Unable to obtain stands in for the list
       const copy = { ...it, fields: {} };
       for (const [rel, f] of Object.entries(it.fields || {})) { if (tplLocked(it.root + '.' + rel)) dropped++; else copy.fields[rel] = f; }
       if (it.kind === 'assessment') {
@@ -2981,6 +2985,7 @@
       const rootLocked = tplLocked(root), rootShut = rootLocked && !isAdmin();
       content += `<details class="sec" ${items.length || q ? 'open' : ''}><summary><span style="flex:1">${esc(ITEM_NAMES[kind] || humanize(root.split('.').pop()))}${items.length ? ` <span class="cnt" style="background:#fbbf24;border-radius:10px;padding:0 7px;font-size:12px">${items.length}</span>` : ''}${rootLocked ? ' ' + lockNote() : ''}</span>${lockBtn(root)}</summary>
         ${rootShut ? `<div class="muted" style="padding:0 0 10px">${esc(ITEM_NAMES[kind] || 'These')} are locked by the agency: a template cannot add them. Enter them on the run yourself.</div>` : ''}
+        ${!rootShut && utoSet(ed.fields, root) ? `<div data-utonote style="color:#b45309;padding:0 0 10px">Unable to obtain is set for ${esc((ITEM_NAMES[kind] || 'these').toLowerCase())}: ESO takes one or the other, so a fill writes the Unable to obtain and leaves ${items.length ? 'these entries' : 'any entries'} out. Clear it to fill entries instead.</div>` : ''}
         ${items.map(({ it, i }) => `<div class="item" data-item="${i}"><div class="ih">${esc(itemTitle(it))}<span style="flex:1"></span><button class="tb danger" data-remove>Remove</button></div>
           ${rootShut ? `<div class="muted">${lockNote()} Not filled.</div>` : kind === 'assessment' ? assessmentUi(it) : groupedRows(members.filter(m => !(kind === 'vital' && /vitalSignDateTime|softDeleted/.test(m.rel))), it, i, fieldRow, kind)}</div>`).join('')}
         ${rootShut ? '' : `<button class="tb pri" data-additem="${esc(root)}" data-kind="${esc(kind)}" style="margin:8px 0">Add ${esc(ITEM_ONE[kind] || 'one')}</button>`}</details>`;
@@ -3159,8 +3164,10 @@
     if (pp) {
       const list = W.querySelector('[data-peoplelist]');
       const crew = ((facilityTypes && facilityTypes.crew) || []).filter(c => c.name && c.id !== userId);
-      const show = () => { const q = pp.value.trim().toLowerCase(); const hits = crew.filter(c => !ed.people.some(p => p.id === c.id) && (!q || c.name.toLowerCase().includes(q))).slice(0, 60); list.innerHTML = hits.map(c => `<button type="button" data-pid="${esc(c.id)}">${esc(c.name)}</button>`).join('') || '<div class="muted" style="padding:8px">No one matches.</div>'; list.hidden = false; list.querySelectorAll('[data-pid]').forEach(b => b.addEventListener('click', () => { ed.people.push({ id: b.dataset.pid, name: crew.find(c => c.id === b.dataset.pid).name }); renderEditor(); const n = tplWin.querySelector('[data-people]'); if (n) n.focus(); })); };
+      const show = () => { const q = pp.value.trim().toLowerCase(); const hits = crew.filter(c => !ed.people.some(p => p.id === c.id) && (!q || c.name.toLowerCase().includes(q))).slice(0, 60); list.innerHTML = hits.map(c => `<button type="button" data-pid="${esc(c.id)}">${esc(c.name)}</button>`).join('') || '<div class="muted" style="padding:8px">No one matches.</div>'; list.hidden = false; list.querySelectorAll('[data-pid]').forEach(b => b.addEventListener('click', () => { ed.people.push({ id: b.dataset.pid, name: crew.find(c => c.id === b.dataset.pid).name }); renderEditor(); })); };
       pp.addEventListener('focus', show); pp.addEventListener('input', show);
+      // clicking away closes the list (a moment later, so a tap on a name still lands)
+      pp.addEventListener('blur', () => setTimeout(() => { if (!list.contains(shadow.activeElement)) list.hidden = true; }, 250));
     }
     W.querySelector('[data-act=cancel]').addEventListener('click', () => { tplView = 'list'; ed = null; lockMode = false; renderTemplates(); });
     const lm = W.querySelector('[data-act=lockmode]'); if (lm) lm.addEventListener('click', () => { lockMode = !lockMode; renderEditor(); });

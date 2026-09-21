@@ -157,7 +157,9 @@ to bad signal or a hung page.
   Assessed per section written where ESO writes them; the category's comments; everything
   starts No Abnormalities on the areas ESO seeds, one button does all of it, one does Alert and
   Oriented x4; ESO's retired one-field-per-finding assessment form, still in its field list, is
-  never offered; the same for what ESO sets itself, the unit's capability and level of care and
+  never offered; an Unable to obtain set for the history, allergies, medications or immunizations
+  stands in for that list, so entries on it are left out of a fill and the editor says so, as ESO
+  takes one or the other; the same for what ESO sets itself, the unit's capability and level of care and
   the protocol age category, and its retired signs form), ESO's unable-to-obtain reasons named
   after what each stands in for (Last Known Well · UTO), a history entry,
   an allergy, a home
@@ -165,8 +167,9 @@ to bad signal or a hung page.
   vehicle, shift, crew, times, the addresses, the patient's name, DOB and SSN, signatures) is
   never offered. Templates are kept in the agency's table under the person's ESO id (so a name
   change loses nothing), private, or shared with everyone or with named people; the list shows
-  My templates, Templates shared with you and Templates shared to everyone, each with who
-  shared it. Any template, your own or one shared with you, can be copied: the copy is a new
+  My templates (each marked private, shared with everyone or shared with some people), Templates
+  others shared with you and Templates others shared to everyone, each with who shared it; a
+  template appears once, under its maker. Any template, your own or one shared with you, can be copied: the copy is a new
   private one of your own, named "(copy)", "(copy 2)"..., to change and share as you like, so a
   call that differs only a little from a saved one starts from that one; only a template's maker
   can change or delete it. A name is used once per shared category across the agency (one "Refusal" shared to

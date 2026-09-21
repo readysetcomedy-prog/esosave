@@ -1963,6 +1963,11 @@ test('templates: shared to everyone or to named people show up for them, named a
   await waitFor(() => T.page.evaluate(() => !!document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin [data-peoplelist] button')), { label: 'names' });
   await twClickText('[data-peoplelist] button', 'JONES, ALEX');
   await waitFor(async () => /JONES, ALEX/.test((await tw('.share .chosen')) || ''), { label: 'chosen' });
+  assert.equal(await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin [data-peoplelist]').hidden), true, 'the name list closes once a name is picked');
+  await twType('[data-people]', 'j');
+  await waitFor(() => T.page.evaluate(() => !document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin [data-peoplelist]').hidden), { label: 'typing opens it again' });
+  await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin [data-name]').focus());
+  await waitFor(() => T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin [data-peoplelist]').hidden), { label: 'clicking away closes it' });
   await twClick('[data-act=save]');
   await waitFor(async () => (await tplDb()).shares.some(s => s.person_id === 'person-m'), { label: 'share row' });
   await waitFor(() => tw('[data-act=new]'), { label: 'back on the list' });
@@ -1972,9 +1977,9 @@ test('templates: shared to everyone or to named people show up for them, named a
   await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.bar [data-act=templates]').click());
   await waitFor(async () => /shared by TEST, MEDIC/.test((await tw('.body')) || ''), { label: 'listed for her with who shared it' });
   const body = await tw('.body');
-  assert.match(body, /Templates shared to everyone[\s\S]*Chest pain[\s\S]*shared by TEST, MEDIC/);
+  assert.match(body, /Templates others shared to everyone[\s\S]*Chest pain[\s\S]*shared by TEST, MEDIC/);
   assert.doesNotMatch(body, /For Alex/);
-  assert.match(body.split('Templates shared with you')[1].split('Templates shared to everyone')[0], /None/);
+  assert.match(body.split('Templates others shared with you')[1].split('Templates others shared to everyone')[0], /None/);
   // only its maker can change or delete it: her buttons on his template are Fill and Copy
   assert.deepEqual(await T.page.evaluate(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.tplwin .tpl [data-act]')).map(b => b.dataset.act)), ['fill', 'copy']);
   await twClickText('.tpl [data-act=copy]', 'Copy to mine');
@@ -2019,7 +2024,7 @@ test('templates: shared to everyone or to named people show up for them, named a
   await freshRun();
   await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.bar [data-act=templates]').click());
   await waitFor(async () => /For Alex/.test((await tw('.body')) || ''), { label: 'listed for him' });
-  assert.match((await tw('.body')).split('Templates shared with you')[1].split('Templates shared to everyone')[0], /For Alex[\s\S]*shared by TEST, MEDIC/);
+  assert.match((await tw('.body')).split('Templates others shared with you')[1].split('Templates others shared to everyone')[0], /For Alex[\s\S]*shared by TEST, MEDIC/);
   assert.ok(!(await T.page.evaluate(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.tplwin .tpl [data-act]')).some(b => /edit|delete/.test(b.dataset.act)))), 'no Edit or Delete on what others made');
   assert.equal((await tplDb()).templates.find(t => t.name === 'Chest pain').owner_id, 'person-1', 'the original is still his after the copy');
   await twClick('[data-act=close]');
@@ -2119,4 +2124,28 @@ test('templates: the agency owner locks a field and a part of the vitals; the cr
   // the owner clears the locks
   await fetch(T.base + '/__db_set', { method: 'POST', body: JSON.stringify({ name: '__agency__', settings: { ...(await agency()), tplLocks: [] } }) });
   await T.setStorage({ settings: { ...(await T.storage()).settings, tplLocks: [] } });
+});
+
+test('templates: an Unable to obtain set for a list wins over entries on it, as ESO takes one or the other; the editor says so and a fill leaves the entries out', async () => {
+  await T.control({ userName: 'TEST, MEDIC', userId: 'person-1' });
+  const id = await freshRun();
+  await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.bar [data-act=templates]').click());
+  await waitFor(async () => /Chest pain/.test((await tw('.body')) || ''), { label: 'his templates' });
+  await T.page.evaluate(() => { const row = Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.tplwin .tpl')).find(r => /^Chest pain/.test(r.querySelector('.tn').textContent)); row.querySelector('[data-act=edit]').click(); });
+  await waitFor(() => tw('[data-page=patient]'), { label: 'editor' });
+  await twClick('[data-page=patient]');
+  await waitFor(() => tw(rowSel('patient.patientHistoriesPertinentNegativeId')), { label: 'the history UTO' });
+  assert.equal(await tw('[data-utonote]'), null, 'no note while the UTO is clear');
+  await pick('patient.patientHistoriesPertinentNegativeId', 'Unable to Obtain');
+  await waitFor(async () => /Unable to obtain is set for patient history/.test((await tw('[data-utonote]')) || ''), { label: 'the note on the entries' });
+  await twClick('[data-act=save]');
+  await waitFor(() => tw('[data-act=new]'), { label: 'list' });
+  await T.page.evaluate(() => { const row = Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.tplwin .tpl')).find(r => /^Chest pain/.test(r.querySelector('.tn').textContent)); row.querySelector('[data-act=fill]').click(); });
+  await waitFor(async () => /Fill this run from "Chest pain"/.test(await T.page.evaluate(() => (document.getElementById('esosave-host').shadowRoot.querySelector('.veil .askbox') || {}).textContent || '')), { label: 'question' });
+  await T.page.evaluate(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.askbox button')).find(b => /Yes, fill it/.test(b.textContent)).click());
+  await waitFor(async () => (await T.record(id)).tree.patient?.patientHistoriesPertinentNegativeId === 360, { label: 'the UTO went in', timeout: 30000 });
+  await waitFor(() => T.page.evaluate(() => /Filled from/.test((document.getElementById('esosave-host').shadowRoot.querySelector('.veil') || {}).textContent || '')), { label: 'notice', timeout: 15000 });
+  const t = (await T.record(id)).tree;
+  assert.equal(Object.keys(t.patient.patientMedicalHistories || {}).length, 0, 'no history entries beside the UTO');
+  assert.equal(t.vitals.vitalSigns.length, 1, 'the rest of the template still went in');
 });
