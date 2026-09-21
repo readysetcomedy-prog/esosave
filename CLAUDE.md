@@ -35,7 +35,10 @@ assessment layout (`extension/assess-catalog.js`, `layout`: category → section
 their findings, `na` where a section's No Abnormalities / Not Assessed is written, `one` for
 pick-one rows, `top` what ESO seeds Not Assessed) is taken from ESO's own Assessments code, not
 PHI; findings are written per location exactly as ESO's screen writes them (recorded 2026-09-20).
-ESO's retired `assessments.assessments` form is in `CATALOG_SKIP`.
+ESO's retired `assessments.assessments` and `narrative.supportingSignsAndSymptoms` forms, the unit
+capability / level of care (ESO sets them from the unit) and the protocol age category (from the
+patient's age) are in `CATALOG_SKIP`: ESO refused each on its own (recorded 2026-09-20). A fill
+that ESO refuses (400) is bisected (`saveOpsIsolating`), the refused ops named to the medic.
 
 ## Data that may leave the device
 

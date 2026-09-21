@@ -27,7 +27,7 @@
   if (ext) return;
   if (window.__esosave) return;
 
-  const VERSION = '0.15.10';
+  const VERSION = '0.15.12';
   const API_PREFIX_RE = /^\/ehr\/api\/+/i;
   const FAKE_OK_TEXT = '{"result":"Success","data":[]}';
   const PROBE_PATH = '/ehr/api/thirdpartydata/partners';
@@ -805,6 +805,9 @@
     /^patient\.(contact|incident)\b/,
     /^billing\.(patient|contactForPayment|nextOfKin)\b/,
     /^signatures\.(?!standardSignatures\.standardRefusal\b)/,
+    /^incident\.response\.(unitCapabilityID|unitsLevelOfCareID)$/, // ESO sets these itself once the unit and shift are chosen; refused on their own (recorded)
+    /^narrative\.clinicalImpression\.protocolAgeCategoryId$/, // follows the patient's age; refused on its own
+    /^narrative\.supportingSignsAndSymptoms\b/, // ESO's retired signs form (the Enhanced one is the item offered); refused
     /^assessments\.assessments\b/, // ESO's retired assessment form: a field per finding whose value is a section name; the current screen never writes it
     /\.(itemId|mobileToMobile|softDeleted|fileId|imageType|version)$/,
   ];

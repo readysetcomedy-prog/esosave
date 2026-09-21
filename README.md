@@ -29,7 +29,8 @@ to bad signal or a hung page.
   or Send email right there in the run, and sends through ESO's own call. With no signal the send is
   held with the run and goes when signal returns. Unlock and relock asks again until it has gone.
 - **Not sent list.** Agency-wide, on any device: locked runs from the last 15 days that have a fax or
-  email destination and no fax in ESO's history, with Fax and Email buttons. The card shows the count.
+  email destination and no fax in ESO's history, with Fax and Email buttons. The card's words carry
+  the count; the list itself is in the opened card, folded until tapped, not a button on the card's front.
   Emails leave no history in ESO, so a run emailed from a device without the extension still shows.
   Both are settings, on by default.
 - **Quick buttons.** One-tap chips for the common history items and home medications (each list
@@ -150,7 +151,9 @@ to bad signal or a hung page.
   Assessed per section written where ESO writes them; the category's comments; everything
   starts No Abnormalities on the areas ESO seeds, one button does all of it, one does Alert and
   Oriented x4; ESO's retired one-field-per-finding assessment form, still in its field list, is
-  never offered), a history entry,
+  never offered; the same for what ESO sets itself, the unit's capability and level of care and
+  the protocol age category, and its retired signs form), ESO's unable-to-obtain reasons named
+  after what each stands in for (Last Known Well · UTO), a history entry,
   an allergy, a home
   medication, a sign or symptom, a protocol. What is the call's own (incident number, unit,
   vehicle, shift, crew, times, the addresses, the patient's name, DOB and SSN, signatures) is

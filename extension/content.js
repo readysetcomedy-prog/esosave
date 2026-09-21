@@ -402,7 +402,7 @@
     if (s.pushing) return { cls: 'info', title: 'Pushing to ESO…', msg: held, num };
     if (s.held) return { cls: 'warn', title: 'Changes held', msg: held + '. Pushing shortly.', num, btn: 'Push now' };
     const unsent = settings.unsentList !== false && s.unsent && s.unsent.items.length;
-    return { cls: 'good', title: 'ESO Save · signal OK', msg: (cur && cur.lastSavedAt ? `last save ${fmtTime(cur.lastSavedAt)}` : 'all saved') + (unsent ? ` · ${unsent} run${unsent === 1 ? '' : 's'} not faxed` : ''), num, btn: unsent ? 'Not sent' : null };
+    return { cls: 'good', title: 'ESO Save · signal OK', msg: (cur && cur.lastSavedAt ? `last save ${fmtTime(cur.lastSavedAt)}` : 'all saved') + (unsent ? ` · ${unsent} run${unsent === 1 ? '' : 's'} not faxed` : ''), num, btn: null }; // the Not sent list lives in the opened card, not as a button on its front
   }
   let lastCls = null;
   function renderBar() {
@@ -2847,6 +2847,7 @@
   // ---- the editor
   async function startEditor(t) {
     if (!catalog) { toPage('action', { name: 'catalog' }); alert("ESO Save: ESO's field list has not been seen yet on this device. Open any run once, then try again."); return; }
+    if (t && t.body) t = { ...t, body: onlyOffered(t.body) };
     ed = { id: t ? t.id : null, name: t ? t.name : '', share: t ? t.share || 'private' : 'private', people: [], page: 'incident', q: '', fields: {}, items: [] };
     if (t && t.body) { ed.fields = JSON.parse(JSON.stringify(t.body.fields || {})); ed.items = JSON.parse(JSON.stringify(t.body.items || [])); }
     if (t && t.id && t.share === 'some') { try { ed.people = (await tplPeople(t.id)).map(p => ({ id: p.person_id, name: p.person_name })); } catch (e) { /* offline */ } }
@@ -2890,6 +2891,12 @@
     return String(text).replace(/\{incident\}/gi, run.incidentNumber || '').replace(/\{unit\}/gi, unit).replace(/\{date\}/gi, `${pad(d.getMonth() + 1)}/${pad(d.getDate())}/${d.getFullYear()}`).replace(/\{time\}/gi, `${pad(d.getHours())}:${pad(d.getMinutes())}`);
   }
   // what a fill leaves out: locked fields, items and parts, and fields whose trigger is not set
+  // a saved template may carry a field the catalog no longer offers (one ESO turned out to set itself); it is dropped quietly
+  function onlyOffered(body) {
+    const fields = {}; const known = new Set((catalog && catalog.fields || []).map(f => f.a));
+    for (const [a, f] of Object.entries(body.fields || {})) if (known.has(a)) fields[a] = f;
+    return { ...body, fields };
+  }
   function applyLocks(body) {
     const out = { v: body.v || 1, fields: {}, items: [] }; let dropped = 0;
     for (const [a, f] of Object.entries(body.fields || {})) { if (tplLocked(a)) dropped++; else if (!fieldShown(a, body.fields || {})) continue; else out.fields[a] = f; }
@@ -2940,13 +2947,22 @@
     let content = '';
     const page = ed.page;
     const secs = sectionsOf(page), roots = itemRootsOf(page);
+    // ESO names its unable-to-obtain fields "UTO" or "Reason Unable To Obtain"; the editor names the field each stands in for (Last Known Well · UTO)
+    const pnTitle = (f) => {
+      if (f.t !== 'pertinentNegative') return f.n;
+      const generic = /^(UTO|Reason Unable To Obtain|Pertinent Negative)$/i.test(f.n.trim());
+      const partnerA = f.a.replace(/PertinentNegative(I[dD])?$/, '').replace(/\.pertinentNegativeId$/, '');
+      const partner = partnerA !== f.a && (catalog.fields || []).find(x => x.a === partnerA);
+      const base = generic ? (partner ? partner.n : humanize(partnerA.split('.').pop())) : f.n;
+      return `${base} · UTO`;
+    };
     const fieldRow = (f, cur, prefix) => {
       const on = !!cur; const key = prefix ? `${prefix}|${f.rel}` : f.a;
       const locked = tplLocked(f.a);
       const shut = locked && !isAdmin();
       const rule = prefix ? null : ruleFor(f.a); const unmet = rule && !ruleMet(rule, ed.fields);
       const blanks = f.t === 'string' && /narrative/i.test(f.a) && /narrativeText|narrative$/i.test(f.a) ? '<div class="muted" style="font-weight:400">Leave blanks like ____ to fill on the run; {incident}, {unit}, {date} and {time} are filled in for you.</div>' : '';
-      return `<div class="tf ${on ? 'on' : ''} ${shut ? 'shut' : ''}" data-key="${esc(key)}"><input type="checkbox" data-sel ${on ? 'checked' : ''} ${shut ? 'disabled' : ''}><div class="fl">${esc(f.n)}<div class="muted" style="font-weight:400">${esc(f.t === 'pertinentNegative' ? 'reason unable to obtain' : '')}${locked ? lockNote() : ''}${unmet ? `<div style="color:#b45309">Only on the run when ${esc(rule.why)}; left out until then.</div>` : ''}</div>${blanks}</div><div>${shut ? '' : inputFor(f, cur ? cur.v : null, key)}${lockBtn(f.a, 'margin-top:4px')}</div></div>`;
+      return `<div class="tf ${on ? 'on' : ''} ${shut ? 'shut' : ''}" data-key="${esc(key)}"><input type="checkbox" data-sel ${on ? 'checked' : ''} ${shut ? 'disabled' : ''}><div class="fl">${esc(pnTitle(f))}<div class="muted" style="font-weight:400">${esc(f.t === 'pertinentNegative' ? 'unable to obtain: the reason' : '')}${locked ? lockNote() : ''}${unmet ? `<div style="color:#b45309">Only on the run when ${esc(rule.why)}; left out until then.</div>` : ''}</div>${blanks}</div><div>${shut ? '' : inputFor(f, cur ? cur.v : null, key)}${lockBtn(f.a, 'margin-top:4px')}</div></div>`;
     };
     for (const [sec, fields] of secs) {
       const shown = (q ? fields.filter(f => f.n.toLowerCase().includes(q) || sec.toLowerCase().includes(q)) : fields).filter(f => fieldShown(f.a, ed.fields) || ed.fields[f.a]);
@@ -3301,7 +3317,7 @@
   function fillWithTemplate(t) {
     const run = currentRun();
     if (!run || run.locked) { alert('ESO Save: open an unlocked run first.'); return; }
-    const { body, dropped } = applyLocks(t.body || {});
+    const { body, dropped } = applyLocks(onlyOffered(t.body || {}));
     for (const it of body.items) if (it.kind === 'assessment') it.findings = axComplete(it.findings);
     for (const f of Object.values(body.fields)) if (f && f.t === 'string' && typeof f.v === 'string') f.v = fillBlanks(f.v, run);
     for (const it of body.items) for (const f of Object.values(it.fields || {})) if (f && f.t === 'string' && typeof f.v === 'string') f.v = fillBlanks(f.v, run);

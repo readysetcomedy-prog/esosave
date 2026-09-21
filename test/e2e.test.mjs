@@ -1788,6 +1788,10 @@ test('templates: made from ESO\'s own field catalog, saved under the person\'s i
   await twClick('[data-page=assessments]');
   // ESO's retired assessment form (a field per finding, its value a section name) is still in ESO's field list; it is never offered
   assert.equal(await tw(rowSel('assessments.assessments.mentalStatus.orientation.person')), null, 'the retired form stays out');
+  await twClick('[data-page=incident]');
+  await waitFor(() => tw(rowSel('incident.response.priorityId')), { label: 'incident fields' });
+  assert.equal(await tw(rowSel('incident.response.unitCapabilityID')), null, 'what ESO sets from the unit is never offered');
+  await twClick('[data-page=assessments]');
   await twClick('[data-additem="assessments.assessmentsV2"]');
   // laid out as ESO's screen: categories down the side, each area No Abnormalities to start; Skin gets Cold ✓ and Clammy ✕, Mental Status A&Ox4
   assert.match(await tw('.item .ih'), /no abnormalities/);
@@ -1821,6 +1825,10 @@ test('templates: made from ESO\'s own field catalog, saved under the person\'s i
   
   // Narrative: an impression and text
   await twClick('[data-page=narrative]');
+  // ESO's unable-to-obtain fields are named after what they stand in for, and a UTO reason writes as ESO writes it (the id as a number)
+  await waitFor(() => tw(rowSel('narrative.narrativeTimes.lastKnownWellPertinentNegativeID')), { label: 'the UTO field' });
+  assert.match(await tw(rowSel('narrative.narrativeTimes.lastKnownWellPertinentNegativeID') + ' .fl'), /Last Known Well · UTO/);
+  await pick('narrative.narrativeTimes.lastKnownWellPertinentNegativeID', 'Unable to Obtain');
   await pick('narrative.clinicalImpression.primaryImpressionId', 'Chest Pain');
   await twType(rowSel('narrative.narrative.narrativeText') + ' [data-in]', 'Unit {unit} responded to {incident} on {date}. Pt c/o chest pain. Pt is ____ y/o.');
   assert.match(await tw('.pages'), /Incident4/);
@@ -1856,6 +1864,7 @@ test('templates: made from ESO\'s own field catalog, saved under the person\'s i
   const tr = t.flowchartTreatments.treatments[0]; assert.equal(tr.flowchartTreatmentRegistryId, 1416); assert.equal(tr.dose, '15'); assert.equal(tr.doseUnitId, 9001); assert.ok(tr.treatmentDate);
   const a = t.assessments.assessmentsV2[0]; assert.equal(a.abdomenSection.comments, 'Soft, non-tender'); const fs = Object.values(a.findings); assert.equal(fs.length, 31); assert.deepEqual(fs.filter(f => f.findingLocationId === 'Skin').map(f => [f.findingId, f.present]).sort(), [['Clammy', false], ['Cold', true]]); assert.deepEqual(fs.filter(f => f.findingLocationId === 'MentalStatus').map(f => f.findingId).sort(), ['Oriented_Event', 'Oriented_Person', 'Oriented_Place', 'Oriented_Time']); assert.deepEqual(fs.filter(f => /^Eyes/.test(f.findingLocationId)).map(f => [f.findingLocationId, f.findingId, f.present]).sort(), [['EyesLeft', '4mm', true], ['EyesRight', 'Blind', true]], 'written on each eye as ESO writes them; no Not Assessed on Eyes'); assert.ok(fs.filter(f => !/^(Skin|MentalStatus|Eyes)/.test(f.findingLocationId)).every(f => f.findingId === 'No_Abnormalities' && f.present === true));
   assert.equal(t.narrative.clinicalImpression.primaryImpressionId, 500);
+  assert.strictEqual(t.narrative.narrativeTimes.lastKnownWellPertinentNegativeID, 11854, 'the UTO reason went in as a number');
   const run = await T.run(id);
   assert.ok(run.batches.filter(b => b.synthetic === 'facesheet' || b.synthetic === 'template').length >= 6, 'one batch per tab');
   assert.ok(run.log.some(l => /Template "Chest pain": filled/.test(l.msg)));
