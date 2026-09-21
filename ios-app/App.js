@@ -80,8 +80,14 @@ export default function App() {
   }, []);
 
   // Back to ESO: the page the scan left from opens in Safari (a fresh tab; the extension closes
-  // the old one). iOS offers an app no way to jump back to the tab itself.
-  const backToEso = () => { Linking.openURL(scan && scan.back ? scan.back : 'https://www.esosuite.net/ehr/').catch(() => {}); };
+  // the old one). iOS offers an app no way to jump back to the tab itself. A plain web link
+  // would open in whatever browser the iPad has as its default (Chrome, on ours), where the
+  // extension is not; the x-safari- form asks for Safari by name. Should iOS ever refuse it,
+  // the plain link is the fallback.
+  const backToEso = () => {
+    const url = scan && scan.back ? scan.back : 'https://www.esosuite.net/ehr/';
+    Linking.openURL(url.replace(/^https:\/\//i, 'x-safari-https://')).catch(() => Linking.openURL(url).catch(() => {}));
+  };
   if (scan) {
     return (
       <View style={styles.scanPage}>

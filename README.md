@@ -125,7 +125,8 @@ to bad signal or a hung page.
   desktop, ESO's own camera or file dialog then runs exactly as before, only the description is
   filled in. On an iPad carrying the ESO Save app, Camera hops to the app's document scanner
   (VisionKit: the page is found, straightened and cropped; several pages for a med list or a
-  printout), the app then shows one button, Attach to ESO, which opens the run in Safari (a
+  printout), the app then shows one button, Attach to ESO, which opens the run in Safari by name,
+  not in whatever browser the iPad calls its default (a
   fresh tab; the extension closes the one the scan left from), and the pages upload themselves
   with the same request ESO's dialog sends, named `…Photo1.jpg`, `…Photo2.jpg` as ESO names them.
   A scan is claimed by one tab before it is used, so it can never attach twice. A facesheet

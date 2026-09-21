@@ -10,9 +10,10 @@
       "bundleIdentifier": "com.ruralmedems.esosave",
       "appleTeamId": "UG9SN323ZU",
       "supportsTablet": true,
-      "buildNumber": "1",
+      "buildNumber": "2",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
+        "LSApplicationQueriesSchemes": ["x-safari-https", "x-safari-http"],
         "NSCameraUsageDescription": "ESO Save uses the camera to scan paperwork (facesheets, certifications, med lists, monitor printouts) onto the run open in Safari."
       },
       "entitlements": {
