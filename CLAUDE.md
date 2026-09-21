@@ -56,3 +56,14 @@ iPad scans are uploaded by the extension with that same request. The Patient and
 filled with the app's own autosave ops (recorded), never through the UI. Facesheet photos and
 recordings are PHI: they live in the scratchpad only, never in the repo. The parser's fixtures in
 `test/e2e.test.mjs` are made up.
+
+## Validation outlines
+
+`validateRun` (inject.js) GETs ESO's own `/PatientCareRecords/{id}/Validate?lrIsLinked=false`
+after each tab load and each acked save (and takes the answer when ESO's summary fetches it).
+`applyValidation` reads each `eso-field`'s ref through AngularJS's model controller
+(`angular.element(el).controller('ngModel').$viewModel.fieldConfig()`, the way ESO's own
+"take me there" matches a field), falling back to the `ng-model` path's tail, and sets
+`esosave-val-err` / `esosave-val-warn` plus a `title`. Row issues (`ids` set) are skipped.
+Open setting `valHighlight`, on by default. The mock fakes `window.angular` for its fields.
+

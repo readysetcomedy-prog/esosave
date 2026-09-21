@@ -22,6 +22,8 @@
   const hosts = () => [document.getElementById('esosave-host'), ...document.querySelectorAll('.esosave-ride')].filter(h => h && h.shadowRoot);
   window.__q = (sel) => { for (const h of hosts()) { const r = h.shadowRoot.querySelector(sel); if (r) return r; } return null; };
   window.__qa = (sel) => hosts().flatMap(h => Array.from(h.shadowRoot.querySelectorAll(sel)));
+  // ESO's app hangs a model controller on each field whose view model knows the field's config; the extension reads the field's ref through it
+  window.angular = { element: (el) => ({ controller: (name) => { const ref = name === 'ngModel' && el && el.dataset ? el.dataset.fieldRef : null; const d = ref && (SS[ref] || NUM[ref]); return d ? { $viewModel: { fieldConfig: () => ({ fieldRef: ref, address: d.addr }) } } : null; } }) };
   const app = window.app = {
     recordId: null, keyMap: {}, dirty: [], responses: [], views: {}, autosaveMs: 300, flushing: false, errors: [],
     async start() {

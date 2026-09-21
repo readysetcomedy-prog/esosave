@@ -28,6 +28,12 @@ to bad signal or a hung page.
   fax history). If there is somewhere to send it and it has not been sent, a prompt offers Send fax
   or Send email right there in the run, and sends through ESO's own call. With no signal the send is
   held with the run and goes when signal returns. Unlock and relock asks again until it has gone.
+- **Validation outlines.** Every field on the open tab that ESO's own validation summary names is
+  outlined, red for an error and amber for a warning, with the reason on it (hover or hold). ESO
+  is asked again after each tab load and each save, so a field clears the moment it is filled and
+  comes back if it is emptied; opening ESO's summary refreshes it too. An issue on one row of a
+  list (one treatment's provider) is left to ESO's summary, which names the row. Each person's
+  own setting, on to start, off if the outlines get in the way.
 - **Not sent list.** Agency-wide, on any device: locked runs from the last 15 days that have a fax or
   email destination and no fax in ESO's history, with Fax and Email buttons. The card's words carry
   the count; the list itself is in the opened card, folded until tapped, not a button on the card's front.

@@ -43,7 +43,7 @@
   const sget = (keys) => new Promise(res => storage.get(keys, (v) => res(v || {})));
   const sset = (obj) => new Promise(res => storage.set(obj, () => res()));
   const sremove = (keys) => new Promise(res => storage.remove(keys, () => res()));
-  const DEFAULT_SETTINGS = { purgeHoursAfterLock: 0, probeSec: 20, heldProbeSec: 8, warmTabs: true, cardCollapsed: false, showTimes: true, sendPrompt: true, unsentList: true, quickHistory: true, quickMeds: true, quickAllergies: true, quickAcuity: true, quickDelays: true, quickTransport: true, quickAssess: true, quickDisposition: true, autoResponse: true, quickIncident: true, quickMechanism: true, quickFacilities: true, quickNarrative: true, quickPatient: true, quickRefusal: true, autoMileage: true, askBeforeLock: true, cadGate: true, scanDocs: true, vitalCopySkip: [], tplLocks: [], facilitySending: [], facilityDestination: [] };
+  const DEFAULT_SETTINGS = { valHighlight: true, purgeHoursAfterLock: 0, probeSec: 20, heldProbeSec: 8, warmTabs: true, cardCollapsed: false, showTimes: true, sendPrompt: true, unsentList: true, quickHistory: true, quickMeds: true, quickAllergies: true, quickAcuity: true, quickDelays: true, quickTransport: true, quickAssess: true, quickDisposition: true, autoResponse: true, quickIncident: true, quickMechanism: true, quickFacilities: true, quickNarrative: true, quickPatient: true, quickRefusal: true, autoMileage: true, askBeforeLock: true, cadGate: true, scanDocs: true, vitalCopySkip: [], tplLocks: [], facilitySending: [], facilityDestination: [] };
   // The agency's standard facility chips (ids and names from ESO's saved facilities). Every install
   // starts with these; Settings can add or remove per device.
   const FAC = {
@@ -71,7 +71,7 @@
   // the groups a saved vital is made of, as ESO's own view lays them out; the copy can leave any out
   const VITAL_GROUPS = [['bloodPressure', 'Blood pressure'], ['pulse', 'Pulse'], ['respiration', 'Respirations'], ['etCO2SPO2CO', 'SpO2, EtCO2 and CO'], ['glucoseAndTemp', 'Glucose and temperature'],
     ['pain', 'Pain scale'], ['avpu', 'AVPU'], ['position', 'Patient side and posture'], ['glasgowComaScale', 'Glasgow Coma Scale'], ['revisedTraumaScore', 'Revised trauma score'], ['cardiacMonitoring', 'Cardiac monitoring (ECG)']];
-  const OPEN_SETTINGS = ['quickHistory', 'quickMeds', 'quickAllergies', 'quickAcuity', 'quickDelays', 'quickTransport', 'quickAssess', 'quickDisposition', 'autoResponse', 'quickIncident', 'quickMechanism', 'quickFacilities', 'quickNarrative', 'quickPatient', 'quickRefusal', 'autoMileage', 'scanDocs', 'vitalCopySkip', 'facilitySending', 'facilityDestination'];
+  const OPEN_SETTINGS = ['valHighlight', 'quickHistory', 'quickMeds', 'quickAllergies', 'quickAcuity', 'quickDelays', 'quickTransport', 'quickAssess', 'quickDisposition', 'autoResponse', 'quickIncident', 'quickMechanism', 'quickFacilities', 'quickNarrative', 'quickPatient', 'quickRefusal', 'autoMileage', 'scanDocs', 'vitalCopySkip', 'facilitySending', 'facilityDestination'];
   // The open settings follow the ESO login: one row per login in the agency's table, written when
   // the login is first seen and whenever they change something. Only these settings go there;
   // never a run, nor which runs were worked. The key is the project's public one.
@@ -492,6 +492,7 @@
         `<label class="s"><input type="checkbox" id="qpatient" ${settings.quickPatient === false ? '' : 'checked'}> Patient: Race row (every race, shortened) (Patient tab)</label>` +
         `<label class="s"><input type="checkbox" id="qrefusal" ${settings.quickRefusal === false ? '' : 'checked'}> Refusal form: chips for Legal, Decision-Making, Medical, Check All notifications and the four Patient Refusals inside ESO's Patient Refusal Form (Signatures tab)</label>` +
         `<label class="s"><input type="checkbox" id="qmileage" ${settings.autoMileage === false ? '' : 'checked'}> Loaded mileage: press ESO's Calculate Mileage once the scene and destination both have an address (Incident tab)</label>` +
+        `<label class="s"><input type="checkbox" id="valhl" ${settings.valHighlight === false ? '' : 'checked'}> Show what the validation summary wants: every field on the open tab that ESO's validation summary names is outlined, red for an error and amber for a warning, with the reason when you hover or hold on it. It is checked again after each tab load and each save, so a field clears the moment it is filled and comes back if it is emptied. Turn it off if the outlines get in your way.</label>` +
         `<label class="s"><input type="checkbox" id="qscan" ${settings.scanDocs === false ? '' : 'checked'}> Paperwork scanner: when you press Camera or Add Attachment in ESO's Attachments dialog, ESO Save first asks what the paperwork is (Facesheet, Physician Certification, Med List, Monitor Printout or Other) and names the attachment after it, for example "260918-021:Facesheet". A run keeps one Facesheet and one Physician Certification: adding a second asks whether to replace the first. On an iPad with the ESO Save app, Camera opens the app's document scanner, which straightens and crops each page; the pages come back and attach themselves. A facesheet, scanned or uploaded, is read and offered to fill the Patient and Billing pages. Off: ESO's own camera and Add Attachment work as they always have.</label>` +
         `<div class="fac"><b>Vitals copy: what the copy button carries over</b><div class="muted" style="font-size:12px;margin:2px 0 4px">Untick anything that changes every time (blood pressure, say) so the copied vital comes in without it and nobody has to erase it.</div>` +
         VITAL_GROUPS.map(([k, label]) => `<label class="s"><input type="checkbox" data-vc="${k}" ${(settings.vitalCopySkip || []).includes(k) ? '' : 'checked'}> ${esc(label)}</label>`).join('') + `</div>` +
@@ -663,6 +664,7 @@
       settings.quickRefusal = !!panel.querySelector('#qrefusal').checked;
       settings.autoMileage = !!panel.querySelector('#qmileage').checked;
       settings.scanDocs = !!panel.querySelector('#qscan').checked;
+      settings.valHighlight = !!panel.querySelector('#valhl').checked;
       settings.vitalCopySkip = Array.from(panel.querySelectorAll('[data-vc]')).filter(c => !c.checked).map(c => c.dataset.vc);
       layoutQuick();
       await sset({ settings }); toPage('settings', settings); settingsOpen = false; renderPanel(); renderTimes();

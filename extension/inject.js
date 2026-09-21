@@ -27,7 +27,7 @@
   if (ext) return;
   if (window.__esosave) return;
 
-  const VERSION = '0.15.12';
+  const VERSION = '0.15.13';
   const API_PREFIX_RE = /^\/ehr\/api\/+/i;
   const FAKE_OK_TEXT = '{"result":"Success","data":[]}';
   const PROBE_PATH = '/ehr/api/thirdpartydata/partners';
@@ -465,6 +465,7 @@
     batch.mappings = (j && Array.isArray(j.data)) ? j.data : [];
     applyMappings(run, batch.mappings);
     run.lastSavedAt = Date.now();
+    scheduleValidate(run, 1000);
   }
   function reject(run, batch, res) {
     batch.status = 'rejected'; batch.error = summarize(res); batch.rejectedAt = Date.now();
@@ -711,6 +712,7 @@
       if (/^autosave$/i.test(tail) && m === 'POST') return { type: 'autosave', recordId: id, scope: u.searchParams.get('scope') || 'unknown', path, query: u.search };
       const v = /^Views\/([^/?]+)$/i.exec(tail);
       if (v && m === 'GET') return { type: 'view', recordId: id, view: v[1], path, query: u.search };
+      if (/^Validate$/i.test(tail) && m === 'GET') return { type: 'validate', recordId: id, path, query: u.search };
       return { type: 'record', recordId: id, tail, method: m, path, query: u.search };
     }
     return { type: 'other', path };
@@ -739,6 +741,7 @@
       case 'view': return handleView(kind, req);
       case 'create': return handleCreate(kind, req);
       case 'record': return handleRecord(kind, req);
+      case 'validate': { const res = await rawRequest(req); if (outcome(res) === 'ok') { const run = S.runs[kind.recordId]; if (run) takeValidation(run, res.text); } return res; }
       default: {
         const res = await rawRequest(req);
         const o = outcome(res);
@@ -1114,6 +1117,7 @@
       S.lastView = { view: kind.view, recordId: kind.recordId, ts: Date.now() };
       noteLists(run, kind.view, j);
       emit();
+      scheduleValidate(run, 400);
       cachePut('GET', req.url, undefined, res);
       learnTab(kind.view, kind.recordId, req);
       if (!run.prefetchedAt) schedulePrefetch(run);
@@ -1339,6 +1343,87 @@
     }
     log(run, `Facesheet: filled the Patient page (${patient.length} fields) and the Billing page (${billing.length} fields)${held ? '; held until ESO answers' : ''}.`, held ? 'warn' : 'good');
     post('event', { name: 'facesheetFilled', recordId: a.recordId, ok: true, held, patient: patient.length, billing: billing.length });
+  }
+
+  // ------------------------------------------------------------------ validation highlight
+  // ESO's own validation summary (GET .../Validate) names every issue on the run: its field,
+  // its tab, the reason (Required, Out of Sequence...), an error or a warning, and the row when
+  // it is one vital's or one treatment's. With the setting on, the fields it names on the open
+  // tab are outlined, red for an error and amber for a warning, the reason in the tooltip. It
+  // is asked again after each tab load and each save, so a field that gets filled clears and
+  // one that is emptied comes back. ESO's own summary, when the medic opens it, is used too.
+  const VAL = { issues: null, recordId: null, at: 0, timer: null, busy: false, again: false, mo: null, moTimer: null };
+  const VAL_CSS = 'eso-field.esosave-val-err, eso-display-field.esosave-val-err, eso-field-v2.esosave-val-err { outline: 2px solid #dc2626 !important; outline-offset: 2px; border-radius: 6px; }'
+    + ' eso-field.esosave-val-warn, eso-display-field.esosave-val-warn, eso-field-v2.esosave-val-warn { outline: 2px solid #d97706 !important; outline-offset: 2px; border-radius: 6px; }';
+  function valStyle() {
+    if (document.getElementById('esosave-val-style')) return;
+    const st = document.createElement('style'); st.id = 'esosave-val-style'; st.textContent = VAL_CSS; (document.head || document.documentElement).appendChild(st);
+  }
+  function scheduleValidate(run, delay) {
+    if (!run || S.settings.valHighlight === false) return;
+    clearTimeout(VAL.timer); VAL.timer = setTimeout(() => validateRun(run), delay == null ? 1000 : delay);
+  }
+  async function validateRun(run) {
+    if (S.settings.valHighlight === false || !S.online || S.loggedOut || !run || run.locked || (run.tmp && !run.realId) || run.pendingCreate) return;
+    if (VAL.busy) { VAL.again = true; return; }
+    VAL.busy = true;
+    try {
+      const id = run.realId || run.recordId;
+      const res = await rawRequest({ method: 'GET', url: apiUrl(`/PatientCareRecords/${id}/Validate?lrIsLinked=false`), headers: headersFor(false), timeout: 20000 });
+      if (outcome(res) === 'ok') takeValidation(run, res.text);
+    } catch (e) { /* nothing to show */ } finally {
+      VAL.busy = false;
+      if (VAL.again) { VAL.again = false; scheduleValidate(run, 500); }
+    }
+  }
+  function takeValidation(run, text) {
+    const j = tryJSON(text);
+    const issues = j && Array.isArray(j.issues) ? j.issues : (j && j.data && Array.isArray(j.data.issues) ? j.data.issues : null);
+    if (!issues) return;
+    VAL.issues = issues; VAL.recordId = run.recordId; VAL.at = Date.now();
+    post('event', { name: 'validation', recordId: run.recordId, errors: issues.filter(i => i && i.severityId === 1).length, warnings: issues.filter(i => i && i.severityId !== 1).length });
+    applyValidation();
+  }
+  // ESO's field elements know their own field config through the model controller ESO's app
+  // hangs on them; failing that, the model path the template binds them to ends with the address
+  function fieldRefOf(el) {
+    try {
+      const ng = window.angular && typeof window.angular.element === 'function' ? window.angular.element(el).controller('ngModel') : null;
+      const cfg = ng && ng.$viewModel && typeof ng.$viewModel.fieldConfig === 'function' ? ng.$viewModel.fieldConfig() : null;
+      if (cfg && cfg.fieldRef) return { ref: String(cfg.fieldRef).toUpperCase(), address: String(cfg.address || '') };
+    } catch (e) { /* not one of ESO's fields */ }
+    const m = el.getAttribute('ng-model') || '';
+    return m ? { ref: null, address: m } : null;
+  }
+  function applyValidation() {
+    const on = S.settings.valHighlight !== false && VAL.issues && S.currentRecordId === VAL.recordId;
+    const byRef = new Map();
+    for (const i of (on ? VAL.issues : [])) {
+      if (!i || !i.fieldRef) continue;
+      const key = String(i.fieldRef).toUpperCase(), sev = i.severityId === 1 ? 'err' : 'warn';
+      const cur = byRef.get(key);
+      if (!cur || (cur.sev === 'warn' && sev === 'err')) byRef.set(key, { sev, msg: String(i.summary || i.description || ''), rows: Array.isArray(i.ids) && i.ids.length > 0, address: String(i.address || '') });
+    }
+    if (byRef.size) valStyle();
+    const els = document.querySelectorAll('eso-field, eso-display-field, eso-field-v2');
+    for (const el of els) {
+      let hit = null;
+      const f = byRef.size ? fieldRefOf(el) : null;
+      if (f && f.ref) hit = byRef.get(f.ref) || null;
+      else if (f && f.address) { for (const v of byRef.values()) { const tail = v.address.split('.').slice(1).join('.'); if (tail && f.address.endsWith('.' + tail)) { hit = v; break; } } }
+      // an issue on one row of a list (one treatment's provider) names the row, not a field on the tab
+      if (hit && hit.rows) hit = null;
+      const want = hit ? 'esosave-val-' + hit.sev : null;
+      for (const c of ['esosave-val-err', 'esosave-val-warn']) if (c !== want && el.classList.contains(c)) el.classList.remove(c);
+      if (want && !el.classList.contains(want)) el.classList.add(want);
+      if (hit) { if (el.getAttribute('data-esosave-val') !== hit.msg) { el.setAttribute('data-esosave-val', hit.msg); el.title = hit.msg; } }
+      else if (el.hasAttribute('data-esosave-val')) { el.removeAttribute('data-esosave-val'); el.removeAttribute('title'); }
+    }
+    // ESO redraws its fields as the medic moves about the tab: keep the outlines on the new elements
+    if (!VAL.mo && typeof MutationObserver === 'function' && document.body) {
+      VAL.mo = new MutationObserver(() => { if (!VAL.issues) return; clearTimeout(VAL.moTimer); VAL.moTimer = setTimeout(applyValidation, 250); });
+      VAL.mo.observe(document.body, { childList: true, subtree: true });
+    }
   }
 
   // ------------------------------------------------------------------ Templates: the fill
@@ -1662,7 +1747,7 @@
         scheduleUnsentScan(20000);
         if (anyHeld()) { log(null, 'Found changes held from before. Pushing as soon as ESO answers.', 'warn'); kick(500); }
       } else if (type === 'settings') {
-        Object.assign(S.settings, payload || {}); emit();
+        Object.assign(S.settings, payload || {}); emit(); applyValidation(); if (S.settings.valHighlight !== false && S.currentRecordId && S.runs[S.currentRecordId]) scheduleValidate(S.runs[S.currentRecordId], 200);
       } else if (type === 'action') {
         const a = payload || {};
         if (a.name === 'pushNow') { probe().then(() => kick(0)); }

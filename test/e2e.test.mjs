@@ -1733,6 +1733,38 @@ const pick = async (key, text) => {
 };
 const tplDb = () => fetch(T.base + '/__db_tpl_dump').then(r => r.json());
 
+test("validation highlight: what ESO's validation summary wants is outlined on the tab, red for an error and amber for a warning, clears once filled, comes back when emptied, and the setting turns it off", async () => {
+  const id = await freshRun();
+  const cls = (ref) => T.page.evaluate((r) => { const f = document.querySelector(`eso-field[data-field-ref="${r}"]`); return f ? { err: f.classList.contains('esosave-val-err'), warn: f.classList.contains('esosave-val-warn'), title: f.title } : null; }, ref);
+  // the incident tab: Response Mode to Scene is required, and only it
+  await waitFor(async () => { const c = await cls('PRIORITYID'); return c && c.err && c.title === 'Required'; }, { label: 'priority outlined red, the reason on it', timeout: 10000 });
+  assert.deepEqual(await cls('RUNTYPEID'), { err: false, warn: false, title: '' }, 'only what the summary names');
+  // filled: the outline goes after the save; emptied: it comes back
+  await app(() => window.app.edit('incident', 'incident.response.priorityId', 338, 'singleselect'));
+  await waitFor(async () => { const c = await cls('PRIORITYID'); return c && !c.err && !c.title; }, { label: 'outline gone once filled', timeout: 10000 });
+  await app(() => window.app.edit('incident', 'incident.response.priorityId', null, 'singleselect'));
+  await waitFor(async () => { const c = await cls('PRIORITYID'); return c && c.err; }, { label: 'back when emptied', timeout: 10000 });
+  // the narrative tab: a warning is amber
+  await app(() => window.app.openTab('Narrative'));
+  await waitFor(async () => { const c = await cls('CHIEFCOMPLAINTDURATION'); return c && c.warn && c.title === 'Recommended'; }, { label: 'duration amber', timeout: 10000 });
+  // the setting (open, each person's own) turns it off: every outline goes; on again: back
+  const q = (sel) => T.page.evaluate((s) => { const el = document.getElementById('esosave-host').shadowRoot.querySelector(s); return !!(el && el.getBoundingClientRect().height); }, sel);
+  if (!(await q('.panel [data-act=settings]'))) await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.bar').click());
+  await waitFor(() => q('.panel [data-act=settings]'), { label: 'panel open' });
+  await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('[data-act=settings]').click());
+  await waitFor(() => q('#valhl'), { label: 'settings open' });
+  assert.equal(await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('#valhl').disabled), false, 'open to everyone');
+  await T.page.evaluate(() => { const r = document.getElementById('esosave-host').shadowRoot; r.querySelector('#valhl').checked = false; r.querySelector('[data-act=save-settings]').click(); });
+  await waitFor(async () => { const c = await cls('CHIEFCOMPLAINTDURATION'); return c && !c.warn && !c.title; }, { label: 'off: no outlines', timeout: 10000 });
+  assert.equal(await T.page.evaluate(() => document.querySelectorAll('.esosave-val-err, .esosave-val-warn').length), 0);
+  await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('[data-act=settings]').click());
+  await waitFor(() => q('#valhl'), { label: 'settings open again' });
+  await T.page.evaluate(() => { const r = document.getElementById('esosave-host').shadowRoot; r.querySelector('#valhl').checked = true; r.querySelector('[data-act=save-settings]').click(); });
+  await waitFor(async () => { const c = await cls('CHIEFCOMPLAINTDURATION'); return c && c.warn; }, { label: 'on again: back', timeout: 10000 });
+  // a row's issue (a treatment with no provider) names the row, not a field on the tab: nothing else is marked
+  assert.equal(await T.page.evaluate(() => Array.from(document.querySelectorAll('.esosave-val-err')).filter(e => e.closest('#narrative')).length), 0, 'nothing red on the narrative tab (the mock keeps the other tabs in the page, hidden)');
+});
+
 test('templates: made from ESO\'s own field catalog, saved under the person\'s id, and filled into a run tab by tab with a progress bar', async () => {
   await fetch(T.base + '/__db_tpl_reset', { method: 'POST' });
   await T.control({ userName: 'TEST, MEDIC', userId: 'person-1' });

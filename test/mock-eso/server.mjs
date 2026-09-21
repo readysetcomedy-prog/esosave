@@ -524,7 +524,16 @@ export function createMockEso() {
       }
       const da = /^Attachments\/([^/]+)$/.exec(tail);
       if (da && req.method === 'DELETE') { const before = rec.attachments.length; rec.attachments = rec.attachments.filter(a => a.itemId !== da[1]); return before === rec.attachments.length ? send(404, { result: 'Failure', message: 'no such attachment' }) : send(200, { result: 'Success', data: null }); }
-      if (tail.startsWith('Validate')) return send(200, { issues: [] });
+      if (tail.startsWith('Validate')) {
+        // ESO's validation summary, as it answers: every issue with its field, tab, reason and severity (1 error, 2 warning); a row's issue names the row
+        const at = (a) => a.split('.').reduce((o, k) => (o && typeof o === 'object' ? o[k] : undefined), rec.tree);
+        const issues = [];
+        if (at('incident.response.priorityId') == null) issues.push({ ids: null, fieldRef: 'PRIORITYID', address: 'incident.response.priorityId', summary: 'Required', description: null, categoryId: 2, severityId: 1, label: null });
+        if (at('narrative.patientComplaint.chiefComplaintDuration') == null) issues.push({ ids: null, fieldRef: 'CHIEFCOMPLAINTDURATION', address: 'narrative.patientComplaint.chiefComplaintDuration', summary: 'Recommended', description: null, categoryId: 7, severityId: 2, label: null });
+        for (const t of (at('flowchartTreatments.treatments') || [])) if (t.provider == null) issues.push({ ids: [t.itemId], fieldRef: 'FLOWCHARTTREATMENTPROVIDER', address: 'flowchartTreatments.treatments.provider', summary: 'Required', description: null, categoryId: 5, severityId: 1, label: 'Provider' });
+        control.validations = (control.validations || 0) + 1;
+        return send(200, { issues, fieldConfigs: [], severities: [{ itemId: 1, itemName: 'Error' }, { itemId: 2, itemName: 'Warning' }], categories: [] });
+      }
       if (/^lock$/i.test(tail) && req.method === 'POST') { rec.state = 'locked'; rec.locked = true; return send(200, { result: 'Success', data: null }); }
       if (/^unlock$/i.test(tail) && req.method === 'POST') { rec.state = 'draft'; rec.locked = false; return send(200, { result: 'Success', data: null }); }
       // fax / email, exactly as ESO answers
