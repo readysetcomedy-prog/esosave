@@ -48,8 +48,7 @@ test('online saves are recorded and acknowledged, with server key remapping', as
   assert.equal(rec.tree.incident.scene.manualAddress.locationName, 'Main St');
   assert.equal(rec.tree.vitals.vitalSigns[0].pulse, 88);
   assert.equal((await app(() => window.app.errors)).length, 0);
-  const stored = await T.storage();
-  assert.ok(stored['run:' + id], 'run persisted to extension storage');
+  const stored = await waitFor(async () => { const st = await T.storage(); return st['run:' + id] ? st : null; }, { label: 'run persisted to extension storage' });
   assert.ok(stored.templates && stored.templates.views.Incident, 'blank-run template captured');
 });
 
@@ -201,7 +200,8 @@ test('restore: push a whole recorded run into a brand-new run, crew and item key
   await app((i) => window.postMessage({ __esosave: 'to-page', type: 'action', payload: { name: 'pushIntoNew', recordId: i } }, location.origin), srcId);
   const list = await waitFor(async () => { const l = await T.records(); return l.length > beforeCount ? l : null; }, { label: 'new run created' });
   const newId = list[list.length - 1].id;
-  await waitFor(async () => { const s = await T.status(); const r = s.runs.find(x => x.recordId === newId); return r && r.counts.held === 0 && !s.pushing; }, { label: 'restore pushed', timeout: 30000 });
+  // the new run exists before its batches are queued (the crew is mapped first): wait for them to be there and gone through
+  await waitFor(async () => { const s = await T.status(); const r = s.runs.find(x => x.recordId === newId); return r && r.counts.total > 0 && r.counts.held === 0 && !s.pushing; }, { label: 'restore pushed', timeout: 30000 });
   const dst = await T.record(newId);
   const held = (await T.run(newId)).batches.filter(b => b.status === 'rejected');
   assert.equal(held.length, 0, 'no rejected batches on restore: ' + JSON.stringify(held.map(b => b.error)));
@@ -541,7 +541,7 @@ test('the Not sent list is agency-wide: locked runs from other devices with a de
   assert.ok(!s.unsent.items.some(i => i.pcrId === nowhere), 'run with no destination not listed');
   const item = s.unsent.items.find(i => i.pcrId === unsent);
   assert.equal(item.destinationName, 'Gateway Regional Med Center'); assert.equal(item.fax, true); assert.equal(item.email, true);
-  assert.match(await sh('.run.unsent'), /Not sent yet \(1\)/, 'folded, with the count');
+  await waitFor(async () => /Not sent yet \(1\)/.test((await sh('.run.unsent')) || ''), { label: 'folded, with the count' });
   await shClick('.unsent [data-act=unsent-toggle]');
   const text = await waitFor(async () => { const t = await sh('.run.unsent'); return t && /Gateway/.test(t) ? t : null; }, { label: 'unfolded' });
   assert.match(text, /Gateway Regional Med Center/);
@@ -872,6 +872,33 @@ test('choosing a response mode fills the follow-on fields that are empty and set
   await sleep(1500);
   const r3 = (await T.record(id3)).tree.incident.response;
   assert.equal(r3.responseModeLightsAndSirensUseId, undefined, 'lights & sirens left for the crew on a downgraded response');
+});
+
+test("Location Type and Destination Type rows: Nursing Home and Other under the type field on the Address side and the Predefined side; only what ESO's own quick-picks lack; one tap picks it", async () => {
+  const id = await freshRun();
+  await app(() => window.app.openTab('Incident'));
+  const row = (g) => T.page.evaluate((gg) => Array.from(window.__qa(`.quick [data-group=${gg}]`)).map(b => ({ text: b.textContent, cls: b.className, left: b.getBoundingClientRect().left })).sort((a, b) => a.left - b.left), g);
+  const tap = async (g, text) => { await waitFor(async () => (await row(g)).some(b => b.text === text && !/busy/.test(b.cls)), { label: text }); await T.page.evaluate(([gg, t]) => Array.from(window.__qa(`.quick [data-group=${gg}]`)).find(b => b.textContent === t).click(), [g, text]); };
+  const tree = async () => (await T.record(id)).tree.incident || {};
+  // the scene starts on the Address side: its type field shows no ESO quick-picks, so both chips; the Predefined side's row is not drawn (hidden)
+  await waitFor(async () => (await row('sr-scenetypeman')).map(b => b.text).join() === 'Nursing Home,Other Place', { label: 'scene address-side row' });
+  assert.equal((await row('sr-scenetype')).length, 0, 'the hidden Predefined field gets no row');
+  await tap('sr-scenetypeman', 'Nursing Home');
+  await waitFor(async () => (await tree()).scene?.manualAddress?.locationTypeID === 6542, { label: 'Nursing home on the manual address', timeout: 15000 });
+  await waitFor(async () => (await row('sr-scenetypeman')).some(b => b.text === 'Nursing Home' && /added/.test(b.cls)), { label: 'chip marked' });
+  // the Predefined side: same two chips under its own type field
+  await app(() => document.querySelector('eso-location[data-scope=scene] [data-mode=predefined]').click());
+  await waitFor(async () => (await row('sr-scenetype')).map(b => b.text).join() === 'Nursing Home,Other Place' && (await row('sr-scenetypeman')).length === 0, { label: 'scene predefined-side row' });
+  await tap('sr-scenetype', 'Other Place');
+  await waitFor(async () => (await tree()).scene?.predefinedAddress?.locationTypeID === 6556, { label: 'Other Specified Place on the predefined address', timeout: 15000 });
+  // the destination: ESO's own quick-picks show Hospital and Nursing Home, so only Other (Not Listed) is drawn
+  await waitFor(async () => (await row('sr-desttype')).map(b => b.text).join() === 'Other (Not Listed)', { label: 'destination row carries only what ESO lacks' });
+  await tap('sr-desttype', 'Other (Not Listed)');
+  await waitFor(async () => (await tree()).destination?.predefinedAddress?.locationTypeID === 6588, { label: 'Other (Not Listed) on the destination', timeout: 15000 });
+  // once set, ESO's quick-picks go away (as ESO does), so the row now offers Nursing Home too, one tap even though the field is set
+  await waitFor(async () => (await row('sr-desttype')).map(b => b.text).join() === 'Nursing Home,Other (Not Listed)', { label: 'both chips once ESO hides its quick-picks' });
+  await tap('sr-desttype', 'Nursing Home');
+  await waitFor(async () => (await tree()).destination?.predefinedAddress?.locationTypeID === 6577, { label: 'Nursing Home on the destination', timeout: 15000 });
 });
 
 test('Run Type, Mutual Aid, EMD Complaint and Requested By rows; Mutual Aid only once the run type is mutual aid', async () => {
@@ -1542,7 +1569,8 @@ test('paperwork on an iPad: Camera hops to the ESO Save scanner and the pages co
   await fetch(T.base + '/__native_seed', { method: 'POST', body: JSON.stringify({ scans: [{ id: 'scan-2', type: 'Facesheet', record: id, incident: inc, pages: [jpeg], at: Date.now() }] }) });
   await waitFor(async () => (await list()).some(a => a.description === `${inc}:Facesheet`), { label: 'facesheet attached', timeout: 20000 });
   const fs1 = (await list()).find(a => a.description === `${inc}:Facesheet`).itemId;
-  await waitFor(async () => ((await T.status()).runs.find(r => r.recordId === id) || {}).attachments?.length === 3, { label: 'extension knows three' });
+  await waitFor(async () => { const r = (await T.status()).runs.find(x => x.recordId === id) || {}; return (r.attachments || []).some(a => a.description === `${inc}:Facesheet`); }, { label: 'extension knows the facesheet' });
+  await waitFor(async () => !(await box()), { label: 'no question left over' });
   await app(() => document.querySelector('eso-modal-dialog .camera').click());
   await waitFor(async () => /What is this paperwork/.test((await box()) || ''), { label: 'asked' }); await choose('Facesheet');
   await waitFor(async () => /already attached/.test((await box()) || ''), { label: 'replace question' }); await choose('Replace it');

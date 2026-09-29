@@ -66,7 +66,10 @@ to bad signal or a hung page.
   Transport Mode or Reason for Refusal in red until answered; choosing Emergent or Non-Emergent for
   the response or transport mode fills the lights/sirens, intersection, scheduled, speed and method
   fields still empty and sets EMD Performed to No. Rows for Run Type, Mutual Aid, EMD Complaint
-  and Requested By sit under their labels; Mechanism of Injury chips on the Narrative tab. Every
+  and Requested By sit under their labels; Nursing Home and Other sit under the Location Type
+  (Scene) and Destination Type (Destination) fields on both the Predefined and the Address side,
+  and a chip ESO's own quick-picks already show for that field is left out, so the row only ever
+  adds what ESO lacks; Mechanism of Injury chips on the Narrative tab. Every
   row sits under the label of the field it fills, and carries only what ESO's own quick-picks do
   not already offer (where ESO shows its own buttons and Other, the row has no Other… of its own).
   Mutual Aid stays hidden until the run type is mutual aid, as in ESO. Also on the Narrative tab: the ten

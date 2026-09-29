@@ -371,15 +371,25 @@
       loc.querySelector('.manual').style.display = b.dataset.mode === 'manual' ? '' : 'none';
     }));
     const typeField = loc.querySelector('[data-kind=type]'), nameField = loc.querySelector('[data-kind=name]');
+    const typeList = async () => { const b = await loadBundle(); return scope === 'scene' ? b.lists['SL.LOCATIONTYPE'].values : b.lists['SL.DESTINATIONTYPE'].values; };
+    const pickType = (it) => {
+      app.locations[scope].type = it;
+      app.edit('incident', `incident.${scope}.predefinedAddress.locationTypeID`, it.itemId, 'singleselect');
+      typeField.querySelector('.display-value').textContent = it.itemName; nameField.removeAttribute('disabled');
+      const qp = typeField.querySelector('.quick-picks'); if (qp) qp.style.display = 'none'; // as ESO: quick-picks only while empty
+      app.locations[scope].name = null; nameField.querySelector('.display-value').textContent = '';
+    };
     typeField.querySelector('.shelf-click-indicator').addEventListener('click', async () => {
-      const b = await loadBundle();
-      const list = scope === 'scene' ? b.lists['SL.LOCATIONTYPE'].values : b.lists['SL.DESTINATIONTYPE'].values;
-      openShelf({ title: typeField.querySelector('label').textContent, items: list.map(i => [i.itemId, i.itemName]), multi: false, checked: [], onPick: (id) => {
-        const it = list.find(i => i.itemId === id); app.locations[scope].type = it;
-        app.edit('incident', `incident.${scope}.predefinedAddress.locationTypeID`, id, 'singleselect');
-        typeField.querySelector('.display-value').textContent = it.itemName; nameField.removeAttribute('disabled');
-        app.locations[scope].name = null; nameField.querySelector('.display-value').textContent = '';
-      } });
+      const list = await typeList();
+      openShelf({ title: typeField.querySelector('label').textContent, items: list.map(i => [i.itemId, i.itemName]), multi: false, checked: [], onPick: (id) => pickType(list.find(i => i.itemId === id)) });
+    });
+    typeField.querySelectorAll('.quick-picks button[data-id]').forEach(b => b.addEventListener('click', async () => { const list = await typeList(); pickType(list.find(i => i.itemId === Number(b.dataset.id))); }));
+    const typeOther = typeField.querySelector('.quick-picks button.other'); if (typeOther) typeOther.addEventListener('click', () => typeField.querySelector('.shelf-click-indicator').click());
+    // the Address side's own type field (the scene has one in the mock): its list, written on the manual address
+    const manualType = loc.querySelector('.manual eso-field');
+    if (manualType) manualType.querySelector('.shelf-click-indicator').addEventListener('click', async () => {
+      const list = await typeList();
+      openShelf({ title: 'Location Type', items: list.map(i => [i.itemId, i.itemName]), multi: false, checked: [], onPick: (id) => { const it = list.find(i => i.itemId === id); app.edit('incident', `incident.${scope}.manualAddress.locationTypeID`, id, 'singleselect'); manualType.querySelector('.display-value').textContent = it.itemName; } });
     });
     nameField.querySelector('.shelf-click-indicator').addEventListener('click', async () => {
       if (nameField.hasAttribute('disabled')) return;

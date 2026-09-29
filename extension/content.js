@@ -483,7 +483,7 @@
         `<label class="s"><input type="checkbox" id="qacuity" ${settings.quickAcuity === false ? '' : 'checked'}> Acuity: red, yellow and green buttons next to Initial and Final Patient Acuity (Narrative tab)</label>` +
         `<label class="s"><input type="checkbox" id="qtransport" ${settings.quickTransport === false ? '' : 'checked'}> Transport: chips for how the patient was moved and positioned (Narrative tab)</label>` +
         `<label class="s"><input type="checkbox" id="qfacilities" ${settings.quickFacilities === false ? '' : 'checked'}> Facilities: chips for saved facilities above the Scene and Destination locations (Incident tab)</label>` +
-        `<label class="s"><input type="checkbox" id="qincident" ${settings.quickIncident === false ? '' : 'checked'}> Incident: Run Type, Mutual Aid, EMD Complaint and Requested By rows under their labels (only what ESO's own quick-picks lack)</label>` +
+        `<label class="s"><input type="checkbox" id="qincident" ${settings.quickIncident === false ? '' : 'checked'}> Incident: Run Type, Mutual Aid, EMD Complaint and Requested By rows under their labels, and Nursing Home / Other under the Scene and Destination types (only what ESO's own quick-picks lack)</label>` +
         `<label class="s"><input type="checkbox" id="qmechanism" ${settings.quickMechanism === false ? '' : 'checked'}> Mechanism of injury: Blunt, Burn, Penetrating, Other chips (Narrative tab)</label>` +
         `<label class="s"><input type="checkbox" id="qdisposition" ${settings.quickDisposition === false ? '' : 'checked'}> Disposition: Transported ALS/BLS, Refusal, Canceled (Prior/Scene) buttons under Unit Disposition; Transport Mode and Reason for Refusal outlined in red until answered (Incident tab)</label>` +
         `<label class="s"><input type="checkbox" id="qautoresp" ${settings.autoResponse === false ? '' : 'checked'}> Auto-fill: choosing Emergent or Non-Emergent (response or transport mode) fills the lights/sirens, intersection, scheduled, speed and method fields that are still empty, and sets EMD Performed to No</label>` +
@@ -1856,6 +1856,13 @@
     mutual: { setting: 'quickIncident', ref: 'MUTUALAIDID', what: 'Mutual Aid', noOther: true, items: [['Given', 'Mutual Aid Given'], ['Received', 'Mutual Aid Received'], ['No Unit Available', 'No Unit Available']] },
     emd: { setting: 'quickIncident', ref: 'EMDCOMPLAINTID', what: 'EMD Complaint', noOther: true, items: [['Abd Pain', 'Abdominal Pain/Problems'], ['AMS', 'Altered Mental Status'], ['Allergic', 'Allergic Reaction/Stings'], ['Assault', 'Assault'], ['Chest Pain', 'Chest Pain (Non-Traumatic)'], ['Cardiac Arrest', 'Cardiac Arrest/Death'], ['Diabetic', 'Diabetic Problem'], ['Falls', 'Falls'], ['Hemorrhage/Lac', 'Hemorrhage/Laceration'], ['Medical Alarm', 'Medical Alarm'], ['Overdose', 'Overdose/Poisoning/Ingestion'], ['Pregnancy', 'Pregnancy/Childbirth'], ['Psych', 'Psychiatric Problem/Abnormal Behavior/Suicide Attempt'], ['Seizure', 'Convulsions/Seizure'], ['Stroke', 'Stroke/CVA']] },
     reqby: { setting: 'quickIncident', ref: 'REQUESTEDBYITEMID', what: 'Requested By', noOther: true, items: [['Physician', 'Physician'], ['Law Enforcement', 'Law Enforcement'], ['Fire Dept', 'Fire Department'], ['Other Healthcare', 'Other Healthcare Provider']] },
+    // Location Type under Scene and Destination Type under Destination, whichever address mode
+    // is showing. ESO's own quick-picks are agency-configured, so `hideShown` leaves out any chip
+    // ESO is already showing for the field (a chip only appears where ESO's row lacks it).
+    scenetype: { setting: 'quickIncident', ref: 'DISPATCHPREDEFINEDLOCATIONTYPEID', what: 'Location Type', noOther: true, hideShown: true, items: [['Nursing Home', 'Nursing home', 'Nursing home'], ['Other Place', 'Other Specified Place', 'Other Specified Place']] },
+    scenetypeman: { setting: 'quickIncident', ref: 'DISPATCHMANUALLOCATIONTYPEID', what: 'Location Type', noOther: true, hideShown: true, items: [['Nursing Home', 'Nursing home', 'Nursing home'], ['Other Place', 'Other Specified Place', 'Other Specified Place']] },
+    desttype: { setting: 'quickIncident', ref: 'DESTINATIONPREDEFINEDLOCATIONTYPEID', what: 'Destination Type', noOther: true, hideShown: true, items: [['Nursing Home', 'Nursing Home', 'Nursing Home'], ['Other (Not Listed)', 'Other (Not Listed)', 'Other (Not Listed)']] },
+    desttypeman: { setting: 'quickIncident', ref: 'DESTINATIONMANUALLOCATIONTYPEID', what: 'Destination Type', noOther: true, hideShown: true, items: [['Nursing Home', 'Nursing Home', 'Nursing Home'], ['Other (Not Listed)', 'Other (Not Listed)', 'Other (Not Listed)']] },
     // Narrative tab. The ten impressions a rural service sees most; the secondary list carries the
     // same names.
     primary: { setting: 'quickNarrative', tab: 'Narrative', ref: 'PRIMARYIMPRESSIONID', what: 'Primary Impression', items: IMPRESSIONS },
@@ -1876,7 +1883,11 @@
       const r = f.getBoundingClientRect();
       if (!r.width) { dropQuick(`sr:${rk}:`); continue; }
       const cur = shownParts(row.ref);
-      const entries = [...row.items.map((it, i) => [String(i), ...it]), ...(row.noOther ? [] : [['other', 'Other…', null, null]])];
+      const esoShows = row.hideShown ? new Set(Array.from(f.querySelectorAll('.quick-picks button')).filter(visible).map(b => norm(b.textContent).toUpperCase())) : null;
+      const items = row.items.map((it, i) => [String(i), ...it]).filter(([, , full, quick]) => !esoShows || !(esoShows.has(String(full).toUpperCase()) || (quick && esoShows.has(String(quick).toUpperCase()))));
+      for (const [k] of row.items.map((it, i) => [String(i)])) if (!items.some(x => x[0] === k)) dropQuick(`sr:${rk}:${k}`);
+      if (!items.length) { dropQuick(`sr:${rk}:`); continue; }
+      const entries = [...items, ...(row.noOther ? [] : [['other', 'Other…', null, null]])];
       // measure, wrap within the field width, then place the rows above the field
       const els = entries.map(([k, text, full, quick]) => {
         const b = quickEl(`sr:${rk}:${k}`, () => {
