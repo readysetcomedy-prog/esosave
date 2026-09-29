@@ -2422,8 +2422,8 @@
   async function startScan(run, type, label, replace, pages) {
     pendingScan = { recordId: run.recordId, label, type, replace, at: Date.now(), back: location.href };
     await sset({ pendingScan });
-    // the page to come back to: the app's Attach button opens it in Safari (a fresh tab; the
-    // extension in that tab then closes this one)
+    // the page to come back to. iOS's own "◀ Safari" link returns to this very tab; should the
+    // run ever be opened in a second tab instead, the extension there closes this one
     const url = `esosave://scan?type=${encodeURIComponent(type)}&record=${encodeURIComponent(run.recordId)}&incident=${encodeURIComponent(run.incidentNumber || '')}&pages=${pages}&back=${encodeURIComponent(location.href)}`;
     if (ON_ESO) location.href = url; else nativeCall({ type: 'open', url });
     watchScans();
@@ -2468,7 +2468,7 @@
     const st = await sget('pendingScan');
     if (!st.pendingScan || Date.now() - st.pendingScan.at > 30 * 60 * 1000) return;
     pendingScan = st.pendingScan;
-    // this is the tab the app's Attach button opened: the one the scan left from goes
+    // back on the page the scan left from: any second tab on the same page goes, so tabs do not pile up
     if (pendingScan.back && pendingScan.back === location.href && ON_ESO) { try { api.runtime.sendMessage({ type: 'closeTwins', url: location.href }, () => { void api.runtime.lastError; }); } catch (e) { /* ignore */ } }
     watchScans();
   })();

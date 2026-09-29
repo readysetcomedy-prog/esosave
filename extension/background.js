@@ -18,8 +18,8 @@ api.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   } catch (e) { done({ native: false, error: String(e && e.message || e) }); }
   return true;
 });
-// The ESO Save app's Attach button opens the ESO page in a fresh Safari tab; the tab the scan
-// left from (same page) is closed so tabs do not pile up.
+// After a scan, iOS's own "◀ Safari" link returns to the tab the scan left from; should the run
+// ever come back in a second tab on the same page, the other one is closed so tabs do not pile up.
 api.runtime.onMessage.addListener((msg, sender) => {
   if (!msg || msg.type !== 'closeTwins' || !msg.url || !sender || !sender.tab || !api.tabs) return;
   const same = (a, b) => String(a || '').replace(/\/+$/, '') === String(b || '').replace(/\/+$/, '');

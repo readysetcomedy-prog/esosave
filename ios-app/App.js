@@ -79,15 +79,17 @@ export default function App() {
     return () => sub.remove();
   }, []);
 
-  // Back to ESO: the page the scan left from opens in Safari (a fresh tab; the extension closes
-  // the old one). iOS offers an app no way to jump back to the tab itself. A plain web link
-  // would open in whatever browser the iPad has as its default (Chrome, on ours), where the
-  // extension is not; the x-safari- form asks for Safari by name. Should iOS ever refuse it,
-  // the plain link is the fallback.
-  const backToEso = () => {
-    const url = scan && scan.back ? scan.back : 'https://www.esosuite.net/ehr/';
-    Linking.openURL(url.replace(/^https:\/\//i, 'x-safari-https://')).catch(() => Linking.openURL(url).catch(() => {}));
-  };
+  // Back to ESO: iOS puts a small "◀ Safari" link in the top-left corner of the screen whenever
+  // this app was opened from Safari, and that link returns to the very tab the scan left from.
+  // Opening the run's address ourselves went to whatever browser the iPad calls its default, so
+  // the screen points the crew at that corner instead; the pages attach themselves once Safari
+  // is back.
+  const Corner = ({ children }) => (
+    <View style={styles.corner} pointerEvents="none">
+      <Text style={styles.cornerArrow}>⬉</Text>
+      <Text style={styles.cornerText}>{children}</Text>
+    </View>
+  );
   if (scan) {
     return (
       <View style={styles.scanPage}>
@@ -97,24 +99,27 @@ export default function App() {
         {state === 'scanning' && <Text style={styles.scanLead}>Scanning {scan.type}{scan.incident ? ` for ${scan.incident}` : ''}…</Text>}
         {state === 'done' && (
           <>
+            <Corner>Tap ◀ Safari up here to go back to ESO</Corner>
             <Text style={styles.scanLead}>{count === 1 ? 'One page' : `${count} pages`} scanned as {scan.incident ? scan.incident + ':' : ''}{scan.type}</Text>
-            <Pressable style={styles.bigBtn} onPress={backToEso}><Text style={styles.bigBtnText}>Attach to ESO</Text></Pressable>
-            <Text style={styles.scanHint}>Opens the run in Safari; the {count === 1 ? 'page attaches itself' : 'pages attach themselves'}.</Text>
+            <Text style={styles.scanBig}>Tap ◀ Safari in the top-left corner</Text>
+            <Text style={styles.scanHint}>That takes you back to the run, and the {count === 1 ? 'page attaches itself' : 'pages attach themselves'}.</Text>
             <Pressable style={styles.linkBtn} onPress={() => runScanner(scan)}><Text style={styles.linkText}>Scan it again instead</Text></Pressable>
           </>
         )}
         {state === 'cancelled' && (
           <>
+            <Corner>◀ Safari goes back to ESO</Corner>
             <Text style={styles.scanLead}>Nothing was scanned.</Text>
             <Pressable style={styles.bigBtn} onPress={() => runScanner(scan)}><Text style={styles.bigBtnText}>Scan</Text></Pressable>
-            <Pressable style={styles.linkBtn} onPress={backToEso}><Text style={styles.linkText}>Back to ESO without scanning</Text></Pressable>
+            <Text style={styles.scanHint}>Or tap ◀ Safari in the top-left corner to go back without scanning.</Text>
           </>
         )}
         {state === 'error' && (
           <>
+            <Corner>◀ Safari goes back to ESO</Corner>
             <Text style={styles.scanLead}>The scanner could not run: {error}</Text>
             <Pressable style={styles.bigBtn} onPress={() => runScanner(scan)}><Text style={styles.bigBtnText}>Try again</Text></Pressable>
-            <Pressable style={styles.linkBtn} onPress={backToEso}><Text style={styles.linkText}>Back to ESO</Text></Pressable>
+            <Text style={styles.scanHint}>Or tap ◀ Safari in the top-left corner to go back to ESO.</Text>
           </>
         )}
       </View>
@@ -152,7 +157,12 @@ const styles = StyleSheet.create({
   scanLead: { fontSize: 20, color: '#fff', textAlign: 'center', marginBottom: 26, lineHeight: 28 },
   bigBtn: { backgroundColor: '#fff', borderRadius: 16, paddingVertical: 22, paddingHorizontal: 48, minWidth: 320, alignItems: 'center' },
   bigBtnText: { color: '#15803d', fontWeight: '800', fontSize: 26 },
-  scanHint: { fontSize: 15, color: '#d1fae5', textAlign: 'center', marginTop: 14 },
+  scanBig: { fontSize: 30, fontWeight: '800', color: '#fff', textAlign: 'center', lineHeight: 38 },
+  scanHint: { fontSize: 17, color: '#d1fae5', textAlign: 'center', marginTop: 14, lineHeight: 24 },
+  // the callout that sits just under iOS's own "◀ Safari" link in the top-left corner
+  corner: { position: 'absolute', top: 52, left: 16, flexDirection: 'row', alignItems: 'flex-start', maxWidth: 360 },
+  cornerArrow: { fontSize: 44, color: '#fde047', lineHeight: 48, marginRight: 8 },
+  cornerText: { fontSize: 20, fontWeight: '700', color: '#fde047', lineHeight: 26, marginTop: 8, flexShrink: 1 },
   linkBtn: { marginTop: 28, padding: 10 },
   linkText: { color: '#fff', fontSize: 16, textDecorationLine: 'underline' },
   container: { padding: 24, paddingTop: 72, backgroundColor: '#15803d', minHeight: '100%' },
