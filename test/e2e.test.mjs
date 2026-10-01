@@ -758,7 +758,7 @@ test('assessment: "All normal" presses No Abnormalities on every category in ESO
   const rec0 = await waitFor(async () => { const r = await T.record(id); const a = r.tree.assessments?.assessmentsV2?.[0]; return a && (a.findings || []).length === 26 ? r : null; }, { label: 'assessment with 26 Not Assessed findings', timeout: 15000 });
   assert.ok(rec0.tree.assessments.assessmentsV2[0].findings.every(f => f.findingId === 'Not_Assessed'));
   const btns = () => T.page.evaluate(() => Array.from(window.__qa('.quick [data-group^=assess-]')).map(b => ({ g: b.dataset.group, text: b.textContent, cls: b.className, rect: b.getBoundingClientRect().toJSON() })));
-  await waitFor(async () => (await btns()).length === 2, { label: 'All normal and A&Ox4 buttons' });
+  await waitFor(async () => (await btns()).length === 3, { label: 'All normal, A&Ox4 and Copy buttons' });
   const edit = await T.page.evaluate(() => document.querySelector('assessment-record .ax-edit-buttons').getBoundingClientRect().toJSON());
   const all = (await btns()).find(b => b.g === 'assess-all');
   assert.ok(all.rect.right < edit.left && Math.abs(all.rect.top + all.rect.height / 2 - (edit.top + edit.height / 2)) < 10, 'sits just left of ESO\'s edit buttons on the record header');
@@ -770,19 +770,32 @@ test('assessment: "All normal" presses No Abnormalities on every category in ESO
   assert.equal(dels, 26, 'each Not Assessed finding was removed the way ESO does it');
   await waitFor(async () => /done/.test((await btns()).find(b => b.g === 'assess-all').cls), { label: 'All normal shows done' });
   // A&Ox4
-  await waitFor(async () => { const b = await btns(); return b.length === 2 && !b.some(x => /busy/.test(x.cls)); }, { label: 'free' });
+  await waitFor(async () => { const b = await btns(); return b.length === 3 && !b.some(x => /busy/.test(x.cls)); }, { label: 'free' });
   await T.page.evaluate(() => window.__q('.quick [data-group=assess-ao]').click());
   await waitFor(async () => { const a = (await T.record(id)).tree.assessments.assessmentsV2[0]; return ['Oriented_Person', 'Oriented_Place', 'Oriented_Time', 'Oriented_Event'].every(x => a.findings.some(f => f.findingId === x && f.findingLocationId === 'MentalStatus')); }, { label: 'oriented x4 saved', timeout: 15000 });
   assert.equal(await app(() => window.app.mentalOpens), 1);
   await waitFor(async () => (await app(() => document.querySelectorAll('shelf-panel').length)) === 0, { label: 'Mental Status closed with OK' });
   // a second press of All normal on an already-normal record presses nothing and still closes cleanly
-  await waitFor(async () => { const b = await btns(); return b.length === 2 && !b.some(x => /busy/.test(x.cls)); }, { label: 'free again' });
+  await waitFor(async () => { const b = await btns(); return b.length === 3 && !b.some(x => /busy/.test(x.cls)); }, { label: 'free again' });
   const before = (await T.record(id)).ops.length;
   await T.page.evaluate(() => window.__q('.quick [data-group=assess-all]').click());
   await waitFor(async () => (await app(() => window.app.quickAxOpens)) === 2, { label: 'opened again' });
   await waitFor(async () => (await app(() => document.querySelectorAll('shelf-panel').length)) === 0, { label: 'closed again' });
   await sleep(800);
   assert.equal((await T.record(id)).ops.length, before, 'nothing re-saved');
+  // Copy: the assessment entered again as a new one with the current time, every finding the same (the orientation and the No Abnormalities), with a comment carried too
+  await app(() => { const a = window.app.assessments[0]; window.app.edit('assessments', `assessments.assessmentsV2.['${a.key}'].abdomenSection.comments`, 'Soft, non-tender'); });
+  await waitFor(async () => (await T.record(id)).tree.assessments.assessmentsV2[0].abdomenSection?.comments === 'Soft, non-tender', { label: 'comment saved' });
+  await waitFor(async () => { const b = await btns(); return b.length === 3 && !b.some(x => /busy/.test(x.cls)); }, { label: 'free before copy' });
+  await T.page.evaluate(() => window.__q('.quick [data-group=assess-copy]').click());
+  const two = await waitFor(async () => { const r = await T.record(id); const l = r.tree.assessments?.assessmentsV2 || []; return l.length === 2 ? r : null; }, { label: 'a second assessment', timeout: 20000 });
+  const [a0, a1] = two.tree.assessments.assessmentsV2;
+  const sig = (a) => (a.findings || []).map(f => `${f.findingLocationId}:${f.findingId}:${f.present !== false}`).sort();
+  assert.deepEqual(sig(a1), sig(a0), 'every finding the same');
+  assert.equal(a1.abdomenSection.comments, 'Soft, non-tender', 'the comment too');
+  assert.notEqual(a1.assessmentTime, a0.assessmentTime, 'a new time');
+  await waitFor(async () => (await app(() => document.querySelectorAll('assessment-record').length)) === 2, { label: 'the tab was re-read and shows both', timeout: 15000 });
+  await waitFor(async () => (await btns()).length === 6, { label: 'buttons on both records' });
 });
 
 test('disposition buttons set the whole set through ESO\'s pickers and quick-picks; red outline until Transport Mode or the refusal reason is answered', async () => {
@@ -955,6 +968,35 @@ test('mechanism of injury: all four as chips, more than one allowed', async () =
   await waitFor(async () => ((await T.record(id)).tree.narrative?.injuries?.mechanismOfInjuryIds || []).length === 2, { label: 'both saved', timeout: 15000 });
   assert.deepEqual((await T.record(id)).tree.narrative.injuries.mechanismOfInjuryIds.map(Number).sort(), [7117, 7120]);
   await waitFor(async () => (await chips()).filter(c => /added/.test(c.cls)).length === 2, { label: 'both shown as set' });
+});
+
+test('Narrative: Barriers to Care and Alcohol/Drugs chips (only what ESO lacks), and Same as LKWT sets Onset Time to the Last Known Well time', async () => {
+  const id = await freshRun();
+  await app(() => window.app.edit('narrative', 'narrative.patientComplaint.complaintLastKnownWell', '09/18/2026 08:15:00', 'datetime'));
+  await waitFor(async () => (await T.record(id)).tree.narrative?.patientComplaint?.complaintLastKnownWell === '09/18/2026 08:15:00', { label: 'LKW saved' });
+  await app(() => window.app.openTab('Narrative'));
+  const row = (g) => T.page.evaluate((gg) => Array.from(window.__qa(`.quick [data-group=${gg}]`)).map(b => ({ text: b.textContent, cls: b.className, left: b.getBoundingClientRect().left })).sort((a, b) => a.left - b.left), g);
+  const tap = async (g, text) => { await waitFor(async () => (await row(g)).some(b => b.text === text && !/busy/.test(b.cls)), { label: text }); await T.page.evaluate(([gg, t]) => Array.from(window.__qa(`.quick [data-group=${gg}]`)).find(b => b.textContent === t).click(), [g, text]); };
+  const nar = async () => (await T.record(id)).tree.narrative || {};
+  // Barriers: ESO's own quick-picks are Unconscious and None Noted, so all five chips show; Alcohol/Drugs: ESO shows Admits Alcohol and Admits Drug itself, so only Smell of Alcohol
+  await waitFor(async () => (await row('sr-barriers')).map(b => b.text).join() === 'Alcohol Suspected,Drug Suspected,Obesity,Language,Psych Impaired', { label: 'barriers row' });
+  await waitFor(async () => (await row('sr-alcohol')).map(b => b.text).join() === 'Smell of Alcohol', { label: 'alcohol row carries only what ESO lacks' });
+  await tap('sr-barriers', 'Obesity');
+  await waitFor(async () => ((await nar()).otherFactors?.barriersToCareIds || []).map(Number).includes(9370), { label: 'Obesity on the run', timeout: 15000 });
+  await tap('sr-alcohol', 'Smell of Alcohol');
+  await waitFor(async () => ((await nar()).otherFactors?.alcoholDrugUsageIds || []).map(Number).includes(703), { label: 'Smell of Alcohol on the run', timeout: 15000 });
+  // once set, ESO's quick-picks go away and the row offers Admits Alcohol and Admits Drug as well
+  await waitFor(async () => (await row('sr-alcohol')).map(b => b.text).join() === 'Smell of Alcohol,Admits Alcohol,Admits Drug', { label: 'full alcohol row once ESO hides its quick-picks' });
+  // Same as LKWT sits above Onset Time; one tap writes the Last Known Well time into Onset Time, as ESO holds it
+  const lkwBtn = () => T.page.evaluate(() => { const b = window.__q('.quick [data-group=lkw]'); const f = document.querySelector('eso-field[data-field-ref="COMPLAINTONSETTIME"]'); return b && f ? { text: b.textContent, cls: b.className, rect: b.getBoundingClientRect().toJSON(), field: f.getBoundingClientRect().toJSON() } : null; });
+  const lb = await waitFor(lkwBtn, { label: 'Same as LKWT button' });
+  assert.equal(lb.text, 'Same as LKWT');
+  assert.ok(lb.rect.bottom <= lb.field.top + 2 && lb.rect.right <= lb.field.right + 2, 'sits just above the Onset Time field, right-aligned');
+  await T.page.evaluate(() => window.__q('.quick [data-group=lkw]').click());
+  await waitFor(async () => (await nar()).patientComplaint?.complaintOnsetTime === '09/18/2026 08:15:00', { label: 'onset time = LKW', timeout: 15000 });
+  const op = (await T.record(id)).ops.find(o => /complaintOnsetTime/.test(o.address));
+  assert.equal(op.dataType, 'datetime'); assert.equal(op.fieldRef, 'COMPLAINTONSETTIME');
+  await waitFor(async () => (await app(() => document.querySelector('eso-field[data-field-ref="COMPLAINTONSETTIME"] .display-value').textContent)) === '09/18/2026 08:15:00', { label: 'the tab was re-read and shows it', timeout: 15000 });
 });
 
 test('Narrative rows: impressions, care level, duration units and every anatomic location', async () => {

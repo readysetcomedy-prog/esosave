@@ -159,6 +159,10 @@
       await sset({ fieldDefs2: payload.fieldDefs });
     } else if (type === 'event' && payload && payload.name === 'vitalCopied') {
       onVitalCopied(payload);
+    } else if (type === 'event' && payload && payload.name === 'assessmentCopied') {
+      onAssessmentCopied(payload);
+    } else if (type === 'event' && payload && payload.name === 'lkwCopied') {
+      onLkwCopied(payload);
     } else if (type === 'facilities' && payload && Array.isArray(payload.items)) {
       facilities = payload;
       facilityTypes = { locationTypes: payload.locationTypes || [], destinationTypes: payload.destinationTypes || [], crew: payload.crew || [], lists: payload.lists || null };
@@ -487,8 +491,8 @@
         `<label class="s"><input type="checkbox" id="qmechanism" ${settings.quickMechanism === false ? '' : 'checked'}> Mechanism of injury: Blunt, Burn, Penetrating, Other chips (Narrative tab)</label>` +
         `<label class="s"><input type="checkbox" id="qdisposition" ${settings.quickDisposition === false ? '' : 'checked'}> Disposition: Transported ALS/BLS, Refusal, Canceled (Prior/Scene) buttons under Unit Disposition; Transport Mode and Reason for Refusal outlined in red until answered (Incident tab)</label>` +
         `<label class="s"><input type="checkbox" id="qautoresp" ${settings.autoResponse === false ? '' : 'checked'}> Auto-fill: choosing Emergent or Non-Emergent (response or transport mode) fills the lights/sirens, intersection, scheduled, speed and method fields that are still empty, and sets EMD Performed to No</label>` +
-        `<label class="s"><input type="checkbox" id="qassess" ${settings.quickAssess === false ? '' : 'checked'}> Assessment: "All normal" (presses No Abnormalities on every category in ESO's Quick Ax) and "A&amp;Ox4" on each assessment (Assessments tab)</label>` +
-        `<label class="s"><input type="checkbox" id="qnarrative" ${settings.quickNarrative === false ? '' : 'checked'}> Narrative: rows for Primary and Secondary Impression, Provided Care Level, Chief Complaint System, Anatomic Location and the complaint duration units (Narrative tab)</label>` +
+        `<label class="s"><input type="checkbox" id="qassess" ${settings.quickAssess === false ? '' : 'checked'}> Assessment: Copy (enters an assessment again as a new one with the current time, every finding and comment the same); "All normal" (presses No Abnormalities on every category in ESO's Quick Ax) and "A&amp;Ox4" on each assessment (Assessments tab)</label>` +
+        `<label class="s"><input type="checkbox" id="qnarrative" ${settings.quickNarrative === false ? '' : 'checked'}> Narrative: rows for Primary and Secondary Impression, Provided Care Level, Chief Complaint System, Anatomic Location, the complaint duration units, Barriers to Care and Alcohol/Drugs, and a Same as LKWT button above Onset Time (Narrative tab)</label>` +
         `<label class="s"><input type="checkbox" id="qpatient" ${settings.quickPatient === false ? '' : 'checked'}> Patient: Race row (every race, shortened) (Patient tab)</label>` +
         `<label class="s"><input type="checkbox" id="qrefusal" ${settings.quickRefusal === false ? '' : 'checked'}> Refusal form: chips for Legal, Decision-Making, Medical, Check All notifications and the four Patient Refusals inside ESO's Patient Refusal Form (Signatures tab)</label>` +
         `<label class="s"><input type="checkbox" id="qmileage" ${settings.autoMileage === false ? '' : 'checked'}> Loaded mileage: press ESO's Calculate Mileage once the scene and destination both have an address (Incident tab)</label>` +
@@ -1699,14 +1703,14 @@
       // done when every category row of the record shows the No Abnormalities check
       const rows = Array.from(rec.querySelectorAll('.assessment-summary')).filter(r => !/Neonatal/i.test(r.textContent));
       const normal = rows.length && rows.every(r => r.querySelector('.no-abnormalities-or-not-assessed .assess-circle-check-bg, .no-abnormalities-or-not-assessed.assess-circle-check-bg'));
-      const defs = [['all', normal ? '✓ All normal' : 'All normal', 'Press No Abnormalities on every category of this assessment (ESO\'s Quick Ax), then OK'], ['ao', 'A&Ox4', 'Open Mental Status and press Alert and Oriented x4']];
+      const defs = [['all', normal ? '✓ All normal' : 'All normal', 'Press No Abnormalities on every category of this assessment (ESO\'s Quick Ax), then OK'], ['ao', 'A&Ox4', 'Open Mental Status and press Alert and Oriented x4'], ['copy', 'Copy', 'Enter this assessment again as a new one with the current time: every finding and comment the same']];
       let right = ar.left - 10;
       for (const [k, text, title] of defs.reverse()) {
         const key = `x:${id}:${k}`; keep.add(key);
         const b = quickEl(key, () => {
           const el = document.createElement('button'); el.type = 'button'; el.className = 'allnone'; el.dataset.group = 'assess-' + k;
           el.addEventListener('pointerdown', (e) => e.stopPropagation());
-          el.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); if (k === 'all') assessAllNormal(rec); else assessAOx4(rec); });
+          el.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); if (k === 'all') assessAllNormal(rec); else if (k === 'copy') copyAssessment(rec); else assessAOx4(rec); });
           return el;
         });
         b.textContent = text; b.title = title;
@@ -1871,6 +1875,8 @@
     units: { setting: 'quickNarrative', tab: 'Narrative', ref: 'CHIEFTIMEUNITSOFCOMPLAINTDURATION', what: 'Duration Unit', items: [['Minutes', 'Minutes'], ['Hours', 'Hours'], ['Days', 'Days']] },
     // Chief Complaint System: ESO shows Global/General, Musculoskeletal/Skin, Cardiovascular and Other itself
     system: { setting: 'quickNarrative', tab: 'Narrative', ref: 'CHIEFCOMPLAINTORGANSYSTEMID', what: 'Chief Complaint System', noOther: true, items: [['Psych', 'Behavioral/Psychiatric'], ['Neuro', 'CNS/Neuro'], ['GI', 'GI'], ['Immune', 'Lymphatic/Immune'], ['Reproductive', 'Reproductive'], ['Pulmonary', 'Pulmonary'], ['Renal', 'Renal']] },
+    barriers: { setting: 'quickNarrative', tab: 'Narrative', ref: 'BARRIERSTOCAREIDS', what: 'Barriers to Care', noOther: true, hideShown: true, items: [['Alcohol Suspected', 'Alcohol Use, Suspected'], ['Drug Suspected', 'Drug Use, Suspected'], ['Obesity', 'Obesity'], ['Language', 'Language'], ['Psych Impaired', 'Psychologically Impaired']] },
+    alcohol: { setting: 'quickNarrative', tab: 'Narrative', ref: 'ALCOHOLDRUGUSAGEIDS', what: 'Alcohol/Drugs', noOther: true, hideShown: true, items: [['Smell of Alcohol', 'Smell of Alcohol on Breath'], ['Admits Alcohol', 'Patient Admits to Alcohol Use', 'Patient Admits to Alcohol Use'], ['Admits Drug', 'Patient Admits to Drug Use', 'Patient Admits to Drug Use']] },
     anatomic: { setting: 'quickNarrative', tab: 'Narrative', ref: 'CHIEFCOMPLAINTANATOMICLOCATIONID', what: 'Anatomic Location', noOther: true, items: [['Head', 'Head'], ['Neck', 'Neck'], ['Chest', 'Chest'], ['Abd', 'Abdomen'], ['Back', 'Back'], ['Upper Ext', 'Extremity-Upper'], ['Lower Ext', 'Extremity-Lower'], ['Genitalia', 'Genitalia'], ['General', 'General/Global']] },
     // Patient tab
     race: { setting: 'quickPatient', tab: 'Patient', ref: 'PATIENTRACEIDS', what: 'Race', noOther: true, items: [['White', 'White', 'White'], ['Black', 'Black or African American', 'Black'], ['Asian', 'Asian'], ['Latino', 'Hispanic or Latino'], ['Am Indian', 'American Indian or Alaska Native'], ['Mid East', 'Middle Eastern or North African'], ['Pac Islander', 'Native Hawaiian or Other Pacific Islander']] },
@@ -2156,6 +2162,7 @@
     for (const gk of Object.keys(CHIP_GROUPS)) { try { layoutChips(gk); } catch (e) { /* keep going */ } }
     for (const gk of Object.keys(FACILITY_GROUPS)) { try { layoutFacilities(gk); } catch (e) { /* keep going */ } }
     try { layoutDelays(); } catch (e) { /* keep going */ }
+    try { layoutLkw(); } catch (e) { /* keep going */ }
     try { layoutAcuity(); } catch (e) { /* keep going */ }
   }
 
@@ -3476,18 +3483,70 @@
     setTimeout(() => { if (veil && /sent/.test(veil.textContent)) hideVeil(); }, 2500);
     if (panelOpen) renderPanel();
   }
+  // The app only shows what it has loaded: step off the tab and back so it re-reads it
+  async function reloadTab(view) {
+    const id = lastStatus && lastStatus.currentRecordId;
+    const awayView = view === 'Incident' ? 'Patient' : 'Incident';
+    const away = tabElement(TAB_LABELS[awayView]), back = tabElement(TAB_LABELS[view]);
+    if (!away || !back) return;
+    away.click();
+    await waitViewLoaded(awayView, id, 1500).catch(() => {});
+    back.click();
+    await waitViewLoaded(view, id, 3000).catch(() => {});
+  }
+  function copyAssessment(rec) {
+    if (copyBusy || quickBusy) return;
+    copyBusy = true;
+    showVeilMessage('Copying assessment…', 'Entering every finding and comment again as a new assessment with the current time.');
+    const time = norm((rec.querySelector('.date-and-time') || {}).textContent || '').slice(-8);
+    toPage('action', { name: 'copyAssessment', recordId: lastStatus.currentRecordId, key: rec.getAttribute('data-item-id') || '', time });
+    setTimeout(() => { if (copyBusy) { copyBusy = false; hideVeil(); } }, 20000);
+  }
+  async function onAssessmentCopied(p) {
+    if (!p.ok) { copyBusy = false; hideVeil(); alert('ESO Save: ' + (p.error || 'could not copy the assessment')); return; }
+    await reloadTab('Assessments');
+    copyBusy = false; hideVeil();
+    notice('Assessment copied', p.held ? 'Entered again with the current time; held until ESO answers.' : 'Entered again with the current time.', 3500);
+    setTimeout(layoutQuick, 300);
+  }
+  // Same as LKWT: a button above Onset Time that sets it to the Last Known Well time
+  function layoutLkw() {
+    const run = currentRun();
+    const f = settings.quickNarrative === false || !run || run.locked || !onTab('Narrative') || shelfOpen() ? null : fieldEl('COMPLAINTONSETTIME');
+    if (!f) { dropQuick('lkw:'); return; }
+    const r = f.getBoundingClientRect();
+    if (!r.width) { dropQuick('lkw:'); return; }
+    const btn = quickEl('lkw:same', () => {
+      const b = document.createElement('button'); b.type = 'button'; b.className = 'allnone'; b.dataset.group = 'lkw'; b.title = 'Set Onset Time to the same date and time as Last Known Well Time';
+      b.addEventListener('pointerdown', (e) => e.stopPropagation());
+      b.addEventListener('click', (e) => {
+        e.preventDefault(); e.stopPropagation();
+        if (copyBusy || quickBusy) return;
+        copyBusy = true;
+        showVeilMessage('Setting Onset Time…', 'to the same date and time as Last Known Well Time.');
+        toPage('action', { name: 'sameAsLkw', recordId: lastStatus.currentRecordId });
+        setTimeout(() => { if (copyBusy) { copyBusy = false; hideVeil(); } }, 20000);
+      });
+      return b;
+    });
+    btn.textContent = 'Same as LKWT';
+    btn.classList.toggle('busy', copyBusy);
+    btn.style.visibility = 'hidden'; btn.style.display = 'block';
+    const w = btn.getBoundingClientRect().width || 130;
+    btn.style.left = Math.round(r.right - w) + 'px';
+    btn.style.top = Math.round(r.top - 36) + 'px';
+    btn.style.visibility = '';
+  }
+  async function onLkwCopied(p) {
+    if (!p.ok) { copyBusy = false; hideVeil(); alert('ESO Save: ' + (p.error || 'could not set Onset Time')); return; }
+    await reloadTab('Narrative');
+    copyBusy = false; hideVeil();
+    notice('Onset Time set', p.held ? 'Same as Last Known Well; held until ESO answers.' : 'Same as Last Known Well.', 3000);
+    setTimeout(layoutQuick, 300);
+  }
   async function onVitalCopied(p) {
     if (!p.ok) { copyBusy = false; hideVeil(); alert('ESO Save: ' + (p.error || 'could not copy the vital')); return; }
-    // The app only shows what it has loaded: step off the tab and back so it re-reads the list.
-    const id = lastStatus && lastStatus.currentRecordId;
-    const away = tabElement('INCIDENT') || tabElement('PATIENT');
-    const back = tabElement('VITALS');
-    if (away && back) {
-      away.click();
-      await waitViewLoaded('Incident', id, 1500).catch(() => {});
-      back.click();
-      await waitViewLoaded('Vitals', id, 3000).catch(() => {});
-    }
+    await reloadTab('Vitals');
     copyBusy = false;
     hideVeil();
     if (p.held) setTimeout(() => alert('ESO Save: no signal right now. The copied vital is held on this device and will be pushed to ESO when signal returns.'), 50);

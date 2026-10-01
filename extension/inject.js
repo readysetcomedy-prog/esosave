@@ -27,7 +27,7 @@
   if (ext) return;
   if (window.__esosave) return;
 
-  const VERSION = '0.15.15';
+  const VERSION = '0.15.16';
   const API_PREFIX_RE = /^\/ehr\/api\/+/i;
   const FAKE_OK_TEXT = '{"result":"Success","data":[]}';
   const PROBE_PATH = '/ehr/api/thirdpartydata/partners';
@@ -1019,18 +1019,83 @@
     walk(vital, '');
     return { ops, skipped };
   }
-  async function currentVitals(run) {
+  // a tab's model as ESO holds it now: re-read when there is signal, the saved copy otherwise
+  async function currentModel(run, view, query) {
     const id = run.realId || run.recordId;
     if (S.online && !S.loggedOut && !(run.tmp && !run.realId)) {
-      const url = apiUrl(`/PatientCareRecords/${id}/Views/Vitals`);
+      const url = apiUrl(`/PatientCareRecords/${id}/Views/${view}${query || ''}`);
       const res = await rawRequest({ method: 'GET', url, headers: headersFor(false), timeout: 15000 });
-      if (outcome(res) === 'ok') { run.views.Vitals = { text: res.text, ts: Date.now() }; cachePut('GET', url, undefined, res); }
-      else log(run, `Could not re-read the vitals list (${summarize(res)}); using the saved copy.`, 'warn');
+      if (outcome(res) === 'ok') { run.views[view] = { text: res.text, ts: Date.now() }; cachePut('GET', url, undefined, res); }
+      else log(run, `Could not re-read the ${view} tab (${summarize(res)}); using the saved copy.`, 'warn');
     }
-    const cached = run.views.Vitals;
+    const cached = run.views[view];
     if (!cached) return null;
-    const j = tryJSON(applyHeldToView(run, 'Vitals', cached.text));
-    return j && j.data && j.data.model && Array.isArray(j.data.model.vitalSigns) ? j.data.model.vitalSigns : null;
+    const j = tryJSON(applyHeldToView(run, view, cached.text));
+    return j && j.data && j.data.model ? j.data.model : null;
+  }
+  async function currentVitals(run) {
+    const m = await currentModel(run, 'Vitals');
+    return m && Array.isArray(m.vitalSigns) ? m.vitalSigns : null;
+  }
+  // A batch the extension made up (a copy, a time carried over) is sent more carefully than the
+  // app's own saves: directly when there is signal, held like any save otherwise, and never
+  // allowed to flip the card to NO SIGNAL or to block real saves if ESO refuses it.
+  async function sendSynthetic(run, scope, ops, kind, what, eventName, noun) {
+    noun = noun || 'copy';
+    const batch = { seq: run.nextSeq++, ts: Date.now(), scope, ops, status: 'pending', attempts: 0, synthetic: kind };
+    if (!S.online || S.loggedOut || run.pendingCreate || run.pushing || hasHeld(run)) {
+      batch.status = 'held'; run.batches.push(batch); persist(run, true); emit(); kick(300);
+      log(run, `${what}; held until it can be pushed.`, 'warn');
+      post('event', { name: eventName, ok: true, held: true });
+      return true;
+    }
+    const id = run.realId || run.recordId;
+    const res = await rawRequest({ method: 'POST', url: apiUrl(`/PatientCareRecords/${id}/autosave?scope=${scope}`), headers: headersFor(true), body: rewriteKeys(JSON.stringify(ops), run.keyMap), timeout: 30000 });
+    const o = outcome(res);
+    if (o === 'ok') {
+      run.batches.push(batch); ack(run, batch, res); setOnline(true); setLoggedOut(false); persist(run); emit();
+      log(run, `${what}.`, 'good');
+      post('event', { name: eventName, ok: true });
+      return true;
+    }
+    if (o === 'auth') setLoggedOut(true);
+    const why = o === 'net' ? 'ESO did not answer. Check the signal and try again.' : `ESO refused the ${noun.replace(/ the .*$/, '').replace(/^set .*$/, 'change')}: ${summarize(res)}`;
+    log(run, `Could not ${noun}: ${why}`, 'error');
+    post('event', { name: eventName, ok: false, error: why });
+    return false;
+  }
+  // The same assessment entered again as a new one with the current time: every finding on every
+  // location, present or not, and each category's comments, written as ESO's own screen writes them.
+  const AX_COMMENT_REFS = { mentalStatusSection: 'ASSESSMENT2MENTALSTATUSSECTIONCOMMENTS', skinSection: 'ASSESSMENT2SKINSECTIONCOMMENTS', heentSection: 'ASSESSMENT2HEENTSECTIONCOMMENTS', chestSection: 'ASSESSMENT2CHESTSECTIONCOMMENTS', abdomenSection: 'ASSESSMENT2ABDOMENSECTIONCOMMENTS', backSection: 'ASSESSMENT2BACKSECTIONCOMMENTS', pelvisGuGiSection: 'ASSESSMENT2PELVISGUGISECTIONCOMMENTS', extremitiesSection: 'ASSESSMENT2EXTREMITIESSECTIONCOMMENTS', neurologicalSection: 'ASSESSMENT2NEUROLOGICALSECTIONCOMMENTS', neonatalSection: 'ASSESSMENT2NEONATALSECTIONCOMMENTS' };
+  async function copyAssessment(recordId, key, timeText) {
+    const fail = (error) => post('event', { name: 'assessmentCopied', ok: false, error });
+    const run = S.runs[recordId];
+    if (!run) return fail('Run not found.');
+    const m = await currentModel(run, 'Assessments', '?getAssessmentListsData=true');
+    const list = m && Array.isArray(m.assessmentsV2) ? m.assessmentsV2 : null;
+    if (!list) return fail('Could not read the assessments.');
+    // the record on the page may still carry the app's own key for the assessment while ESO's view carries the server's: the key map joins them
+    const keys = new Set([String(key), String(run.keyMap[key] || ''), ...Object.entries(run.keyMap).filter(([, v]) => String(v) === String(key)).map(([k]) => String(k))].filter(Boolean));
+    const src = list.find(a => a && keys.has(String(a.itemId))) || list.find(a => a && typeof a.assessmentTime === 'string' && timeText && a.assessmentTime.slice(-8) === timeText);
+    if (!src) return fail('That assessment has not been saved by ESO yet. Wait a moment and try again.');
+    const k = uuid(), base = `assessments.assessmentsV2.['${k}']`, now = fmtEsoLocal(new Date());
+    const ops = [{ verb: 'ADD', address: base, fieldRef: 'ASSESSMENT2', value: { assessmentDate: now, assessmentTime: now }, dataType: 'collectionWithData', isComplexType: true }];
+    const findings = Array.isArray(src.findings) ? src.findings : Object.values(src.findings || {});
+    for (const f of findings) if (f && f.findingId && f.findingLocationId) ops.push({ verb: 'ADD', address: `${base}.findings.['${uuid()}']`, fieldRef: 'ASSESSMENT2FINDINGS', value: { findingId: f.findingId, findingLocationId: f.findingLocationId, present: f.present !== false }, dataType: 'binary', isComplexType: true });
+    for (const [sec, ref] of Object.entries(AX_COMMENT_REFS)) { const c = src[sec] && src[sec].comments; if (typeof c === 'string' && c.trim()) ops.push({ verb: 'EDIT', address: `${base}.${sec}.comments`, fieldRef: ref, value: c, dataType: 'string' }); }
+    if (ops.length < 2) return fail('Nothing in that assessment can be copied.');
+    await sendSynthetic(run, 'assessments', ops, 'copyAssessment', `Copied the ${timeText || ''} assessment as a new one (${ops.length - 1} findings and comments)`, 'assessmentCopied', 'copy the assessment');
+  }
+  // Onset Time set to the Last Known Well time, exactly as ESO holds it
+  async function sameAsLkw(recordId) {
+    const fail = (error) => post('event', { name: 'lkwCopied', ok: false, error });
+    const run = S.runs[recordId];
+    if (!run) return fail('Run not found.');
+    const m = await currentModel(run, 'Narrative');
+    const lkw = m && m.patientComplaint ? m.patientComplaint.complaintLastKnownWell : null;
+    if (!lkw) return fail('Last Known Well Time is empty. Enter it first, then press Same as LKWT.');
+    const ops = [{ verb: 'EDIT', address: 'narrative.patientComplaint.complaintOnsetTime', fieldRef: 'COMPLAINTONSETTIME', value: lkw, dataType: 'datetime' }];
+    await sendSynthetic(run, 'narrative', ops, 'sameAsLkw', `Onset Time set to the Last Known Well time (${lkw})`, 'lkwCopied', 'set Onset Time');
   }
   // A copy is a batch the extension made up, so it is treated more carefully than the app's own
   // saves: sent directly when there is signal, and never allowed to flip the card to NO SIGNAL or
@@ -1047,25 +1112,8 @@
     const newKey = uuid();
     const { ops, skipped } = vitalCopyOps(vital, newKey);
     if (ops.length < 2) return fail('Nothing in that vital can be copied.' + (skipped.length ? ' Unknown fields: ' + skipped.join(', ') : ''));
-    const note = skipped.length ? ` Not copied (never seen the app save them): ${skipped.join(', ')}.` : '';
-    const batch = { seq: run.nextSeq++, ts: Date.now(), scope: 'vitals', ops, status: 'pending', attempts: 0, synthetic: 'copyVital' };
-    if (!S.online || S.loggedOut || run.pendingCreate || run.pushing || hasHeld(run)) {
-      batch.status = 'held'; run.batches.push(batch); persist(run, true); emit(); kick(300);
-      log(run, `Copied the ${timeText} vital as a new entry (${ops.length - 1} fields); held until it can be pushed.${note}`, 'warn');
-      return post('event', { name: 'vitalCopied', ok: true, held: true });
-    }
-    const id = run.realId || run.recordId;
-    const res = await rawRequest({ method: 'POST', url: apiUrl(`/PatientCareRecords/${id}/autosave?scope=vitals`), headers: headersFor(true), body: rewriteKeys(JSON.stringify(ops), run.keyMap), timeout: 30000 });
-    const o = outcome(res);
-    if (o === 'ok') {
-      run.batches.push(batch); ack(run, batch, res); setOnline(true); setLoggedOut(false); persist(run); emit();
-      log(run, `Copied the ${timeText} vital as a new entry (${ops.length - 1} fields).${note}`, 'good');
-      return post('event', { name: 'vitalCopied', ok: true });
-    }
-    if (o === 'auth') setLoggedOut(true);
-    const why = o === 'net' ? 'ESO did not answer. Check the signal and try again.' : `ESO refused the copy: ${summarize(res)}`;
-    log(run, `Could not copy the ${timeText} vital: ${why}${note}`, 'error');
-    fail(why);
+    const note = skipped.length ? ` Not copied (never seen the app save them): ${skipped.join(', ')}` : '';
+    await sendSynthetic(run, 'vitals', ops, 'copyVital', `Copied the ${timeText} vital as a new entry (${ops.length - 1} fields)${note}`, 'vitalCopied', `copy the ${timeText} vital`);
   }
 
   async function handleAutosave(kind, req) {
@@ -1759,6 +1807,8 @@
         else if (a.name === 'status') { emit(); }
         else if (a.name === 'note') { const run = S.runs[a.recordId]; if (run) log(run, String(a.msg || ''), a.level || 'info'); }
         else if (a.name === 'copyVital') { copyVital(a.recordId || S.currentRecordId, String(a.time || ''), Number(a.nth) || 0); }
+        else if (a.name === 'copyAssessment') { copyAssessment(a.recordId || S.currentRecordId, String(a.key || ''), String(a.time || '')); }
+        else if (a.name === 'sameAsLkw') { sameAsLkw(a.recordId || S.currentRecordId); }
         else if (a.name === 'send') { sendRecord(a.recordId, a.kind === 'email' ? 'email' : 'fax'); }
         else if (a.name === 'scanUnsent') { scheduleUnsentScan(0); }
         else if (a.name === 'facilities') { if (S.facilities) post('facilities', S.facilities); }

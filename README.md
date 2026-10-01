@@ -191,6 +191,15 @@ to bad signal or a hung page.
   later. Should ESO refuse a tab's batch (HTTP 400), the batch is split until the refused
   fields stand alone: they are left out and named to the medic with ESO's own reason (and
   written to the run's log with ESO's full reply), and everything else still goes in. The list seen last is kept on the device, so it works with no signal.
+- **Copy an assessment.** A Copy button beside All normal on each saved assessment enters it again
+  as a new assessment with the current time: every finding on every location, present or not,
+  and each category's comments, written as ESO's own screen writes them. For the patient whose
+  assessment barely changes between checks.
+- **Same as LKWT.** A button above Onset Time on the Narrative tab sets it to the same date and
+  time as Last Known Well Time, exactly as ESO holds it. Rows under Barriers to Care (Alcohol
+  Suspected, Drug Suspected, Obesity, Language, Psych Impaired) and Alcohol/Drugs (Smell of
+  Alcohol, Admits Alcohol, Admits Drug) sit under those fields, only what ESO's own quick-picks
+  lack.
 - **Copy a vital.** A small copy button floats just left of each saved vital's time in the Vitals
   tab; tapping it re-enters that vital as a new one with the current time, every other value the
   same. Only fields the app itself has been seen saving are copied, and the run log names any that
