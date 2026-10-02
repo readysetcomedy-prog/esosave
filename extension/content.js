@@ -3780,14 +3780,17 @@
   }
   // A key on ESO's numpad: it acts on mousedown (as a finger does); a key that did nothing that
   // way is clicked. The box must show the change before the next key.
+  // (an empty masked box may carry its pattern, "__:__:__", as its value: only digits count)
+  const digitsOf = (v) => String(v == null ? '' : v).replace(/\D/g, '');
   async function tapKey(shelf, input, ch) {
     const b = Array.from(shelf.querySelectorAll('[data-char]')).find(x => x.dataset.char === ch);
     if (!b) throw new Error(`no "${ch}" key on ESO's numpad`);
-    const before = input.value;
+    const before = digitsOf(input.value);
+    const took = () => ch === 'clear' ? !digitsOf(input.value) : digitsOf(input.value) !== before;
     for (const t of ['mousedown', 'mouseup']) b.dispatchEvent(new MouseEvent(t, { bubbles: true, cancelable: true, view: window }));
-    if (await until(() => input.value !== before, 250)) return;
+    if (await until(took, 250)) return;
     b.click();
-    if (!(await until(() => input.value !== before, 600))) throw new Error(`ESO's numpad did not take "${ch}"`);
+    if (!(await until(took, 600))) throw new Error(`ESO's numpad did not take "${ch}"`);
   }
   // ESO's calendar: step the month arrows to the month wanted, then tap the day
   async function pickDay(shelf, input, want) {
@@ -3806,7 +3809,7 @@
     const li = Array.from(panel.querySelectorAll('li')).find(l => { const d = l.querySelector('.date-item'); return d && !d.classList.contains('not-this-month') && Number(norm(d.textContent)) === dd; });
     if (!li) throw new Error(`no day ${dd} on ESO's calendar`);
     li.click();
-    if (!(await until(() => norm(input.value) === want, 1500))) throw new Error(`ESO's calendar set "${input.value}", not ${want}`);
+    if (!(await until(() => digitsOf(input.value) === digitsOf(want), 1500))) throw new Error(`ESO's calendar set "${input.value}", not ${want}`);
   }
   // Same as LKWT: read Last Known Well off the screen, open Onset Time's own shelf, type the time
   // on ESO's numpad, pick the date on ESO's calendar, press OK. ESO saves it, draws it and
@@ -3823,10 +3826,15 @@
     const timeIn = await until(() => inputs().find(i => /hh:mm|99:99/i.test(maskOf(i))), 2000);
     const dateIn = inputs().find(i => /yyyy|9999/i.test(maskOf(i)));
     if (!timeIn || !dateIn) throw new Error("ESO's time shelf has no time and date boxes.");
+    // the shelf may open on the date box with the calendar up: pick the time box first and make
+    // sure the numpad is the one showing before a key is pressed
+    const padUp = () => Array.from(shelf.querySelectorAll('eso-numpad, numpad')).some(visible);
     timeIn.click(); timeIn.focus();
-    if (norm(timeIn.value)) await tapKey(shelf, timeIn, 'clear');
-    for (const d of lk.time.replace(/\D/g, '')) await tapKey(shelf, timeIn, d);
-    if (!(await until(() => norm(timeIn.value) === lk.time, 1500))) throw new Error(`the time came out as "${timeIn.value}", not ${lk.time}.`);
+    if (!(await until(padUp, 1000))) { timeIn.dispatchEvent(new Event('focus', { bubbles: true })); const wrap = timeIn.closest('eso-display-field, eso-masked-input'); if (wrap) wrap.click(); }
+    if (!(await until(padUp, 1500))) throw new Error("ESO's numpad did not come up for the Time box.");
+    if (digitsOf(timeIn.value)) await tapKey(shelf, timeIn, 'clear'); // only a time already in the box is cleared first
+    for (const d of digitsOf(lk.time)) await tapKey(shelf, timeIn, d);
+    if (!(await until(() => digitsOf(timeIn.value) === digitsOf(lk.time), 1500))) throw new Error(`the time came out as "${timeIn.value}", not ${lk.time}.`);
     dateIn.click(); dateIn.focus();
     await pickDay(shelf, dateIn, lk.date);
     const ok = Array.from(shelf.querySelectorAll('header button, button')).find(b => /^(OK|Done)$/i.test(norm(b.textContent)));

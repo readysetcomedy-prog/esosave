@@ -320,14 +320,14 @@
   const COMBO = { COMPLAINTLASTKNOWNWELL: 'narrative.patientComplaint.complaintLastKnownWell', COMPLAINTONSETTIME: 'narrative.patientComplaint.complaintOnsetTime' };
   app.combo = {};
   function comboRender(ref) { const v = app.combo[ref] || ''; const [t, d] = document.querySelectorAll(`eso-field[data-field-ref="${ref}"] .display-value`); if (t) t.textContent = v ? v.slice(11) : ''; if (d) d.textContent = v ? v.slice(0, 10) : ''; }
-  const maskDigits = (digits, m) => { let out = '', i = 0; for (const ch of m) { if (i >= digits.length) break; out += ch === '9' ? digits[i++] : ch; } return out; };
+  const maskDigits = (digits, m) => { let out = '', i = 0; for (const ch of m) out += ch === '9' ? (i < digits.length ? digits[i++] : '_') : ch; return out; }; // the pattern shows through where nothing is typed yet
   function openComboShelf(ref) {
     app.shelfOpens++;
     const cur = app.combo[ref] || '';
     const el = document.createElement('shelf-panel');
     const now = new Date(); const view = { m: now.getMonth(), y: now.getFullYear() }; let sel = cur ? cur.slice(0, 10) : ''; let selected = 0;
     el.innerHTML = `<header><h1>${ref === 'COMPLAINTONSETTIME' ? 'Onset Time' : 'Last Known Well'}</h1><button class="btn green-btn workflow-btn">OK</button></header><main class="viewport"><div class="content">
-      <div class="banded"><eso-display-field><eso-masked-input mask="99:99:99"><input value="${cur ? cur.slice(11) : ''}" placeholder="hh:mm:ss"></eso-masked-input></eso-display-field><eso-display-field><eso-masked-input mask="99/99/9999"><input value="${sel}" placeholder="mm/dd/yyyy"></eso-masked-input></eso-display-field></div>
+      <div class="banded"><eso-display-field><eso-masked-input mask="99:99:99"><input value="${cur ? cur.slice(11) : '__:__:__'}" placeholder="hh:mm:ss"></eso-masked-input></eso-display-field><eso-display-field><eso-masked-input mask="99/99/9999"><input value="${sel || '__/__/____'}" placeholder="mm/dd/yyyy"></eso-masked-input></eso-display-field></div>
       <eso-numpad><numpad>${['7', '8', '9', '4', '5', '6', '1', '2', '3', '.', '0', 'back'].map(c => `<button class="btn numpad-btn" data-char="${c}" tabindex="-1">${c === 'back' ? '<div class="back"></div>' : c}</button>`).join('')}<button class="btn numpad-btn clear" data-char="clear" tabindex="-1">C</button></numpad></eso-numpad>
       <eso-date-picker-panel hidden><nav><button class="btn back" tabindex="-1">&#8249;</button><header><a></a></header><button class="btn forward" tabindex="-1">&#8250;</button></nav><main><ul class="day-list"></ul></main></eso-date-picker-panel></div></main>`;
     const [timeIn, dateIn] = el.querySelectorAll('input'); const pad = el.querySelector('eso-numpad'), panel = el.querySelector('eso-date-picker-panel');
