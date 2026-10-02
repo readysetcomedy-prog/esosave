@@ -71,7 +71,15 @@
   // the groups a saved vital is made of, as ESO's own view lays them out; the copy can leave any out
   const VITAL_GROUPS = [['bloodPressure', 'Blood pressure'], ['pulse', 'Pulse'], ['respiration', 'Respirations'], ['etCO2SPO2CO', 'SpO2, EtCO2 and CO'], ['glucoseAndTemp', 'Glucose and temperature'],
     ['pain', 'Pain scale'], ['avpu', 'AVPU'], ['position', 'Patient side and posture'], ['glasgowComaScale', 'Glasgow Coma Scale'], ['revisedTraumaScore', 'Revised trauma score'], ['cardiacMonitoring', 'Cardiac monitoring (ECG)']];
-  const OPEN_SETTINGS = ['valHighlight', 'quickTreatments', 'quickHistory', 'quickMeds', 'quickAllergies', 'quickAcuity', 'quickDelays', 'quickTransport', 'quickAssess', 'quickDisposition', 'autoResponse', 'quickIncident', 'quickMechanism', 'quickFacilities', 'quickNarrative', 'quickPatient', 'quickRefusal', 'autoMileage', 'scanDocs', 'vitalCopySkip', 'facilitySending', 'facilityDestination'];
+  // Every setting a person or the agency may set. Which of them are locked (the agency's value on
+  // every tablet) is itself the agency's choice, made on the Management tab; today's agency block
+  // starts locked, the rest open. A person's row carries the open ones; the agency row the locked
+  // ones, the lock list, the template locks and the managers.
+  const ALL_SETTINGS = ['purgeHoursAfterLock', 'warmTabs', 'showTimes', 'sendPrompt', 'unsentList', 'askBeforeLock', 'cadGate', 'valHighlight', 'quickTreatments', 'quickHistory', 'quickMeds', 'quickAllergies', 'quickAcuity', 'quickDelays', 'quickTransport', 'quickAssess', 'quickDisposition', 'autoResponse', 'quickIncident', 'quickMechanism', 'quickFacilities', 'quickNarrative', 'quickPatient', 'quickRefusal', 'autoMileage', 'scanDocs', 'vitalCopySkip', 'facilitySending', 'facilityDestination'];
+  const DEFAULT_LOCKS = ['purgeHoursAfterLock', 'warmTabs', 'showTimes', 'sendPrompt', 'unsentList', 'askBeforeLock', 'cadGate'];
+  const AGENCY_ONLY = ['tplLocks', 'locks', 'managers']; // always the agency's: never a person's, never a switch
+  const locksIn = (src) => Array.isArray(src && src.locks) ? src.locks.filter(k => ALL_SETTINGS.includes(k)) : DEFAULT_LOCKS.slice();
+  const isLocked = (k) => locksIn(settings).includes(k);
   // The open settings follow the ESO login: one row per login in the agency's table, written when
   // the login is first seen and whenever they change something. Only these settings go there;
   // never a run, nor which runs were worked. The key is the project's public one.
@@ -79,14 +87,26 @@
   const SYNC = ON_ESO
     ? { url: 'https://qkprkwydxbtybaxylhln.supabase.co/rest/v1/esosave_users', key: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFrcHJrd3lkeGJ0eWJheHlsaGxuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzY2MTc2MjYsImV4cCI6MjA1MjE5MzYyNn0.DNjMTLqWtB7KJfZc3I03ufAPoIx69eA6wCkvhgdp7u4' }
     : { url: location.origin + '/__db/esosave_users', key: 'test-anon' };
-  const openSettings = (src) => { const o = {}; for (const k of OPEN_SETTINGS) if (k in src) o[k] = src[k]; return o; };
+  const openSettings = (src) => { const locks = locksIn(settings); const o = {}; for (const k of ALL_SETTINGS) if (!locks.includes(k) && k in src) o[k] = src[k]; return o; };
   // The locked settings are the agency's: one row for all tablets, changed only by the agency's
-  // owner (matched by ESO login name or agency person id), shown greyed out to everyone else.
-  const LOCKED_SETTINGS = ['purgeHoursAfterLock', 'warmTabs', 'showTimes', 'sendPrompt', 'unsentList', 'askBeforeLock', 'cadGate', 'tplLocks'];
-  const lockedSettings = (src) => { const o = {}; for (const k of LOCKED_SETTINGS) if (k in src) o[k] = src[k]; return o; };
+  // owner (matched by ESO login name or agency person id) or a manager the owner gave that
+  // permission, shown greyed out to everyone else.
+  const lockedSettings = (src) => { const o = {}; for (const k of AGENCY_ONLY.concat(locksIn(src))) if (k in src) o[k] = src[k]; return o; };
   const AGENCY_ROW = '__agency__';
   const ADMIN = { name: 'GASTON, MICHAEL', id: 'd4e45fac-ee36-4ac8-bf9a-3fb3e265c0d0' };
   const isAdmin = () => (user && user.toUpperCase() === ADMIN.name) || (userId && userId === ADMIN.id);
+  // Managers: people the owner named, each with their own permissions, kept in the agency row as
+  // { personId: { name, perms: { lockSettings, lockTemplates, approveTemplates, deleteTemplates } } }.
+  // Every manager sees the Management tab; what they lack there shows locked.
+  const PERMS = [
+    ['lockSettings', 'Lock and unlock settings', 'and set the locked ones for every tablet'],
+    ['lockTemplates', 'Lock and unlock template fields', 'Lock fields in a template\'s editor, and the unlock list here'],
+    ['approveTemplates', 'Approve templates', 'a template they share is approved as it is saved'],
+    ['deleteTemplates', 'Delete templates', 'anyone\'s, from the Templates window or here'],
+  ];
+  const managers = () => (settings.managers && typeof settings.managers === 'object' && !Array.isArray(settings.managers)) ? settings.managers : {};
+  const myManager = () => (userId && managers()[userId]) || null;
+  const can = (perm) => isAdmin() || !!(myManager() && myManager().perms && myManager().perms[perm]);
   // the agency's tables (the RuralMed site): the call log and its users
   const AGENCY_DB = ON_ESO ? { url: 'https://qkprkwydxbtybaxylhln.supabase.co/rest/v1', key: SYNC.key } : { url: location.origin + '/__db', key: 'test-anon' };
   async function loadAll() {
@@ -275,6 +295,12 @@
     .bar .who { margin-top: 2px; font-size: 11px; opacity: .85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .panel label.s.locked { opacity: .6; }
     .panel .lock { font-size: 11px; color: #64748b; margin: 4px 0 6px; }
+    .panel .fac.locked { opacity: .7; }
+    .mgmt .msec { border-top: 1px solid #eee; padding: 8px 0; } .mgmt .msec.off { opacity: .75; } .mgmt .mh { font-weight: 700; margin-bottom: 4px; }
+    .mgmt .slk { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 3px 0; font-size: 13px; border-top: 1px solid #f8fafc; }
+    .mgmt .mgr { border: 1px solid #e5e7eb; border-radius: 8px; padding: 6px 10px; margin: 6px 0; } .mgmt .mgr .mn { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+    .mgmt .mgradd { display: flex; gap: 6px; margin-top: 6px; align-items: center; } .mgmt select { font: inherit; font-size: 13px; padding: 5px; flex: 1; min-width: 0; }
+    .mgmt .tpl { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid #f1f5f9; font-size: 13px; } .mgmt .tpl .actions { margin: 0; }
     .bar .num { font-weight: 700; }
     .bar .btns { display: flex; gap: 6px; margin-top: 7px; }
     .bar .title { justify-content: space-between; }
@@ -452,6 +478,7 @@
     if (panelOpen) {
       if (!panel) { panel = document.createElement('div'); panel.className = 'panel'; shadow.appendChild(panel); }
       renderPanel(); panel.style.display = 'block';
+      if ((can('approveTemplates') || can('deleteTemplates')) && Date.now() - mgmt.at > 60 * 1000) mgmtLoad();
       if (settings.unsentList !== false && (!lastStatus || !lastStatus.unsent || Date.now() - lastStatus.unsent.at > 2 * 60 * 1000)) toPage('action', { name: 'scanUnsent' });
     }
     else if (panel) panel.style.display = 'none';
@@ -469,42 +496,25 @@
     parts.push(`<div class="muted">${s.online ? 'Signal OK' : 'NO SIGNAL'}${s.loggedOut ? ' · logged out' : ''}${s.pushing ? ' · pushing' : ''} · ${nRuns} run${nRuns === 1 ? '' : 's'} on this device` +
       `${user ? ` · signed in as <b>${esc(user)}</b>` : ''}` +
       `${s.hasTemplates ? '' : ' · <span title="Start one run with signal so a blank-run template is saved">no offline new-run template yet</span>'}</div>`);
-    parts.push(`<div class="actions"><button class="a" data-act="push">Push all held changes now</button><button class="a sec" data-act="export-all">Export everything</button><button class="a sec" data-act="settings">Settings</button></div>`);
+    parts.push(`<div class="actions"><button class="a" data-act="push">Push all held changes now</button><button class="a sec" data-act="export-all">Export everything</button><button class="a sec" data-act="settings">Settings</button><button class="a sec" data-act="management">Management${can('approveTemplates') && mgmt.pending && mgmt.pending.length ? ` (${mgmt.pending.length})` : ''}</button></div>`);
+    if (mgmtOpen) parts.push(managementUi());
     if (settingsOpen) {
-      const dis = isAdmin() ? '' : 'disabled', lk = isAdmin() ? '' : ' locked';
+      const canA = can('lockSettings');
+      const rowOf = (d) => {
+        const lk = isLocked(d.k), dis = lk && !canA;
+        const tag = lk ? '<span title="Locked by the agency: the same on every tablet">🔒</span> ' : '';
+        const head = d.head ? `<div class="s" style="margin-top:8px;font-weight:700">${esc(d.head)}${user ? ` <span class="muted" style="font-weight:400">· yours, ${esc(user)}: they follow your ESO login to any tablet, unless the agency locked them</span>` : ''}</div>` : '';
+        if (d.type === 'number') return head + `<label class="s${dis ? ' locked' : ''}">${tag}${esc(d.before)} <input type="number" min="0" max="720" id="${d.id}" value="${esc(settings[d.k])}" ${dis ? 'disabled' : ''}> ${esc(d.after)}</label>`;
+        if (d.type === 'bool') return head + `<label class="s${dis ? ' locked' : ''}"><input type="checkbox" id="${d.id}" ${settings[d.k] === false ? '' : 'checked'} ${dis ? 'disabled' : ''}> ${tag}${d.label}</label>`;
+        if (d.type === 'vitals') return head + `<div class="fac${dis ? ' locked' : ''}"><b>${tag}Vitals copy: what the copy button carries over</b><div class="muted" style="font-size:12px;margin:2px 0 4px">Untick anything that changes every time (blood pressure, say) so the copied vital comes in without it and nobody has to erase it.</div>` +
+          VITAL_GROUPS.map(([k, label]) => `<label class="s"><input type="checkbox" data-vc="${k}" ${(settings.vitalCopySkip || []).includes(k) ? '' : 'checked'} ${dis ? 'disabled' : ''}> ${esc(label)}</label>`).join('') + `</div>`;
+        if (d.type === 'facility') return head + facilityPicker(d.k, d.title);
+        return '';
+      };
+      const nLocked = SETTING_DEFS.filter(d => isLocked(d.k)).length;
       parts.push(`<div class="run">` +
-        `<div class="lock">${isAdmin() ? '🔓 Agency settings: yours to change. They apply to every tablet.' : '🔒 Set by the agency. These cannot be changed here.'}</div>` +
-        `<label class="s${lk}">Clear a run from this device <input type="number" min="0" max="720" id="purge" value="${esc(settings.purgeHoursAfterLock)}" ${dis}> hours after it is locked (0 = as soon as the lock is seen)</label>` +
-        `<label class="s${lk}"><input type="checkbox" id="warm" ${settings.warmTabs === false ? '' : 'checked'} ${dis}> Open every tab once, quietly, when a run opens (so tabs you have not touched still work with no signal)</label>` +
-        `<label class="s${lk}"><input type="checkbox" id="times" ${settings.showTimes === false ? '' : 'checked'} ${dis}> Show the call times (dispatched, en route, on scene, at patient, depart, at destination, transfer) in the empty part of ESO's top bar</label>` +
-        `<label class="s${lk}"><input type="checkbox" id="sendprompt" ${settings.sendPrompt === false ? '' : 'checked'} ${dis}> When a run is locked, offer to fax or email it to the destination if it has not been sent yet</label>` +
-        `<label class="s${lk}"><input type="checkbox" id="unsentlist" ${settings.unsentList === false ? '' : 'checked'} ${dis}> Keep a list of locked runs from the last 15 days that have a fax or email destination but were never sent</label>` +
-        `<label class="s${lk}"><input type="checkbox" id="asklock" ${settings.askBeforeLock === false ? '' : 'checked'} ${dis}> Before a lock, ask whether the proper paperwork is attached (or not required); No leaves the run open</label>` +
-        `<div class="s${lk}" style="display:block">Template locks: ${(settings.tplLocks || []).length ? (settings.tplLocks || []).length + ' locked (set in a template\'s editor with Lock fields; only ' + esc(ADMIN.name) + ' can change them)' : 'none (open any template\'s editor and press Lock fields to keep the crew from templating a field, vitals, or a part of them)'}</div>` +
-        `<label class="s${lk}"><input type="checkbox" id="cadgate" ${settings.cadGate === false ? '' : 'checked'} ${dis}> CAD import: only a run the call log shows you on may be imported. Unit Capability and Unit's Level of Care follow the crew's ESO certifications (a paramedic on the crew makes it ALS; a unit named NT… is non-transport)</label>` +
-        `<div class="s" style="margin-top:8px;font-weight:700">Quick buttons${user ? ` <span class="muted" style="font-weight:400">· yours, ${esc(user)}: they follow your ESO login to any tablet</span>` : ''}</div>` +
-        `<label class="s"><input type="checkbox" id="qdelays" ${settings.quickDelays === false ? '' : 'checked'}> Delays: one "All: None/No Delay" button above the delay fields (Incident tab) that presses ESO's own None button on every delay still empty</label>` +
-        `<label class="s"><input type="checkbox" id="qhistory" ${settings.quickHistory === false ? '' : 'checked'}> History: one-tap chips for common conditions under Add History (Patient tab)</label>` +
-        `<label class="s"><input type="checkbox" id="qmeds" ${settings.quickMeds === false ? '' : 'checked'}> Medications: chips for common home meds under Add Medications (Patient tab)</label>` +
-        `<label class="s"><input type="checkbox" id="qallergies" ${settings.quickAllergies === false ? '' : 'checked'}> Allergies: chips for common allergies under Add Allergies (Patient tab)</label>` +
-        `<label class="s"><input type="checkbox" id="qacuity" ${settings.quickAcuity === false ? '' : 'checked'}> Acuity: red, yellow and green buttons next to Initial and Final Patient Acuity (Narrative tab)</label>` +
-        `<label class="s"><input type="checkbox" id="qtransport" ${settings.quickTransport === false ? '' : 'checked'}> Transport: chips for how the patient was moved and positioned (Narrative tab)</label>` +
-        `<label class="s"><input type="checkbox" id="qfacilities" ${settings.quickFacilities === false ? '' : 'checked'}> Facilities: chips for saved facilities above the Scene and Destination locations (Incident tab)</label>` +
-        `<label class="s"><input type="checkbox" id="qincident" ${settings.quickIncident === false ? '' : 'checked'}> Incident: Run Type, Mutual Aid, EMD Complaint and Requested By rows under their labels, and Nursing Home / Other under the Scene and Destination types (only what ESO's own quick-picks lack)</label>` +
-        `<label class="s"><input type="checkbox" id="qmechanism" ${settings.quickMechanism === false ? '' : 'checked'}> Mechanism of injury: Blunt, Burn, Penetrating, Other chips (Narrative tab)</label>` +
-        `<label class="s"><input type="checkbox" id="qdisposition" ${settings.quickDisposition === false ? '' : 'checked'}> Disposition: Transported ALS/BLS, Refusal, Canceled (Prior/Scene) buttons under Unit Disposition; Transport Mode and Reason for Refusal outlined in red until answered (Incident tab)</label>` +
-        `<label class="s"><input type="checkbox" id="qautoresp" ${settings.autoResponse === false ? '' : 'checked'}> Auto-fill: choosing Emergent or Non-Emergent (response or transport mode) fills the lights/sirens, intersection, scheduled, speed and method fields that are still empty, and sets EMD Performed to No</label>` +
-        `<label class="s"><input type="checkbox" id="qtreat" ${settings.quickTreatments === false ? '' : 'checked'}> Flowchart: a copy button beside each saved treatment enters it again as a new one with the current time, every other value the same (Flowchart tab)</label>` +
-        `<label class="s"><input type="checkbox" id="qassess" ${settings.quickAssess === false ? '' : 'checked'}> Assessment: Copy (enters an assessment again as a new one with the current time, every finding and comment the same); "All normal" (presses No Abnormalities on every category in ESO's Quick Ax) and "A&amp;Ox4" on each assessment (Assessments tab)</label>` +
-        `<label class="s"><input type="checkbox" id="qnarrative" ${settings.quickNarrative === false ? '' : 'checked'}> Narrative: rows for Primary and Secondary Impression, Provided Care Level, Chief Complaint System, Anatomic Location, the complaint duration units, Barriers to Care and Alcohol/Drugs, and a Same as LKWT button above Onset Time (Narrative tab)</label>` +
-        `<label class="s"><input type="checkbox" id="qpatient" ${settings.quickPatient === false ? '' : 'checked'}> Patient: Race row (every race, shortened) (Patient tab)</label>` +
-        `<label class="s"><input type="checkbox" id="qrefusal" ${settings.quickRefusal === false ? '' : 'checked'}> Refusal form: chips for Legal, Decision-Making, Medical, Check All notifications and the four Patient Refusals inside ESO's Patient Refusal Form (Signatures tab)</label>` +
-        `<label class="s"><input type="checkbox" id="qmileage" ${settings.autoMileage === false ? '' : 'checked'}> Loaded mileage: press ESO's Calculate Mileage once the scene and destination both have an address (Incident tab)</label>` +
-        `<label class="s"><input type="checkbox" id="valhl" ${settings.valHighlight === false ? '' : 'checked'}> Show what the validation summary wants: every field on the open tab that ESO's validation summary names is outlined, red for an error and amber for a warning, with the reason when you hover or hold on it. It is checked again after each tab load and each save, so a field clears the moment it is filled and comes back if it is emptied. Turn it off if the outlines get in your way.</label>` +
-        `<label class="s"><input type="checkbox" id="qscan" ${settings.scanDocs === false ? '' : 'checked'}> Paperwork scanner: when you press Camera or Add Attachment in ESO's Attachments dialog, ESO Save first asks what the paperwork is (Facesheet, Physician Certification, Med List, Monitor Printout or Other) and names the attachment after it, for example "260918-021:Facesheet". A run keeps one Facesheet and one Physician Certification: adding a second asks whether to replace the first. On an iPad with the ESO Save app, Camera opens the app's document scanner, which straightens and crops each page; the pages come back and attach themselves. A facesheet, scanned or uploaded, is read and offered to fill the Patient and Billing pages. Off: ESO's own camera and Add Attachment work as they always have.</label>` +
-        `<div class="fac"><b>Vitals copy: what the copy button carries over</b><div class="muted" style="font-size:12px;margin:2px 0 4px">Untick anything that changes every time (blood pressure, say) so the copied vital comes in without it and nobody has to erase it.</div>` +
-        VITAL_GROUPS.map(([k, label]) => `<label class="s"><input type="checkbox" data-vc="${k}" ${(settings.vitalCopySkip || []).includes(k) ? '' : 'checked'}> ${esc(label)}</label>`).join('') + `</div>` +
-        facilityPicker('facilitySending', 'Sending facility chips (Scene)') + facilityPicker('facilityDestination', 'Destination facility chips') +
+        `<div class="lock">${canA ? `🔓 Settings marked 🔒 are the agency's and apply to every tablet: yours to change here, and to lock or unlock under Management.` : `🔒 marks a setting set by the agency (${nLocked} of them). Those cannot be changed here; the rest are yours.`}</div>` +
+        SETTING_DEFS.map(rowOf).join('') +
         `<div class="actions"><button class="a" data-act="save-settings">Save</button></div></div>`);
     }
     if (settings.unsentList !== false) {
@@ -552,7 +562,9 @@
       box.querySelector('.facm').innerHTML = fresh.querySelector('.facm').innerHTML;
       box.querySelectorAll('[data-act]').forEach(a => a.addEventListener('click', onPanelAction));
     }));
-    panel.querySelectorAll('[data-act]').forEach(el => el.addEventListener('click', onPanelAction));
+    panel.querySelectorAll('.mgmt [data-act], .mgmt [data-slock], .mgmt [data-tunlock]').forEach(el => el.addEventListener('click', onManagement));
+    panel.querySelectorAll('.mgmt [data-perm]').forEach(el => el.addEventListener('change', onManagement));
+    panel.querySelectorAll('[data-act]').forEach(el => { if (!el.closest('.mgmt')) el.addEventListener('click', onPanelAction); });
   }
   // ---- the login's row: fetched when the login is seen, written when they change something
   const dbHeaders = () => ({ apikey: SYNC.key, Authorization: 'Bearer ' + SYNC.key, 'Content-Type': 'application/json' });
@@ -613,25 +625,178 @@
   async function syncAgency() {
     try {
       const row = await dbGet(AGENCY_ROW);
-      if (row && row.settings && typeof row.settings === 'object') { Object.assign(settings, lockedSettings(row.settings)); await sset({ settings }); toPage('settings', settings); renderTimes(); }
+      const src = row && row.settings && typeof row.settings === 'object' ? row.settings : {};
+      // the lock list and the managers are whatever the row says, even when it says nothing
+      settings.locks = locksIn(src); settings.managers = src.managers && typeof src.managers === 'object' ? src.managers : {};
+      Object.assign(settings, lockedSettings(src));
+      await sset({ settings }); toPage('settings', settings); renderTimes(); layoutQuick();
+      if (panelOpen) { if (can('approveTemplates') || can('deleteTemplates')) mgmtLoad(); renderPanel(); }
     } catch (e) { /* no signal: the tablet's copy stands */ }
   }
-  async function pushAgency() {
-    if (!isAdmin()) return;
-    try { await dbPut({ name: AGENCY_ROW, settings: lockedSettings(settings) }); } catch (e) { syncDirty = true; }
+  // The agency row is written by merging the named keys over what the row holds now, so two
+  // managers' changes do not overwrite each other's. A key no longer locked leaves the row, so a
+  // later lock takes the locker's value, never a stale one.
+  async function pushAgency(keys) {
+    const allowed = (k) => isAdmin() || (k === 'managers' ? false : k === 'tplLocks' ? can('lockTemplates') : can('lockSettings'));
+    const want = (keys || AGENCY_ONLY.concat(locksIn(settings))).filter(allowed);
+    if (!want.length) return;
+    try {
+      const row = await dbGet(AGENCY_ROW);
+      const next = { ...(row && row.settings && typeof row.settings === 'object' ? row.settings : {}) };
+      for (const k of want) { if (k in settings) next[k] = settings[k]; else delete next[k]; }
+      const locks = locksIn(next); for (const k of Object.keys(next)) if (!AGENCY_ONLY.includes(k) && !locks.includes(k)) delete next[k];
+      await dbPut({ name: AGENCY_ROW, settings: next });
+    } catch (e) { syncDirty = true; }
   }
+  // a setting the agency let go of again: this tablet goes back to what its login had chosen
+  async function reopenSetting(k) {
+    try { const row = user ? await findPerson(user, userId) : null; if (row && row.settings && typeof row.settings === 'object' && k in row.settings) settings[k] = row.settings[k]; else if (k in DEFAULT_SETTINGS) settings[k] = DEFAULT_SETTINGS[k]; } catch (e) { /* offline: the agency's value stays until the next sync */ }
+  }
+  // ---- Management: the owner names managers and their permissions; locks; template approval
+  let mgmtOpen = false;
+  let mgmt = { pending: null, all: null, at: 0, note: '' };
+  async function mgmtLoad() {
+    if (!(can('approveTemplates') || can('deleteTemplates'))) { mgmt = { pending: null, all: null, at: 0, note: '' }; return; }
+    try {
+      const [pending, all] = await Promise.all([
+        can('approveTemplates') ? tplReq(`${TPL_URL}?approved=is.false&share=neq.private&select=id,owner_id,owner_name,name,body,share,updated_at&order=updated_at.asc`) : null,
+        can('deleteTemplates') ? tplReq(`${TPL_URL}?select=id,owner_id,owner_name,name,share,approved,updated_at&order=name.asc`) : null,
+      ]);
+      mgmt = { pending: pending || (can('approveTemplates') ? [] : null), all: all || (can('deleteTemplates') ? [] : null), at: Date.now(), note: '' };
+    } catch (e) { mgmt.note = 'No signal: the templates could not be read.'; }
+    if (panelOpen) renderPanel();
+  }
+  const lockName = (k) => k.split('.').map(humanize).join(' › ');
+  function managementUi() {
+    const locked = (title) => `<div class="msec off"><div class="mh">🔒 ${esc(title)}</div><div class="muted">Ask Admin for Approval for this Feature</div></div>`;
+    const parts = [];
+    parts.push(`<div class="lock">${isAdmin() ? 'Management is yours. Name managers below and tick what each may do; untick or remove to take it back.' : myManager() ? `Management: what ${esc(ADMIN.name)} granted you. Anything locked here is theirs to grant.` : `Management is for the agency's owner, ${esc(ADMIN.name)}, and the managers they name.`}</div>`);
+    if (isAdmin()) {
+      const m = managers();
+      const crew = ((facilityTypes && facilityTypes.crew) || []).filter(c => c.name && c.id !== userId && !m[c.id]).sort((a, b) => a.name.localeCompare(b.name));
+      parts.push(`<div class="msec"><div class="mh">Managers</div>` +
+        (Object.keys(m).length ? Object.entries(m).map(([id, x]) => `<div class="mgr" data-mgr="${esc(id)}"><div class="mn"><b>${esc(x.name || id)}</b><button class="a sec" data-act="mgr-remove" title="Take every permission away and remove them from Management">Remove</button></div>${PERMS.map(([pm, l, why]) => `<label class="s"><input type="checkbox" data-perm="${pm}" ${x.perms && x.perms[pm] ? 'checked' : ''}> ${esc(l)} <span class="muted">· ${esc(why)}</span></label>`).join('')}</div>`).join('') : '<div class="muted">No managers yet. Everything here is yours alone until you name one.</div>') +
+        (crew.length ? `<div class="mgradd"><select id="mgr-add"><option value="">Choose a person…</option>${crew.map(c => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('')}</select><button class="a" data-act="mgr-add">Add as manager</button></div>` : facilityTypes ? '' : '<div class="muted">Open a run once so ESO\'s crew list is loaded; then people can be added here.</div>') + `</div>`);
+    } else parts.push(locked('Managers'));
+    if (can('lockSettings')) {
+      parts.push(`<div class="msec"><div class="mh">Settings locks</div><div class="muted">A locked setting is the agency's: its value goes to every tablet and nobody else can change it. An open one is each person's own. Locking takes the value this tablet has now; set it in Settings first.</div>` +
+        SETTING_DEFS.map(d => `<div class="slk"><span>${esc(d.short)}</span><button class="a ${isLocked(d.k) ? '' : 'sec'}" data-slock="${d.k}">${isLocked(d.k) ? '🔒 Locked' : '🔓 Open'}</button></div>`).join('') + '</div>');
+    } else parts.push(locked('Settings locks'));
+    if (can('lockTemplates')) {
+      const L = tplLocks();
+      parts.push(`<div class="msec"><div class="mh">Template locks</div><div class="muted">A locked field, item or part cannot be set by a template: the crew enters it on the run. Lock one with Lock fields in any template's editor; unlock it there or here.</div>` +
+        (L.length ? L.map(k => `<div class="slk"><span>${esc(lockName(k))}</span><button class="a sec" data-tunlock="${esc(k)}">Unlock</button></div>`).join('') : '<div class="muted">Nothing is locked.</div>') + '</div>');
+    } else parts.push(locked('Template locks'));
+    if (can('approveTemplates')) {
+      const P = mgmt.pending;
+      parts.push(`<div class="msec"><div class="mh">Templates waiting for approval${P && P.length ? ` (${P.length})` : ''}</div><div class="muted">A template someone shares is seen by others only once it is approved here; its owner can use it meanwhile. Yours are approved as you save them. Send back makes it private again so its owner can change it and share it anew.</div>` +
+        (P === null ? '<div class="muted">Looking…</div>' : P.length ? P.map(t => `<div class="tpl" data-tid="${esc(t.id)}"><div><b>${esc(t.name)}</b><div class="muted">by ${esc(t.owner_name || '')} · ${t.share === 'everyone' ? 'to everyone' : 'to certain people'} · ${esc(tplHeld(t))} · ${esc(fmtWhen(t.updated_at))}</div></div><div class="actions"><button class="a" data-act="tpl-approve">Approve</button><button class="a sec" data-act="tpl-return">Send back</button></div></div>`).join('') : '<div class="muted">Nothing is waiting.</div>') + '</div>');
+    } else parts.push(locked('Approve templates'));
+    if (can('deleteTemplates')) {
+      const A = mgmt.all;
+      parts.push(`<div class="msec"><div class="mh">Every template in the agency</div>` +
+        (A === null ? '<div class="muted">Looking…</div>' : A.length ? A.map(t => `<div class="tpl" data-tid="${esc(t.id)}"><div><b>${esc(t.name)}</b><div class="muted">by ${esc(t.owner_name || '')} · ${t.share === 'everyone' ? 'shared to everyone' : t.share === 'some' ? 'shared with certain people' : 'private'}${t.share !== 'private' && !t.approved ? ' · waiting for approval' : ''}</div></div><div class="actions"><button class="a danger" data-act="tpl-del">Delete</button></div></div>`).join('') : '<div class="muted">No templates yet.</div>') + '</div>');
+    } else parts.push(locked('Delete templates'));
+    if (mgmt.note) parts.push(`<div class="muted">${esc(mgmt.note)}</div>`);
+    return `<div class="run mgmt">${parts.join('')}</div>`;
+  }
+  async function saveAgency(keys) {
+    await sset({ settings }); toPage('settings', settings);
+    await pushAgency(keys);
+    layoutQuick(); renderTimes(); if (panelOpen) renderPanel();
+  }
+  async function onManagement(e) {
+    const el = e.currentTarget;
+    const act = el.dataset.act;
+    const tid = el.closest('[data-tid]') && el.closest('[data-tid]').dataset.tid;
+    try {
+      if (act === 'mgr-add') {
+        if (!isAdmin()) return;
+        const sel = panel.querySelector('#mgr-add'); const id = sel && sel.value; if (!id) return;
+        const c = ((facilityTypes && facilityTypes.crew) || []).find(x => x.id === id); if (!c) return;
+        settings.managers = { ...managers(), [id]: { name: c.name, perms: {} } };
+        await saveAgency(['managers']);
+      } else if (act === 'mgr-remove') {
+        if (!isAdmin()) return;
+        const id = el.closest('[data-mgr]').dataset.mgr; const m = { ...managers() }; delete m[id]; settings.managers = m;
+        await saveAgency(['managers']);
+      } else if (el.dataset.perm) {
+        if (!isAdmin()) return;
+        const id = el.closest('[data-mgr]').dataset.mgr; const m = { ...managers() }; const x = { ...(m[id] || { name: id }) }; x.perms = { ...(x.perms || {}), [el.dataset.perm]: !!el.checked }; m[id] = x; settings.managers = m;
+        await saveAgency(['managers']);
+      } else if (el.dataset.slock) {
+        if (!can('lockSettings')) return;
+        const k = el.dataset.slock; const L = locksIn(settings); const on = !L.includes(k);
+        settings.locks = on ? L.concat([k]) : L.filter(x => x !== k);
+        await saveAgency(['locks', k]);
+        if (!on) { await reopenSetting(k); await sset({ settings }); toPage('settings', settings); layoutQuick(); if (panelOpen) renderPanel(); }
+      } else if (el.dataset.tunlock) {
+        await toggleLock(el.dataset.tunlock);
+      } else if (act === 'tpl-approve' && tid) {
+        if (!can('approveTemplates')) return;
+        await tplReq(`${TPL_URL}?id=eq.${encodeURIComponent(tid)}`, { method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ approved: true, approved_by: user, approved_at: new Date().toISOString() }) });
+        await mgmtLoad(); if (tplWin) tplLoad().then(() => renderTemplates()).catch(() => {});
+      } else if (act === 'tpl-return' && tid) {
+        if (!can('approveTemplates')) return;
+        const t = (mgmt.pending || []).find(x => x.id === tid);
+        if (!confirm(`Send "${t ? t.name : 'this template'}" back to ${t ? t.owner_name : 'its owner'} as a private template? They keep it and can share it again once it is changed.`)) return;
+        await tplReq(`${TPL_URL}?id=eq.${encodeURIComponent(tid)}`, { method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ share: 'private' }) });
+        await tplReq(`${SHARE_URL}?template_id=eq.${encodeURIComponent(tid)}`, { method: 'DELETE', headers: { Prefer: 'return=minimal' } });
+        await mgmtLoad();
+      } else if (act === 'tpl-del' && tid) {
+        if (!can('deleteTemplates')) return;
+        const t = (mgmt.all || []).find(x => x.id === tid);
+        if (!confirm(`Delete the template "${t ? t.name : ''}"${t && t.owner_id !== userId ? ` made by ${t.owner_name}` : ''}? People it was shared with lose it too.`)) return;
+        await tplDelete(tid); await mgmtLoad(); if (tplWin) tplLoad().then(() => renderTemplates()).catch(() => {});
+      }
+    } catch (err) { alert('ESO Save: that did not reach the table (no signal, or the table is away). ' + err.message); if (panelOpen) renderPanel(); }
+  }
+  // Settings, in the order the panel shows them: key, the input's id, kind, the long label (HTML)
+  // and the short name Management lists. The first seven are the agency's by default.
+  const SETTING_DEFS = [
+    { k: 'purgeHoursAfterLock', id: 'purge', type: 'number', before: 'Clear a run from this device', after: 'hours after it is locked (0 = as soon as the lock is seen)', short: 'Hours a locked run stays on the device' },
+    { k: 'warmTabs', id: 'warm', type: 'bool', label: 'Open every tab once, quietly, when a run opens (so tabs you have not touched still work with no signal)', short: 'Open every tab once when a run opens' },
+    { k: 'showTimes', id: 'times', type: 'bool', label: "Show the call times (dispatched, en route, on scene, at patient, depart, at destination, transfer) in the empty part of ESO's top bar", short: "Call times in ESO's top bar" },
+    { k: 'sendPrompt', id: 'sendprompt', type: 'bool', label: 'When a run is locked, offer to fax or email it to the destination if it has not been sent yet', short: 'Offer to fax or email at lock' },
+    { k: 'unsentList', id: 'unsentlist', type: 'bool', label: 'Keep a list of locked runs from the last 15 days that have a fax or email destination but were never sent', short: 'The Not sent list' },
+    { k: 'askBeforeLock', id: 'asklock', type: 'bool', label: 'Before a lock, ask whether the proper paperwork is attached (or not required); No leaves the run open', short: 'Paperwork question before a lock' },
+    { k: 'cadGate', id: 'cadgate', type: 'bool', label: "CAD import: only a run the call log shows you on may be imported. Unit Capability and Unit's Level of Care follow the crew's ESO certifications (a paramedic on the crew makes it ALS; a unit named NT… is non-transport)", short: 'CAD import only for your own runs' },
+    { k: 'quickDelays', id: 'qdelays', type: 'bool', head: 'Quick buttons', label: 'Delays: one "All: None/No Delay" button above the delay fields (Incident tab) that presses ESO\'s own None button on every delay still empty', short: 'Delays: All None' },
+    { k: 'quickHistory', id: 'qhistory', type: 'bool', label: 'History: one-tap chips for common conditions under Add History (Patient tab)', short: 'History chips' },
+    { k: 'quickMeds', id: 'qmeds', type: 'bool', label: 'Medications: chips for common home meds under Add Medications (Patient tab)', short: 'Medication chips' },
+    { k: 'quickAllergies', id: 'qallergies', type: 'bool', label: 'Allergies: chips for common allergies under Add Allergies (Patient tab)', short: 'Allergy chips' },
+    { k: 'quickAcuity', id: 'qacuity', type: 'bool', label: 'Acuity: red, yellow and green buttons next to Initial and Final Patient Acuity (Narrative tab)', short: 'Acuity buttons' },
+    { k: 'quickTransport', id: 'qtransport', type: 'bool', label: 'Transport: chips for how the patient was moved and positioned (Narrative tab)', short: 'Transport chips' },
+    { k: 'quickFacilities', id: 'qfacilities', type: 'bool', label: 'Facilities: chips for saved facilities above the Scene and Destination locations (Incident tab)', short: 'Facility chips' },
+    { k: 'quickIncident', id: 'qincident', type: 'bool', label: 'Incident: Run Type, Mutual Aid, EMD Complaint and Requested By rows under their labels, and Nursing Home / Other under the Scene and Destination types (only what ESO\'s own quick-picks lack)', short: 'Incident rows' },
+    { k: 'quickMechanism', id: 'qmechanism', type: 'bool', label: 'Mechanism of injury: Blunt, Burn, Penetrating, Other chips (Narrative tab)', short: 'Mechanism chips' },
+    { k: 'quickDisposition', id: 'qdisposition', type: 'bool', label: 'Disposition: Transported ALS/BLS, Refusal, Canceled (Prior/Scene) buttons under Unit Disposition; Transport Mode and Reason for Refusal outlined in red until answered (Incident tab)', short: 'Disposition buttons' },
+    { k: 'autoResponse', id: 'qautoresp', type: 'bool', label: 'Auto-fill: choosing Emergent or Non-Emergent (response or transport mode) fills the lights/sirens, intersection, scheduled, speed and method fields that are still empty, and sets EMD Performed to No', short: 'Auto-fill on Emergent / Non-Emergent' },
+    { k: 'quickTreatments', id: 'qtreat', type: 'bool', label: 'Flowchart: a copy button beside each saved treatment enters it again as a new one with the current time, every other value the same (Flowchart tab)', short: 'Treatment copy' },
+    { k: 'quickAssess', id: 'qassess', type: 'bool', label: 'Assessment: Copy (enters an assessment again as a new one with the current time, every finding and comment the same); "Normal" (presses No Abnormalities on every category in ESO\'s Quick Ax) and "A&amp;Ox4" on each assessment (Assessments tab)', short: 'Assessment Copy, Normal, A&Ox4' },
+    { k: 'quickNarrative', id: 'qnarrative', type: 'bool', label: 'Narrative: rows for Primary and Secondary Impression, Provided Care Level, Chief Complaint System, Anatomic Location, the complaint duration units, Barriers to Care and Alcohol/Drugs, and a Same as LKWT button beside Onset Time (Narrative tab)', short: 'Narrative rows and Same as LKWT' },
+    { k: 'quickPatient', id: 'qpatient', type: 'bool', label: 'Patient: Race row (every race, shortened) (Patient tab)', short: 'Race row' },
+    { k: 'quickRefusal', id: 'qrefusal', type: 'bool', label: 'Refusal form: chips for Legal, Decision-Making, Medical, Check All notifications and the four Patient Refusals inside ESO\'s Patient Refusal Form (Signatures tab)', short: 'Refusal form chips' },
+    { k: 'autoMileage', id: 'qmileage', type: 'bool', label: 'Loaded mileage: press ESO\'s Calculate Mileage once the scene and destination both have an address (Incident tab)', short: 'Loaded mileage' },
+    { k: 'valHighlight', id: 'valhl', type: 'bool', label: 'Show what the validation summary wants: every field on the open tab that ESO\'s validation summary names is outlined, red for an error and amber for a warning, with the reason when you hover or hold on it. It is checked again after each tab load and each save, so a field clears the moment it is filled and comes back if it is emptied. Turn it off if the outlines get in your way.', short: 'Validation outlines' },
+    { k: 'scanDocs', id: 'qscan', type: 'bool', label: 'Paperwork scanner: when you press Camera or Add Attachment in ESO\'s Attachments dialog, ESO Save first asks what the paperwork is (Facesheet, Physician Certification, Med List, Monitor Printout or Other) and names the attachment after it, for example "260918-021:Facesheet". A run keeps one Facesheet and one Physician Certification: adding a second asks whether to replace the first. On an iPad with the ESO Save app, Camera opens the app\'s document scanner, which straightens and crops each page; the pages come back and attach themselves. A facesheet, scanned or uploaded, is read and offered to fill the Patient and Billing pages. Off: ESO\'s own camera and Add Attachment work as they always have.', short: 'Paperwork scanner' },
+    { k: 'vitalCopySkip', id: 'vcopy', type: 'vitals', short: 'What the vitals copy carries over' },
+    { k: 'facilitySending', id: 'facs', type: 'facility', title: 'Sending facility chips (Scene)', short: 'Sending facility chips' },
+    { k: 'facilityDestination', id: 'facd', type: 'facility', title: 'Destination facility chips', short: 'Destination facility chips' },
+  ];
   const openLogs = new Set();
   let settingsOpen = false;
   let unsentOpen = false; // the Not sent list stays folded until asked for
   const facSearch = {};
   function facilityPicker(key, title) {
+    const ro = isLocked(key) && !can('lockSettings');
     const chosen = settings[key] || [];
     const q = (facSearch[key] || '').trim().toLowerCase();
     const cat = facilities ? facilities.items : [];
     const matches = q ? cat.filter(f => f.name.toLowerCase().includes(q) && !chosen.some(c => c.id === f.id)).slice(0, 8) : [];
-    return `<div class="s fac" data-key="${key}"><b>${esc(title)}</b>` +
-      `<div class="chosen">${chosen.map(c => { const t = facilityTypeName(FACILITY_GROUPS[key === 'facilitySending' ? 'sending' : 'destination'], c); return `<span class="pill gray">${esc(c.label && c.label !== c.name ? `${c.label} (${c.name})` : c.name)}${t ? ` <span class="muted">· ${esc(t)}</span>` : ' <span class="muted">· type unknown</span>'} <a data-act="fac-remove" data-id="${esc(c.id)}" title="Remove">×</a></span>`; }).join('') || '<span class="muted">none yet</span>'}</div>` +
-      (facilities ? `<input type="text" class="facq" placeholder="Type part of a facility name…" value="${esc(facSearch[key] || '')}">` +
+    return `<div class="s fac${ro ? ' locked' : ''}" data-key="${key}"><b>${isLocked(key) ? '🔒 ' : ''}${esc(title)}</b>` +
+      `<div class="chosen">${chosen.map(c => { const t = facilityTypeName(FACILITY_GROUPS[key === 'facilitySending' ? 'sending' : 'destination'], c); return `<span class="pill gray">${esc(c.label && c.label !== c.name ? `${c.label} (${c.name})` : c.name)}${t ? ` <span class="muted">· ${esc(t)}</span>` : ' <span class="muted">· type unknown</span>'}${ro ? '' : ` <a data-act="fac-remove" data-id="${esc(c.id)}" title="Remove">×</a>`}</span>`; }).join('') || '<span class="muted">none yet</span>'}</div>` +
+      (ro ? '<span class="muted">Set by the agency.</span>' : facilities ? `<input type="text" class="facq" placeholder="Type part of a facility name…" value="${esc(facSearch[key] || '')}">` +
         `<div class="facm">${matches.map(f => { const t = typeNameFor(key === 'facilitySending' ? 'locationTypes' : 'destinationTypes', f.typeId); return `<a data-act="fac-add" data-id="${esc(f.id)}">${esc(f.name)}${f.city || t ? ` <span class="muted">${esc([f.city, t].filter(Boolean).join(' · '))}</span>` : ''}</a>`; }).join('')}${q && !matches.length ? '<span class="muted">no saved facility matches</span>' : ''}</div>`
         : '<span class="muted">Open a run first so ESO\'s facility list is loaded.</span>') + '</div>';
   }
@@ -644,46 +809,28 @@
     else if (act === 'push') toPage('action', { name: 'pushNow' });
     else if (act === 'settings') { settingsOpen = !settingsOpen; renderPanel(); }
     else if (act === 'save-settings') {
-      if (isAdmin()) { // the agency's owner sets the locked block for every tablet
-        const v = Number(panel.querySelector('#purge').value);
-        settings.purgeHoursAfterLock = Number.isFinite(v) && v >= 0 ? v : 0;
-        settings.warmTabs = !!panel.querySelector('#warm').checked;
-        settings.showTimes = !!panel.querySelector('#times').checked;
-        settings.sendPrompt = !!panel.querySelector('#sendprompt').checked;
-        settings.unsentList = !!panel.querySelector('#unsentlist').checked;
-        settings.askBeforeLock = !!panel.querySelector('#asklock').checked;
-        settings.cadGate = !!panel.querySelector('#cadgate').checked;
-        pushAgency();
+      // the locked settings go to the agency row (for whoever may change them), the open ones to the login's row
+      const canA = can('lockSettings'); const agencyKeys = [];
+      for (const d of SETTING_DEFS) {
+        const lk = isLocked(d.k); if (lk && !canA) continue;
+        if (d.type === 'number') { const v = Number(panel.querySelector('#' + d.id).value); settings[d.k] = Number.isFinite(v) && v >= 0 ? v : 0; }
+        else if (d.type === 'bool') settings[d.k] = !!panel.querySelector('#' + d.id).checked;
+        else if (d.type === 'vitals') settings[d.k] = Array.from(panel.querySelectorAll('[data-vc]')).filter(c => !c.checked).map(c => c.dataset.vc);
+        else continue; // the facility lists are written as they are picked
+        if (lk) agencyKeys.push(d.k);
       }
-      settings.quickDelays = !!panel.querySelector('#qdelays').checked;
-      settings.quickHistory = !!panel.querySelector('#qhistory').checked;
-      settings.quickMeds = !!panel.querySelector('#qmeds').checked;
-      settings.quickAllergies = !!panel.querySelector('#qallergies').checked;
-      settings.quickAcuity = !!panel.querySelector('#qacuity').checked;
-      settings.quickTransport = !!panel.querySelector('#qtransport').checked;
-      settings.quickFacilities = !!panel.querySelector('#qfacilities').checked;
-      settings.quickAssess = !!panel.querySelector('#qassess').checked;
-      settings.quickTreatments = !!panel.querySelector('#qtreat').checked;
-      settings.quickDisposition = !!panel.querySelector('#qdisposition').checked;
-      settings.quickIncident = !!panel.querySelector('#qincident').checked;
-      settings.quickMechanism = !!panel.querySelector('#qmechanism').checked;
-      settings.autoResponse = !!panel.querySelector('#qautoresp').checked;
-      settings.quickNarrative = !!panel.querySelector('#qnarrative').checked;
-      settings.quickPatient = !!panel.querySelector('#qpatient').checked;
-      settings.quickRefusal = !!panel.querySelector('#qrefusal').checked;
-      settings.autoMileage = !!panel.querySelector('#qmileage').checked;
-      settings.scanDocs = !!panel.querySelector('#qscan').checked;
-      settings.valHighlight = !!panel.querySelector('#valhl').checked;
-      settings.vitalCopySkip = Array.from(panel.querySelectorAll('[data-vc]')).filter(c => !c.checked).map(c => c.dataset.vc);
+      if (agencyKeys.length) pushAgency(agencyKeys);
       layoutQuick();
       await sset({ settings }); toPage('settings', settings); settingsOpen = false; renderPanel(); renderTimes();
       pushUser();
     }
+    else if (act === 'management') { mgmtOpen = !mgmtOpen; if (mgmtOpen) { settingsOpen = false; if (can('approveTemplates') || can('deleteTemplates')) mgmtLoad(); } renderPanel(); }
     else if (act === 'toggle-log') { if (openLogs.has(id)) openLogs.delete(id); else openLogs.add(id); renderPanel(); }
     else if (act === 'rescan') { toPage('action', { name: 'scanUnsent' }); }
     else if (act === 'unsent-toggle') { unsentOpen = !unsentOpen; renderPanel(); }
     else if (act === 'fac-add' || act === 'fac-remove') {
       const key = el.closest('.fac').dataset.key; const fid = el.dataset.id;
+      if (isLocked(key) && !can('lockSettings')) return;
       const list = (settings[key] || []).filter(c => c.id !== fid);
       if (act === 'fac-add') {
         const f = facilities && facilities.items.find(x => x.id === fid);
@@ -695,7 +842,7 @@
       }
       settings[key] = list;
       await sset({ settings }); toPage('settings', settings); renderPanel(); layoutQuick();
-      pushUser();
+      if (isLocked(key)) pushAgency([key]); else pushUser();
     }
     else if (act === 'send-fax' || act === 'send-email') {
       const row = el.closest('.urow'); const pcr = row && row.dataset.pcr; if (!pcr) return;
@@ -2812,6 +2959,8 @@
   const ITEM_KEY = { treatment: 'flowchartTreatmentRegistryId', history: 'itemId', allergy: 'itemId', medication: 'itemId', belonging: 'itemId', sign: 'signId', protocol: 'protocolsUsedId', immunization: 'immunizationTypeId' };
   const SHORT_NAMES = { cpr: 'CPR', acs: 'ACS', mvc: 'MVC', css: 'CSS', lapss: 'LAPSS', mend: 'MEND', ob: 'OB', ebola: 'Ebola', ppe: 'PPE', emd: 'EMD', cad: 'CAD' };
   const humanize = (seg) => SHORT_NAMES[String(seg || '').toLowerCase()] || String(seg || '').replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/[_.]/g, ' ').replace(/^./, c => c.toUpperCase()).replace(/\bId\b/g, '').trim();
+  // what a template holds, in a few words: "3 fields · 1 vital · 2 treatments"
+  const tplHeld = (t) => { const nf = Object.keys((t.body && t.body.fields) || {}).length, its = (t.body && t.body.items) || []; const kinds = {}; for (const it of its) kinds[it.kind] = (kinds[it.kind] || 0) + 1; return [`${nf} field${nf === 1 ? '' : 's'}`].concat(Object.entries(kinds).map(([k, n]) => `${n} ${n === 1 ? (ITEM_ONE[k] || k).replace(/^(a|an) /, '') : (ITEM_NAMES[k] || k).toLowerCase()}`)).join(' · '); };
   const tplHeaders = (extra) => ({ apikey: AGENCY_DB.key, Authorization: 'Bearer ' + AGENCY_DB.key, 'Content-Type': 'application/json', ...(extra || {}) });
   async function tplReq(url, opts) {
     const r = await fetch(url, { ...opts, headers: tplHeaders(opts && opts.headers) });
@@ -2824,14 +2973,18 @@
     const shares = await tplReq(`${SHARE_URL}?person_id=eq.${encodeURIComponent(userId)}&select=template_id`);
     const ids = (shares || []).map(x => x.template_id);
     const or = [`owner_id.eq.${userId}`, 'share.eq.everyone'].concat(ids.length ? [`id.in.(${ids.join(',')})`] : []);
-    const rows = await tplReq(`${TPL_URL}?or=(${or.join(',')})&select=id,owner_id,owner_name,name,body,share,updated_at&order=name.asc`);
+    const rows = await tplReq(`${TPL_URL}?or=(${or.join(',')})&select=id,owner_id,owner_name,name,body,share,approved,approved_by,updated_at&order=name.asc`);
     const mine = [], shared = [], everyone = [];
-    for (const r of rows || []) { if (r.owner_id === userId) mine.push(r); else if (r.share === 'everyone') everyone.push(r); else shared.push(r); }
+    // another's shared template is seen only once a manager approved it; one's own always
+    for (const r of rows || []) { if (r.owner_id === userId) mine.push(r); else if (!r.approved) continue; else if (r.share === 'everyone') everyone.push(r); else shared.push(r); }
     tpls = { mine, shared, everyone, at: Date.now(), who: userId };
     await sset({ tpls });
   }
   async function tplSave(t) {
     const row = { owner_id: userId, owner_name: user, name: t.name, body: t.body, share: t.share, updated_at: new Date().toISOString() };
+    // the owner's and an approving manager's templates stand approved as saved; anyone else's wait
+    // for Management, and a change to one puts it back in the queue
+    if (can('approveTemplates')) Object.assign(row, { approved: true, approved_by: user, approved_at: new Date().toISOString() }); else Object.assign(row, { approved: false, approved_by: null, approved_at: null });
     if (t.id) row.id = t.id;
     const out = await tplReq(TPL_URL, { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=representation' }, body: JSON.stringify(row) });
     const saved = Array.isArray(out) ? out[0] : out;
@@ -2866,10 +3019,11 @@
     if (tpls.who && userId && tpls.who !== userId) { tpls = { mine: [], shared: [], everyone: [], at: 0, who: userId }; note = note || 'No signal: the templates seen on this tablet were another login\'s.'; }
     const run = currentRun();
     const canFill = !!run && !run.locked;
-    const held = (t) => { const nf = Object.keys((t.body && t.body.fields) || {}).length, its = (t.body && t.body.items) || []; const kinds = {}; for (const it of its) kinds[it.kind] = (kinds[it.kind] || 0) + 1; return [`${nf} field${nf === 1 ? '' : 's'}`].concat(Object.entries(kinds).map(([k, n]) => `${n} ${n === 1 ? (ITEM_ONE[k] || k).replace(/^(a|an) /, '') : (ITEM_NAMES[k] || k).toLowerCase()}`)).join(' · '); };
-    const row = (t, kind) => `<div class="tpl" data-id="${esc(t.id)}"><div><div class="tn">${esc(t.name)}</div><div class="by">${kind !== 'mine' ? `shared by ${esc(t.owner_name || '')}` : (t.share === 'everyone' ? 'yours, shared with everyone' : t.share === 'some' ? 'yours, shared with some people' : 'yours, private')} · ${esc(held(t))}</div></div>
+    const held = tplHeld;
+    const wait = (t) => t.share !== 'private' && !t.approved ? ' · <span style="color:#b45309;font-weight:600">waiting for a manager\'s approval: others see it once approved</span>' : '';
+    const row = (t, kind) => `<div class="tpl" data-id="${esc(t.id)}"><div><div class="tn">${esc(t.name)}</div><div class="by">${kind !== 'mine' ? `shared by ${esc(t.owner_name || '')}` : (t.share === 'everyone' ? 'yours, shared with everyone' : t.share === 'some' ? 'yours, shared with some people' : 'yours, private')} · ${esc(held(t))}${kind === 'mine' ? wait(t) : ''}</div></div>
       <button class="tb pri" data-act="fill" ${canFill ? '' : 'disabled title="Open an unlocked run first"'}>Fill this run</button>
-      ${kind === 'mine' ? '<button class="tb sec" data-act="edit">Edit</button><button class="tb sec" data-act="copy" title="A new template of your own, starting from this one">Copy</button><button class="tb danger" data-act="delete">Delete</button>' : '<button class="tb sec" data-act="copy" title="A new template of your own, starting from this one">Copy to mine</button>'}</div>`;
+      ${kind === 'mine' ? '<button class="tb sec" data-act="edit">Edit</button><button class="tb sec" data-act="copy" title="A new template of your own, starting from this one">Copy</button><button class="tb danger" data-act="delete">Delete</button>' : '<button class="tb sec" data-act="copy" title="A new template of your own, starting from this one">Copy to mine</button>' + (can('deleteTemplates') ? '<button class="tb danger" data-act="delete" title="A manager\'s delete: the owner and everyone it was shared with lose it">Delete</button>' : '')}</div>`;
     // a copy's name: "(copy)", then "(copy 2)", "(copy 3)"... among the person's own
     const copyName = (name) => { const base = name.replace(/ \(copy( \d+)?\)$/, ''); const taken = new Set(tpls.mine.map(x => x.name.toLowerCase())); let n = 1, cand = `${base} (copy)`; while (taken.has(cand.toLowerCase())) { n++; cand = `${base} (copy ${n})`; } return cand; };
     tplWin.innerHTML = `<div class="tophead"><h1>Templates</h1><button class="tb" data-act="new">New template</button><button class="tb sec" data-act="close">Close</button></div>
@@ -2888,7 +3042,7 @@
       else if (act === 'edit' && t) startEditor(t);
       // any template, one's own or another's, copied becomes a new private one of one's own, to change and share
       else if (act === 'copy' && t) startEditor({ ...t, id: null, name: copyName(t.name), share: 'private', owner_id: userId, owner_name: user });
-      else if (act === 'delete' && t) { if (!confirm(`Delete the template "${t.name}"? People it was shared with lose it too.`)) return; try { await tplDelete(t.id); await tplLoad(); } catch (err) { alert('ESO Save: could not delete it. ' + err.message); } renderTemplates(); }
+      else if (act === 'delete' && t) { if (t.owner_id !== userId && !can('deleteTemplates')) return; if (!confirm(`Delete the template "${t.name}"${t.owner_id !== userId ? ` made by ${t.owner_name}` : ''}? People it was shared with lose it too.`)) return; try { await tplDelete(t.id); await tplLoad(); } catch (err) { alert('ESO Save: could not delete it. ' + err.message); } renderTemplates(); }
       else if (act === 'fill' && t) fillWithTemplate(t);
     }));
   }
@@ -2910,13 +3064,14 @@
   const tplLocked = (key) => tplLocks().some(k => key === k || key.startsWith(k + '.'));
   let lockMode = false;
   async function toggleLock(key) {
-    if (!isAdmin()) return;
+    if (!can('lockTemplates')) return;
     const cur = tplLocks();
     settings.tplLocks = cur.includes(key) ? cur.filter(k => k !== key) : cur.concat([key]);
-    await sset({ settings }); await pushAgency();
-    renderEditor();
+    await sset({ settings }); await pushAgency(['tplLocks']);
+    if (tplWin && tplView === 'edit') renderEditor();
+    if (panelOpen) renderPanel();
   }
-  const lockBtn = (key, extra) => lockMode && isAdmin() ? `<button type="button" class="tb sec" data-lock="${esc(key)}" title="${tplLocked(key) ? 'Locked: the crew cannot set this' : 'Open: lock it'}" style="padding:6px 10px;min-height:36px;${extra || ''}">${tplLocks().includes(key) ? '🔒 Locked' : tplLocked(key) ? '🔒 (in a locked group)' : '🔓 Lock'}</button>` : '';
+  const lockBtn = (key, extra) => lockMode && can('lockTemplates') ? `<button type="button" class="tb sec" data-lock="${esc(key)}" title="${tplLocked(key) ? 'Locked: the crew cannot set this' : 'Open: lock it'}" style="padding:6px 10px;min-height:36px;${extra || ''}">${tplLocks().includes(key) ? '🔒 Locked' : tplLocked(key) ? '🔒 (in a locked group)' : '🔓 Lock'}</button>` : '';
   const lockNote = () => `<span class="muted" style="font-weight:600">🔒 Locked by the agency</span>`;
   // Fields ESO shows only once something else is picked (the mutual aid agency once the run type is
   // mutual aid, the injury fields once there is an injury, the transport fields once the patient
@@ -2995,7 +3150,8 @@
       <label><input type="radio" name="share" value="private" ${ed.share === 'private' ? 'checked' : ''}> Private</label>
       <label><input type="radio" name="share" value="everyone" ${ed.share === 'everyone' ? 'checked' : ''}> Everyone</label>
       <label><input type="radio" name="share" value="some" ${ed.share === 'some' ? 'checked' : ''}> Certain people</label>
-      ${ed.share === 'some' ? `<div class="pick" style="min-width:260px"><input type="text" class="search" data-people placeholder="Search a name…"><div class="picklist" hidden data-peoplelist></div><div class="chosen">${ed.people.map(p => `<span>${esc(p.name)} <a data-unshare="${esc(p.id)}" style="cursor:pointer">✕</a></span>`).join('')}</div></div>` : ''}</div>`;
+      ${ed.share === 'some' ? `<div class="pick" style="min-width:260px"><input type="text" class="search" data-people placeholder="Search a name…"><div class="picklist" hidden data-peoplelist></div><div class="chosen">${ed.people.map(p => `<span>${esc(p.name)} <a data-unshare="${esc(p.id)}" style="cursor:pointer">✕</a></span>`).join('')}</div></div>` : ''}
+      ${ed.share !== 'private' && !can('approveTemplates') ? `<div class="muted" data-approvalnote style="flex-basis:100%">Others see a shared template once a manager approves it under Management; you can use it right away.</div>` : ''}</div>`;
     let content = '';
     const page = ed.page;
     const secs = sectionsOf(page), roots = itemRootsOf(page);
@@ -3011,7 +3167,7 @@
     const fieldRow = (f, cur, prefix) => {
       const on = !!cur; const key = prefix ? `${prefix}|${f.rel}` : f.a;
       const locked = tplLocked(f.a);
-      const shut = locked && !isAdmin();
+      const shut = locked && !can('lockTemplates');
       const rule = prefix ? null : ruleFor(f.a); const unmet = rule && !ruleMet(rule, ed.fields);
       const blanks = f.t === 'string' && /narrative/i.test(f.a) && /narrativeText|narrative$/i.test(f.a) ? '<div class="muted" style="font-weight:400">Leave blanks like ____ to fill on the run; {incident}, {unit}, {date} and {time} are filled in for you.</div>' : '';
       return `<div class="tf ${on ? 'on' : ''} ${shut ? 'shut' : ''}" data-key="${esc(key)}"><input type="checkbox" data-sel ${on ? 'checked' : ''} ${shut ? 'disabled' : ''}><div class="fl">${esc(pnTitle(f))}<div class="muted" style="font-weight:400">${esc(f.t === 'pertinentNegative' ? 'unable to obtain: the reason' : '')}${locked ? lockNote() : ''}${unmet ? `<div style="color:#b45309">Only on the run when ${esc(rule.why)}; left out until then.</div>` : ''}</div>${blanks}</div><div>${shut ? '' : inputFor(f, cur ? cur.v : null, key)}${lockBtn(f.a, 'margin-top:4px')}</div></div>`;
@@ -3028,7 +3184,7 @@
     for (const [root, kind] of roots) {
       const items = ed.items.map((it, i) => ({ it, i })).filter(x => x.it.root === root);
       const members = memberFields(root);
-      const rootLocked = tplLocked(root), rootShut = rootLocked && !isAdmin();
+      const rootLocked = tplLocked(root), rootShut = rootLocked && !can('lockTemplates');
       content += `<details class="sec" ${items.length || q ? 'open' : ''}><summary><span style="flex:1">${esc(ITEM_NAMES[kind] || humanize(root.split('.').pop()))}${items.length ? ` <span class="cnt" style="background:#fbbf24;border-radius:10px;padding:0 7px;font-size:12px">${items.length}</span>` : ''}${rootLocked ? ' ' + lockNote() : ''}</span>${lockBtn(root)}</summary>
         ${rootShut ? `<div class="muted" style="padding:0 0 10px">${esc(ITEM_NAMES[kind] || 'These')} are locked by the agency: a template cannot add them. Enter them on the run yourself.</div>` : ''}
         ${!rootShut && utoSet(ed.fields, root) ? `<div data-utonote style="color:#b45309;padding:0 0 10px">Unable to obtain is set for ${esc((ITEM_NAMES[kind] || 'these').toLowerCase())}: ESO takes one or the other, so a fill writes the Unable to obtain and leaves ${items.length ? 'these entries' : 'any entries'} out. Clear it to fill entries instead.</div>` : ''}
@@ -3038,7 +3194,7 @@
     }
     if (!content) content = '<div class="muted">Nothing on this tab can be templated.</div>';
     const nf = Object.keys(ed.fields).length, ni = ed.items.length;
-    tplWin.innerHTML = `<div class="tophead"><input class="name" type="text" placeholder="Template name" value="${esc(ed.name)}" data-name><span class="muted" style="color:#d1fae5">${nf} field${nf === 1 ? '' : 's'}${ni ? `, ${ni} item${ni === 1 ? '' : 's'}` : ''}</span><span style="flex:1"></span>${isAdmin() ? `<button class="tb ${lockMode ? 'pri' : 'sec'}" data-act="lockmode" title="Lock fields the crew must enter themselves">${lockMode ? 'Done locking' : 'Lock fields'}</button>` : ''}<button class="tb pri" data-act="save">Save</button><button class="tb sec" data-act="cancel">Cancel</button></div>
+    tplWin.innerHTML = `<div class="tophead"><input class="name" type="text" placeholder="Template name" value="${esc(ed.name)}" data-name><span class="muted" style="color:#d1fae5">${nf} field${nf === 1 ? '' : 's'}${ni ? `, ${ni} item${ni === 1 ? '' : 's'}` : ''}</span><span style="flex:1"></span>${can('lockTemplates') ? `<button class="tb ${lockMode ? 'pri' : 'sec'}" data-act="lockmode" title="Lock fields the crew must enter themselves">${lockMode ? 'Done locking' : 'Lock fields'}</button>` : ''}<button class="tb pri" data-act="save">Save</button><button class="tb sec" data-act="cancel">Cancel</button></div>
       <div class="body">${shareUi}<input type="text" class="search" placeholder="Find a field on this tab…" value="${esc(ed.q)}" data-q><div class="pages">${pageBtns}</div>${content}</div>`;
     if (tplWin._page === page) {
       for (const d of tplWin.querySelectorAll('details.sec')) { const t = d.querySelector('summary') && d.querySelector('summary').textContent.trim(); if (t && openFolds.has(t)) d.open = true; }
@@ -3066,7 +3222,7 @@
       const total = gcs.every(n => !isNaN(n)) ? gcs.reduce((a, b) => a + b, 0) : null;
       return `<div style="display:flex;flex-direction:column;gap:10px">` + keys.map(g => {
         const gk = g === 'other' ? null : `${it.root}.${g}`; const gl = gk && tplLocked(gk);
-        const rows = gl && !isAdmin() ? '' : groups.get(g).filter(m => !/PertinentNegativeId$/.test(m.rel)).map(m => fieldRow(m, it.fields[m.rel], String(i))).join('') + groups.get(g).filter(m => /PertinentNegativeId$/.test(m.rel)).map(m => fieldRow({ ...m, n: 'Unable to obtain' }, it.fields[m.rel], String(i))).join('');
+        const rows = gl && !can('lockTemplates') ? '' : groups.get(g).filter(m => !/PertinentNegativeId$/.test(m.rel)).map(m => fieldRow(m, it.fields[m.rel], String(i))).join('') + groups.get(g).filter(m => /PertinentNegativeId$/.test(m.rel)).map(m => fieldRow({ ...m, n: 'Unable to obtain' }, it.fields[m.rel], String(i))).join('');
         return `<div style="border:1px solid #e2e8f0;border-radius:10px;background:#fff"><div style="padding:8px 12px;background:#f1f5f9;border-radius:10px 10px 0 0;font-weight:700;color:#334155;display:flex;gap:10px;align-items:center">${esc(VITAL_GROUP_NAMES[g] || humanize(g))}${g === 'glasgowComaScale' && total ? ` <span class="muted">total ${total}</span>` : ''}${gl ? lockNote() : ''}${gk ? lockBtn(gk) : ''}</div><div style="padding:4px 12px 8px">${rows}</div></div>`;
       }).join('') + '</div>';
     }
@@ -3176,7 +3332,7 @@
       const state = fs.length ? fs.map(f => (f.present === false ? '✕ ' : '✓ ') + fname(f.id)).join(', ') : has(g.loc, 'No_Abnormalities') ? 'No Abnormalities' : has(g.loc, 'Not_Assessed') ? 'Not Assessed' : '';
       return `<details class="axg" data-axg="${esc(g.loc)}" ${fs.length ? 'open' : ''} style="border-top:1px solid #f1f5f9;padding:2px 0"><summary style="cursor:pointer;font-weight:600;color:#334155;padding:6px 0">${esc(g.n)}${state ? ` <span class="muted" style="font-weight:400">${esc(state)}</span>` : ''}</summary><div style="padding:4px 0 8px">${one}${list}</div></details>`;
     };
-    if (catLocked && !isAdmin()) html += `<div class="muted" style="margin:6px 0 12px">${esc(cat.n)} is locked by the agency: a template cannot set it. Assess it on the run.</div>`;
+    if (catLocked && !can('lockTemplates')) html += `<div class="muted" style="margin:6px 0 12px">${esc(cat.n)} is locked by the agency: a template cannot set it. Assess it on the run.</div>`;
     else for (const s of cat.s) {
       const naOn = (id) => s.na.length > 0 && s.na.every(l => has(l, id));
       const fold = new Set(s.g.map(g => g.loc)).size > 1;
@@ -3188,7 +3344,7 @@
         <div style="padding:8px 12px 12px">${s.g.map(g => group(g, fold)).join('')}</div></div>`;
     }
     const cm = cat.c; const cmf = cm && memberFields('assessments.assessmentsV2').find(m => m.rel === cm);
-    if (cmf && !(catLocked && !isAdmin())) html += `<div style="font-weight:700;color:#334155;margin:4px 0 6px">Comments</div><div class="tf ${it.fields[cm] ? 'on' : ''}" data-key="${esc(String(idx))}|${esc(cm)}" style="grid-template-columns:34px 1fr"><input type="checkbox" data-sel ${it.fields[cm] ? 'checked' : ''}><div>${inputFor(cmf, it.fields[cm] ? it.fields[cm].v : null)}</div></div>`;
+    if (cmf && !(catLocked && !can('lockTemplates'))) html += `<div style="font-weight:700;color:#334155;margin:4px 0 6px">Comments</div><div class="tf ${it.fields[cm] ? 'on' : ''}" data-key="${esc(String(idx))}|${esc(cm)}" style="grid-template-columns:34px 1fr"><input type="checkbox" data-sel ${it.fields[cm] ? 'checked' : ''}><div>${inputFor(cmf, it.fields[cm] ? it.fields[cm].v : null)}</div></div>`;
     return html + '</div></div></div>';
   }
   function fieldDef(key) {
@@ -3348,7 +3504,7 @@
     if (empty.length) { alert(`ESO Save: ${empty.length === 1 ? 'one item is' : empty.length + ' items are'} empty (${empty.map(it => ITEM_ONE[it.kind] || it.kind).join(', ')}): pick ${empty.some(it => ITEM_KEY[it.kind]) ? 'what it is' : 'at least one value'}, or remove it.`); return; }
     const items = ed.items.map(it => { const { _open, _cat, ...rest } = it; return rest; });
     let body = { v: 1, fields: ed.fields, items };
-    if (!isAdmin()) { const r = applyLocks(body); body = r.body; }
+    if (!can('lockTemplates')) { const r = applyLocks(body); body = r.body; }
     if (!Object.keys(body.fields).length && !body.items.length) { alert('ESO Save: the template is empty. Tick at least one field.'); return; }
     if (!userId) { alert('ESO Save: ESO has not said who is signed in yet. Open a run, then save.'); return; }
     const btn = tplWin.querySelector('[data-act=save]'); btn.disabled = true; btn.textContent = 'Saving…';

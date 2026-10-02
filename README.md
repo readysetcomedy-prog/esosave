@@ -112,9 +112,20 @@ to bad signal or a hung page.
   paramedic on the crew makes the unit ALS, whatever they run it as; otherwise BLS. A unit named
   NT… is non-transport. Set once the unit is known (the CAD import brings it), once per crew and
   unit, again when either changes. Under the CAD gate's setting.
-- **Agency settings.** The locked block (retention, tab warm-up, call times, fax prompt, Not sent
-  list, the lock question, the CAD gate) is one agency row in the table, read by every tablet,
-  and only the agency owner's ESO login can change it.
+- **Agency settings.** A locked setting is the agency's: one agency row in the table, read by
+  every tablet, greyed out for the crew. Which settings are locked is itself the agency's choice,
+  made under Management; the original block (retention, tab warm-up, call times, fax prompt, Not
+  sent list, the lock question, the CAD gate) starts locked and everything else open.
+- **Management.** A tab on the card for the agency owner and the managers they name. The owner
+  picks anyone on ESO's crew list from a dropdown, makes them a manager and ticks what they may
+  do, each on their own: lock and unlock settings (and set the locked ones for every tablet),
+  lock and unlock template fields, approve templates, delete anyone's template. A permission is
+  taken back by unticking it, a manager by Remove. Everyone sees the tab; a section not granted
+  shows locked with "Ask Admin for Approval for this Feature". The owner's and an approving
+  manager's own templates are approved as they are saved; a template anyone else shares waits in
+  the approval queue (its count on the Management button), is theirs to use meanwhile, and is seen
+  by others once approved; a change to it puts it back in the queue. Send back makes it private
+  again for its owner to change and share anew.
 - **Loaded mileage.** Once the scene and the destination both have an address (a predefined
   place, or a typed street, city, state and zip), ESO's own Calculate Mileage button is pressed
   once for the crew, and again only if an address changes. A complaint ESO raises about it is
@@ -180,7 +191,7 @@ to bad signal or a hung page.
   can change or delete it. A name is used once per shared category across the agency (one "Refusal" shared to
   everyone and one shared with named people may both exist, two shared to everyone may not) and
   once among a person's own private ones; the editor says so and asks for a change, "Refusal2"
-  say, and the table's own unique indexes hold the line. The agency owner can lock any field, any
+  say, and the table's own unique indexes hold the line. The agency owner, or a manager with that permission, can lock any field, any
   kind of item (vitals as a whole) or a part of one (blood pressure, the skin of an assessment) from any template's editor
   (Lock fields): the crew sees the lock, cannot set it, and a fill leaves it out, so a template
   can never make up what the crew must measure themselves. A narrative can be prewritten per

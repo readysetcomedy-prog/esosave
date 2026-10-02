@@ -2050,8 +2050,14 @@ test('templates: a field ESO refuses is left out and named to the medic; everyth
 });
 
 test('templates: shared to everyone or to named people show up for them, named after who shared them; a copy becomes theirs', async () => {
+  // a shared template is seen by others once approved: for this test the sharer holds the approve
+  // permission, so his are approved as he saves them (the approval queue has its own test)
+  const agencyRow = async () => (await fetch(T.base + '/__db_dump').then(r => r.json())).find(r => r.name === '__agency__') || { name: '__agency__', settings: {} };
+  await fetch(T.base + '/__db_set', { method: 'POST', body: JSON.stringify({ name: '__agency__', settings: { ...(await agencyRow()).settings, managers: { 'person-1': { name: 'TEST, MEDIC', perms: { approveTemplates: true } } } } }) });
+  try {
   await T.control({ userName: 'TEST, MEDIC', userId: 'person-1' });
   await freshRun();
+  await waitFor(async () => !!(((await T.storage()).settings.managers || {})['person-1']), { label: 'the permission reached the tablet' });
   await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.bar [data-act=templates]').click());
   await waitFor(async () => /Chest pain/.test((await tw('.body')) || ''), { label: 'his template listed' });
   // share it with everyone
@@ -2138,7 +2144,10 @@ test('templates: shared to everyone or to named people show up for them, named a
   assert.ok(!(await T.page.evaluate(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.tplwin .tpl [data-act]')).some(b => /edit|delete/.test(b.dataset.act)))), 'no Edit or Delete on what others made');
   assert.equal((await tplDb()).templates.find(t => t.name === 'Chest pain').owner_id, 'person-1', 'the original is still his after the copy');
   await twClick('[data-act=close]');
-  await T.control({ userName: 'TEST, MEDIC', userId: 'person-1' });
+  } finally {
+    await fetch(T.base + '/__db_set', { method: 'POST', body: JSON.stringify({ name: '__agency__', settings: { ...(await agencyRow()).settings, managers: {} } }) });
+    await T.control({ userName: 'TEST, MEDIC', userId: 'person-1' });
+  }
 });
 
 test('templates: with no signal the fill is held and pushed when signal returns', async () => {
@@ -2258,4 +2267,214 @@ test('templates: an Unable to obtain set for a list wins over entries on it, as 
   const t = (await T.record(id)).tree;
   assert.equal(Object.keys(t.patient.patientMedicalHistories || {}).length, 0, 'no history entries beside the UTO');
   assert.equal(t.vitals.vitalSigns.length, 1, 'the rest of the template still went in');
+});
+
+// ---- Management: the owner names managers and what each may do; locks; template approval
+const OWNER = { userName: 'GASTON, MICHAEL', userId: 'd4e45fac-ee36-4ac8-bf9a-3fb3e265c0d0' };
+const agencyRow = async () => ((await fetch(T.base + '/__db_dump').then(r => r.json())).find(r => r.name === '__agency__') || {}).settings || {};
+const setAgency = (settings) => fetch(T.base + '/__db_set', { method: 'POST', body: JSON.stringify({ name: '__agency__', settings }) });
+const sr = (fn, ...args) => T.page.evaluate(fn, ...args);
+const openPanel = async () => {
+  await sr(() => document.getElementById('esosave-host').shadowRoot.querySelector('.bar [data-act=open]').click());
+  await waitFor(() => sr(() => !!document.getElementById('esosave-host').shadowRoot.querySelector('.panel [data-act=management]')), { label: 'panel' });
+};
+const openMgmt = async () => {
+  await openPanel();
+  await sr(() => document.getElementById('esosave-host').shadowRoot.querySelector('.panel [data-act=management]').click());
+  await waitFor(() => sr(() => !!document.getElementById('esosave-host').shadowRoot.querySelector('.panel .mgmt')), { label: 'Management open' });
+};
+const mgmtText = () => sr(() => document.getElementById('esosave-host').shadowRoot.querySelector('.panel .mgmt').textContent);
+const signedIn = (name) => waitFor(() => sr((n) => (document.getElementById('esosave-host').shadowRoot.querySelector('.bar .who') || {}).textContent === n, name), { label: name + ' on the card' });
+const openSettingsPanel = async () => {
+  await openPanel();
+  await sr(() => document.getElementById('esosave-host').shadowRoot.querySelector('.panel [data-act=settings]').click());
+  await waitFor(() => sr(() => !!document.getElementById('esosave-host').shadowRoot.querySelector('#qdelays')), { label: 'settings open' });
+};
+
+test('Management: the owner names a manager from the crew list and ticks their permissions; the manager sees what was granted, the crew sees everything locked; the owner takes it back', async () => {
+  await setAgency({ ...(await agencyRow()), managers: {} });
+  await T.control(OWNER);
+  await freshRun();
+  await signedIn(OWNER.userName);
+  await openMgmt();
+  // the dropdown lists the crew, not the owner
+  const options = () => sr(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('#mgr-add option')).map(o => o.textContent));
+  const opts = await options();
+  assert.ok(opts.includes('JONES, ALEX') && opts.includes('TEST, MEDIC') && !opts.includes('GASTON, MICHAEL'), 'the crew, without the owner: ' + opts.join('|'));
+  await sr(() => { const r = document.getElementById('esosave-host').shadowRoot; r.querySelector('#mgr-add').value = 'person-m'; r.querySelector('[data-act=mgr-add]').click(); });
+  await waitFor(async () => !!((await agencyRow()).managers || {})['person-m'], { label: 'the manager in the agency row' });
+  assert.equal((await agencyRow()).managers['person-m'].name, 'JONES, ALEX');
+  await waitFor(() => sr(() => !!document.getElementById('esosave-host').shadowRoot.querySelector('[data-mgr="person-m"] [data-perm=approveTemplates]')), { label: 'the manager\'s row with its permissions' });
+  const grant = async (perm) => {
+    await sr((p) => { const c = document.getElementById('esosave-host').shadowRoot.querySelector(`[data-mgr="person-m"] [data-perm=${p}]`); c.checked = true; c.dispatchEvent(new Event('change', { bubbles: true })); }, perm);
+    await waitFor(async () => (((await agencyRow()).managers['person-m'] || {}).perms || {})[perm] === true, { label: perm + ' granted' });
+  };
+  await grant('approveTemplates'); await grant('deleteTemplates');
+  assert.ok(!(await agencyRow()).managers['person-m'].perms.lockSettings, 'only what was ticked');
+  assert.ok(!(await options()).includes('JONES, ALEX'), 'a manager is no longer offered in the dropdown');
+  // the manager: the granted sections open, the rest locked
+  await T.control({ userName: 'JONES, ALEX', userId: 'person-m' });
+  await freshRun();
+  await signedIn('JONES, ALEX');
+  await waitFor(async () => !!(((await T.storage()).settings.managers || {})['person-m']), { label: 'the managers reached the tablet' });
+  await openMgmt();
+  let txt = await mgmtText();
+  assert.match(txt, /Templates waiting for approval/); assert.match(txt, /Every template in the agency/);
+  assert.match(txt, /🔒 Managers[\s\S]*?Ask Admin for Approval for this Feature/); assert.match(txt, /🔒 Settings locks/); assert.match(txt, /🔒 Template locks/);
+  assert.equal((txt.match(/Ask Admin for Approval for this Feature/g) || []).length, 3, 'three sections locked for this manager');
+  assert.equal(await sr(() => !!document.getElementById('esosave-host').shadowRoot.querySelector('#mgr-add')), false, 'naming managers is the owner\'s alone');
+  // the crew: everything locked
+  await T.control({ userName: 'TEST, MEDIC', userId: 'person-1' });
+  await freshRun();
+  await signedIn('TEST, MEDIC');
+  await openMgmt();
+  txt = await mgmtText();
+  assert.equal((txt.match(/Ask Admin for Approval for this Feature/g) || []).length, 5, 'all five sections locked for the crew');
+  // the owner takes it back
+  await T.control(OWNER);
+  await freshRun();
+  await signedIn(OWNER.userName);
+  await openMgmt();
+  await waitFor(() => sr(() => !!document.getElementById('esosave-host').shadowRoot.querySelector('[data-mgr="person-m"] [data-act=mgr-remove]')), { label: 'the manager\'s row again' });
+  await sr(() => document.getElementById('esosave-host').shadowRoot.querySelector('[data-mgr="person-m"] [data-act=mgr-remove]').click());
+  await waitFor(async () => !((await agencyRow()).managers || {})['person-m'], { label: 'removed' });
+  await T.control({ userName: 'TEST, MEDIC', userId: 'person-1' });
+});
+
+test('Management: a locked setting takes the agency value on every tablet and the crew cannot change it; unlocked, it is each person\'s own again', async () => {
+  const db = () => fetch(T.base + '/__db_dump').then(r => r.json());
+  await T.control(OWNER);
+  await freshRun();
+  await signedIn(OWNER.userName);
+  // the owner turns the Delays button off for themselves, then locks it
+  await openSettingsPanel();
+  assert.equal(await sr(() => document.getElementById('esosave-host').shadowRoot.querySelector('#purge').disabled), false, 'the owner may change the agency block');
+  await sr(() => { const r = document.getElementById('esosave-host').shadowRoot; r.querySelector('#qdelays').checked = false; r.querySelector('[data-act=save-settings]').click(); });
+  await waitFor(async () => ((await db()).find(r => r.name === 'GASTON, MICHAEL') || { settings: {} }).settings.quickDelays === false, { label: 'the owner\'s own row' });
+  assert.ok(!('quickDelays' in (await agencyRow())), 'an open setting is not the agency\'s');
+  await openMgmt();
+  await waitFor(() => sr(() => !!document.getElementById('esosave-host').shadowRoot.querySelector('[data-slock=quickDelays]')), { label: 'the lock switches' });
+  assert.match(await sr(() => document.getElementById('esosave-host').shadowRoot.querySelector('[data-slock=purgeHoursAfterLock]').textContent), /Locked/, 'today\'s agency block starts locked');
+  assert.match(await sr(() => document.getElementById('esosave-host').shadowRoot.querySelector('[data-slock=quickDelays]').textContent), /Open/);
+  await sr(() => document.getElementById('esosave-host').shadowRoot.querySelector('[data-slock=quickDelays]').click());
+  await waitFor(async () => { const a = await agencyRow(); return (a.locks || []).includes('quickDelays') && a.quickDelays === false; }, { label: 'locked, with the owner\'s value' });
+  await waitFor(() => sr(() => /Locked/.test(document.getElementById('esosave-host').shadowRoot.querySelector('[data-slock=quickDelays]').textContent)), { label: 'the switch shows Locked' });
+  // the crew: greyed out and off, whatever they had chosen
+  await T.control({ userName: 'TEST, MEDIC', userId: 'person-1' });
+  await freshRun();
+  await signedIn('TEST, MEDIC');
+  await waitFor(async () => { const st = (await T.storage()).settings; return st.quickDelays === false && (st.locks || []).includes('quickDelays'); }, { label: 'the lock reached the tablet' });
+  await openSettingsPanel();
+  assert.deepEqual(await sr(() => { const r = document.getElementById('esosave-host').shadowRoot; return [r.querySelector('#qdelays').disabled, r.querySelector('#qdelays').checked, r.querySelector('#qhistory').disabled, r.querySelector('#purge').disabled, /🔒/.test(r.querySelector('#qdelays').closest('label').textContent)]; }), [true, false, false, true, true], 'locked and off, marked; the rest open; the agency block locked as before');
+  await openMgmt();
+  assert.match(await mgmtText(), /🔒 Settings locks/, 'the crew cannot unlock');
+  // the owner unlocks it: the row forgets the value, the crew has their own back
+  await T.control(OWNER);
+  await freshRun();
+  await signedIn(OWNER.userName);
+  await openMgmt();
+  await waitFor(() => sr(() => /Locked/.test((document.getElementById('esosave-host').shadowRoot.querySelector('[data-slock=quickDelays]') || {}).textContent || '')), { label: 'still locked' });
+  await sr(() => document.getElementById('esosave-host').shadowRoot.querySelector('[data-slock=quickDelays]').click());
+  await waitFor(async () => { const a = await agencyRow(); return !(a.locks || []).includes('quickDelays') && !('quickDelays' in a); }, { label: 'unlocked and forgotten' });
+  await T.control({ userName: 'TEST, MEDIC', userId: 'person-1' });
+  await freshRun();
+  await signedIn('TEST, MEDIC');
+  await waitFor(async () => { const st = (await T.storage()).settings; return st.quickDelays === true && !(st.locks || []).includes('quickDelays'); }, { label: 'their own choice again' });
+  await openSettingsPanel();
+  assert.deepEqual(await sr(() => { const r = document.getElementById('esosave-host').shadowRoot; return [r.querySelector('#qdelays').disabled, r.querySelector('#qdelays').checked]; }), [false, true]);
+  await sr(() => document.getElementById('esosave-host').shadowRoot.querySelector('.panel [data-act=close]').click());
+  // the owner's own Delays button back on
+  const own = (await db()).find(r => r.name === 'GASTON, MICHAEL');
+  await fetch(T.base + '/__db_set', { method: 'POST', body: JSON.stringify({ ...own, settings: { ...own.settings, quickDelays: true } }) });
+});
+
+test('templates: one shared by the crew waits for a manager\'s approval and is theirs to use meanwhile; the approver sees the count and approves it, then everyone sees it; an approver\'s own is approved as saved; the delete permission reaches anyone\'s', async () => {
+  const onDialog = (d) => d.accept().catch(() => {});
+  T.page.on('dialog', onDialog);
+  try {
+    await setAgency({ ...(await agencyRow()), managers: { 'person-m': { name: 'JONES, ALEX', perms: { approveTemplates: true, deleteTemplates: true } } } });
+    // the crew shares a template to everyone
+    await T.control({ userName: 'TEST, MEDIC', userId: 'person-1' });
+    await freshRun();
+    await signedIn('TEST, MEDIC');
+    await sr(() => document.getElementById('esosave-host').shadowRoot.querySelector('.bar [data-act=templates]').click());
+    await waitFor(() => tw('[data-act=new]'), { label: 'window' });
+    await twClick('[data-act=new]');
+    await waitFor(() => sr(() => !!document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin [data-name]')), { label: 'editor' });
+    await twType('[data-name]', 'Waiting room');
+    await twClick('[data-page=incident]');
+    await pick('incident.response.runTypeId', '911 Response (Scene)');
+    await sr(() => { const r = document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin input[name=share][value=everyone]'); r.checked = true; r.dispatchEvent(new Event('change', { bubbles: true })); });
+    await waitFor(() => tw('[data-approvalnote]'), { label: 'the editor says others see it once approved' });
+    await twClick('[data-act=save]');
+    const waiting = await waitFor(async () => (await tplDb()).templates.find(t => t.name === 'Waiting room'), { label: 'saved' });
+    assert.equal(waiting.approved, false); assert.equal(waiting.share, 'everyone');
+    await waitFor(async () => /Waiting room[\s\S]*waiting for a manager/.test((await tw('.body')) || ''), { label: 'his list says it is waiting' });
+    assert.ok(await sr(() => !!Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.tplwin .tpl')).find(r => /^Waiting room/.test(r.querySelector('.tn').textContent) && r.querySelector('[data-act=fill]'))), 'he can fill with it meanwhile');
+    // Jane does not see it yet
+    await T.control({ userName: 'SMITH, JANE', userId: 'person-j' });
+    await freshRun();
+    await signedIn('SMITH, JANE');
+    await sr(() => document.getElementById('esosave-host').shadowRoot.querySelector('.bar [data-act=templates]').click());
+    await waitFor(async () => (await T.storage()).tpls?.who === 'person-j' && (await T.storage()).tpls?.at > Date.now() - 30000, { label: 'her list loaded' });
+    assert.doesNotMatch(await tw('.body'), /Waiting room/, 'unapproved: not hers to see');
+    await twClick('[data-act=close]');
+    // Alex sees the count on the Management button and approves
+    await T.control({ userName: 'JONES, ALEX', userId: 'person-m' });
+    await freshRun();
+    await signedIn('JONES, ALEX');
+    await waitFor(async () => !!(((await T.storage()).settings.managers || {})['person-m']), { label: 'the permission reached the tablet' });
+    await openPanel();
+    // the count on the button (other tests may have left templates waiting too)
+    await waitFor(() => sr(() => /Management \(\d+\)/.test(document.getElementById('esosave-host').shadowRoot.querySelector('.panel [data-act=management]').textContent)), { label: 'the waiting count on the button' });
+    await openMgmt();
+    await waitFor(() => sr(() => !!Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.mgmt [data-tid]')).find(r => /Waiting room/.test(r.textContent) && r.querySelector('[data-act=tpl-approve]'))), { label: 'the queue' });
+    assert.match(await mgmtText(), /Waiting room[\s\S]*by TEST, MEDIC · to everyone · 1 field/);
+    const nBefore = await sr(() => (document.getElementById('esosave-host').shadowRoot.querySelector('.panel [data-act=management]').textContent.match(/\((\d+)\)/) || [])[1]);
+    await sr(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.mgmt [data-tid]')).find(r => /Waiting room/.test(r.textContent)).querySelector('[data-act=tpl-approve]').click());
+    const approved = await waitFor(async () => { const t = (await tplDb()).templates.find(x => x.name === 'Waiting room'); return t && t.approved ? t : null; }, { label: 'approved' });
+    assert.equal(approved.approved_by, 'JONES, ALEX'); assert.ok(approved.approved_at);
+    await waitFor(() => sr(() => !Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.mgmt [data-tid]')).some(r => /Waiting room/.test(r.textContent) && r.querySelector('[data-act=tpl-approve]'))), { label: 'out of the queue' });
+    const nAfter = await sr(() => (document.getElementById('esosave-host').shadowRoot.querySelector('.panel [data-act=management]').textContent.match(/\((\d+)\)/) || [])[1]);
+    assert.equal(Number(nAfter || 0), Number(nBefore) - 1, 'the count on the button went down by one');
+    await sr(() => document.getElementById('esosave-host').shadowRoot.querySelector('.panel [data-act=close]').click());
+    // an approver's own shared template needs no queue
+    await sr(() => document.getElementById('esosave-host').shadowRoot.querySelector('.bar [data-act=templates]').click());
+    await waitFor(() => tw('[data-act=new]'), { label: 'window' });
+    await twClick('[data-act=new]');
+    await waitFor(() => sr(() => !!document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin [data-name]')), { label: 'editor' });
+    await twType('[data-name]', 'By a manager');
+    await twClick('[data-page=incident]');
+    await pick('incident.response.runTypeId', '911 Response (Scene)');
+    await sr(() => { const r = document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin input[name=share][value=everyone]'); r.checked = true; r.dispatchEvent(new Event('change', { bubbles: true })); });
+    assert.equal(await tw('[data-approvalnote]'), null, 'no approval note for an approver');
+    await twClick('[data-act=save]');
+    const own = await waitFor(async () => (await tplDb()).templates.find(t => t.name === 'By a manager'), { label: 'saved' });
+    assert.equal(own.approved, true); assert.equal(own.approved_by, 'JONES, ALEX');
+    // with the delete permission, anyone's template has a Delete in the Templates window
+    await waitFor(async () => /Templates others shared to everyone[\s\S]*Waiting room/.test((await tw('.body')) || ''), { label: 'the crew\'s template listed for him' });
+    assert.ok(await sr(() => !!Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.tplwin .tpl')).find(r => /^Waiting room/.test(r.querySelector('.tn').textContent) && r.querySelector('[data-act=delete]'))), 'a manager\'s Delete on another\'s row');
+    await twClick('[data-act=close]');
+    // Jane sees the approved one now
+    await T.control({ userName: 'SMITH, JANE', userId: 'person-j' });
+    await freshRun();
+    await signedIn('SMITH, JANE');
+    await sr(() => document.getElementById('esosave-host').shadowRoot.querySelector('.bar [data-act=templates]').click());
+    await waitFor(async () => { const b = ((await tw('.body')) || '').split('Templates others shared to everyone')[1] || ''; return /Waiting room/.test(b) && /By a manager/.test(b); }, { label: 'both shared templates, once approved' });
+    assert.equal(await sr(() => !!Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.tplwin .tpl')).find(r => /^Waiting room/.test(r.querySelector('.tn').textContent) && r.querySelector('[data-act=delete]'))), false, 'no Delete on another\'s row without the permission');
+    await twClick('[data-act=close]');
+    // the manager deletes the crew's template from Management
+    await T.control({ userName: 'JONES, ALEX', userId: 'person-m' });
+    await freshRun();
+    await signedIn('JONES, ALEX');
+    await openMgmt();
+    await waitFor(() => sr(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.mgmt [data-tid]')).some(r => /Waiting room/.test(r.textContent) && r.querySelector('[data-act=tpl-del]'))), { label: 'every template listed with Delete' });
+    await sr(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.mgmt [data-tid]')).find(r => /Waiting room/.test(r.textContent)).querySelector('[data-act=tpl-del]').click());
+    await waitFor(async () => !(await tplDb()).templates.some(t => t.name === 'Waiting room'), { label: 'deleted' });
+    await sr(() => document.getElementById('esosave-host').shadowRoot.querySelector('.panel [data-act=close]').click());
+  } finally {
+    T.page.off('dialog', onDialog);
+    await setAgency({ ...(await agencyRow()), managers: {} });
+    await T.control({ userName: 'TEST, MEDIC', userId: 'person-1' });
+  }
 });

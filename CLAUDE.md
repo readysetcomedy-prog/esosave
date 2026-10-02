@@ -5,14 +5,24 @@ web app. See README.md for what it does and how it is tested (`npm test`, `npm r
 
 ## Settings: locked or open
 
-Settings come in two kinds. **Locked** ones (retention, tab warm-up, call times, fax prompt, Not
-sent list, the paperwork question before a lock, the CAD import gate: the `LOCKED_SETTINGS` list)
-are the agency's: one `__agency__` row in the table, changed only by the agency owner's ESO login
-(`ADMIN` in `extension/content.js`) and shown greyed out to everyone else. **Open** ones (the quick-button
-toggles and the facility chips, the `OPEN_SETTINGS` list in `extension/content.js`) may be changed
-by the crew and follow the ESO login through the `esosave_users` table. The paperwork scanner
-(`scanDocs`) and the vitals-copy groups (`vitalCopySkip`) are open; the template locks
-(`tplLocks`, keys a fill leaves out) are locked.
+Every setting (`ALL_SETTINGS` / `SETTING_DEFS` in `extension/content.js`) is either **locked**
+or **open**, and which is decided on the Management tab, kept as `locks` in the `__agency__` row.
+A locked one is the agency's: its value lives in the agency row, goes to every tablet and is
+greyed out for the crew; changed only by the agency owner (`ADMIN`) or a manager holding
+`lockSettings`. An open one follows the ESO login through the `esosave_users` table. The default
+locks (`DEFAULT_LOCKS`: retention, tab warm-up, call times, fax prompt, Not sent list, the
+paperwork question before a lock, the CAD import gate) are what the agency had locked before the
+switch existed; everything else starts open. `tplLocks`, `locks` and `managers` are always the
+agency's (`AGENCY_ONLY`), never a person's and never a switch. The agency row is written by merging
+the named keys over what it holds (`pushAgency(keys)`), never wholesale.
+
+**Management** (`managementUi`, `onManagement`): the owner names managers from ESO's crew list
+(`facilityTypes.crew`) with per-person permissions (`PERMS`: lockSettings, lockTemplates,
+approveTemplates, deleteTemplates), kept as `managers` in the agency row; `can(perm)` gates every
+use. Template approval: `esosave_templates.approved/approved_by/approved_at`
+(`supabase/esosave_templates_approval.sql`); `tplSave` approves the saver's own when they hold
+approveTemplates, `tplLoad` hides another's unapproved shared template, the queue is read with
+`approved=is.false&share=neq.private`.
 
 **Before adding any new setting, ask the repo owner whether it is locked or open.** Do not guess.
 

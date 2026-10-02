@@ -324,7 +324,7 @@ export function createMockEso() {
         if (req.headers.apikey !== 'test-anon') return send(401, { message: 'No API key found in request' });
         const table = tm[1];
         const rowsOf = () => table === 'esosave_templates' ? [...dbTpl.esosave_templates.values()] : dbTpl.esosave_template_shares.slice();
-        const cond = (row, key, expr) => { const m = /^(eq|in|ilike)\.(.*)$/.exec(expr); if (!m) return true; if (m[1] === 'eq') return String(row[key]) === m[2]; if (m[1] === 'ilike') return new RegExp('^' + m[2].replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/%/g, '.*').replace(/_/g, '.') + '$', 'i').test(String(row[key])); const set = m[2].replace(/^\(|\)$/g, '').split(',').map(x => x.replace(/^"|"$/g, '')).filter(Boolean); return set.includes(String(row[key])); };
+        const cond = (row, key, expr) => { const m = /^(eq|neq|in|ilike|is)\.(.*)$/.exec(expr); if (!m) return true; if (m[1] === 'eq') return String(row[key]) === m[2]; if (m[1] === 'neq') return String(row[key]) !== m[2]; if (m[1] === 'is') return m[2] === 'null' ? row[key] == null : String(!!row[key]) === m[2]; if (m[1] === 'ilike') return new RegExp('^' + m[2].replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/%/g, '.*').replace(/_/g, '.') + '$', 'i').test(String(row[key])); const set = m[2].replace(/^\(|\)$/g, '').split(',').map(x => x.replace(/^"|"$/g, '')).filter(Boolean); return set.includes(String(row[key])); };
         const matches = (row) => {
           for (const [k, v] of u.searchParams) {
             if (k === 'select' || k === 'order' || k === 'limit') continue;
@@ -341,7 +341,7 @@ export function createMockEso() {
             if (table === 'esosave_templates') {
               const id = r.id || randomUUID();
               if (dbTpl.esosave_templates.has(id) && !/merge-duplicates/.test(req.headers.prefer || '')) return send(409, { code: '23505', message: 'duplicate key' });
-              const row = { ...(dbTpl.esosave_templates.get(id) || { created_at: new Date().toISOString(), share: 'private', body: {} }), ...r, id, updated_at: new Date().toISOString() };
+              const row = { ...(dbTpl.esosave_templates.get(id) || { created_at: new Date().toISOString(), share: 'private', body: {}, approved: false, approved_by: null, approved_at: null }), ...r, id, updated_at: new Date().toISOString() };
               // the unique indexes: one name per shared category, one per person among private ones
               const same = (x) => x.id !== id && String(x.name).toLowerCase() === String(row.name).toLowerCase();
               if ([...dbTpl.esosave_templates.values()].some(x => same(x) && (row.share === 'private' ? x.share === 'private' && x.owner_id === row.owner_id : x.share === row.share))) return send(409, { code: '23505', message: 'duplicate key value violates unique constraint "esosave_templates_shared_name"' });
