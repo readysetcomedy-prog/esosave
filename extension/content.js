@@ -807,7 +807,7 @@
     { k: 'autoResponse', id: 'qautoresp', type: 'bool', label: 'Auto-fill: choosing Emergent or Non-Emergent (response or transport mode) fills the lights/sirens, intersection, scheduled, speed and method fields that are still empty, and sets EMD Performed to No', short: 'Auto-fill on Emergent / Non-Emergent' },
     { k: 'quickTreatments', id: 'qtreat', type: 'bool', label: 'Flowchart: a copy button beside each saved treatment enters it again as a new one with the current time, every other value the same (Flowchart tab)', short: 'Treatment copy' },
     { k: 'quickAssess', id: 'qassess', type: 'bool', label: 'Assessment: Copy (enters an assessment again as a new one with the current time, every finding and comment the same); "Normal" (presses No Abnormalities on every category in ESO\'s Quick Ax) and "A&amp;Ox4" on each assessment (Assessments tab)', short: 'Assessment Copy, Normal, A&Ox4' },
-    { k: 'quickNarrative', id: 'qnarrative', type: 'bool', label: 'Narrative: rows for Primary and Secondary Impression, Provided Care Level, Chief Complaint System, Anatomic Location, the complaint duration units, Barriers to Care and Alcohol/Drugs, and a Same as LKWT button beside Onset Time (Narrative tab)', short: 'Narrative rows and Same as LKWT' },
+    { k: 'quickNarrative', id: 'qnarrative', type: 'bool', label: 'Narrative: rows for Primary and Secondary Impression, Provided Care Level, Chief Complaint System, Anatomic Location, the complaint duration units, Barriers to Care and Alcohol/Drugs, and a Same as LKWT button under Onset Time (Narrative tab)', short: 'Narrative rows and Same as LKWT' },
     { k: 'quickPatient', id: 'qpatient', type: 'bool', label: 'Patient: Race row (every race, shortened) (Patient tab)', short: 'Race row' },
     { k: 'quickRefusal', id: 'qrefusal', type: 'bool', label: 'Refusal form: chips for Legal, Decision-Making, Medical, Check All notifications and the four Patient Refusals inside ESO\'s Patient Refusal Form (Signatures tab)', short: 'Refusal form chips' },
     { k: 'autoMileage', id: 'qmileage', type: 'bool', label: 'Loaded mileage: press ESO\'s Calculate Mileage once the scene and destination both have an address (Incident tab)', short: 'Loaded mileage' },
@@ -3749,17 +3749,28 @@
     notice('Treatment copied', p.held ? 'Entered again with the current time; held until ESO answers.' : 'Entered again with the current time.', 3500);
     setTimeout(layoutQuick, 300);
   }
-  // Same as LKWT: a button above Onset Time that sets it to the Last Known Well time
+  // Same as LKWT: a button under Onset Time that sets it to the Last Known Well time, as the screen shows it
+  // The Last Known Well time as the screen shows it, "MM/DD/YYYY HH:mm:ss": ESO may not have saved
+  // a time just typed, so the button goes by what the medic sees, not only by what ESO holds.
+  function lkwOnScreen() {
+    const f = fieldEl('COMPLAINTLASTKNOWNWELL'); if (!f) return null;
+    const text = Array.from(f.querySelectorAll('input')).map(i => norm(i.value || '')).concat([fieldValue('COMPLAINTLASTKNOWNWELL') || '']).join(' ');
+    const date = (text.match(/(^|\s)(\d{1,2}\/\d{1,2}\/\d{4})(?=\s|$)/) || [])[2], time = (text.match(/(^|\s)(\d{1,2}:\d{2}(?::\d{2})?)(?=\s|$)/) || [])[2];
+    if (!date || !time) return null;
+    const [mm, dd, yyyy] = date.split('/'); const [h, mi, ss] = time.split(':');
+    return `${mm.padStart(2, '0')}/${dd.padStart(2, '0')}/${yyyy} ${h.padStart(2, '0')}:${mi}:${ss || '00'}`;
+  }
   function layoutLkw() {
     const run = currentRun();
     const f = settings.quickNarrative === false || !run || run.locked || !onTab('Narrative') || shelfOpen() ? null : fieldEl('COMPLAINTONSETTIME');
     if (!f) { dropQuick('lkw:'); return; }
     const box = f.querySelector('.field-area') || f; const r = box.getBoundingClientRect();
     if (!r.width) { dropQuick('lkw:'); return; }
-    // the row the field sits in (its time, date, Estimated and UTO): the button goes after the last of them
+    // the row the field sits in (its time, date, Estimated and UTO): the button goes under the row,
+    // level with the time box, so a narrow tablet never pushes it off the screen
     const rowEl = f.closest('tr, grid-row, .field-group, .field-row') || f.parentElement;
-    let rightMost = r.right;
-    for (const el of Array.from(rowEl.children)) { const er = el.getBoundingClientRect(); if (er.width && er.top < r.bottom && er.bottom > r.top) rightMost = Math.max(rightMost, er.right); }
+    let bottom = r.bottom;
+    for (const el of Array.from(rowEl.children)) { const er = el.getBoundingClientRect(); if (er.width && er.top < r.bottom && er.bottom > r.top) bottom = Math.max(bottom, er.bottom); }
     const btn = quickEl('lkw:same', () => {
       const b = document.createElement('button'); b.type = 'button'; b.className = 'allnone'; b.dataset.group = 'lkw'; b.title = 'Set Onset Time to the same date and time as Last Known Well Time';
       b.addEventListener('pointerdown', (e) => e.stopPropagation());
@@ -3768,7 +3779,7 @@
         if (copyBusy || quickBusy) return;
         copyBusy = true;
         showVeilMessage('Setting Onset Time…', 'to the same date and time as Last Known Well Time.');
-        toPage('action', { name: 'sameAsLkw', recordId: lastStatus.currentRecordId });
+        toPage('action', { name: 'sameAsLkw', recordId: lastStatus.currentRecordId, lkw: lkwOnScreen() });
         setTimeout(() => { if (copyBusy) { copyBusy = false; hideVeil(); } }, 20000);
       });
       return b;
@@ -3776,9 +3787,8 @@
     btn.textContent = 'Same as LKWT';
     btn.classList.toggle('busy', copyBusy);
     btn.style.visibility = 'hidden'; btn.style.display = 'block';
-    const h = btn.getBoundingClientRect().height || 30;
-    btn.style.left = Math.round(rightMost + 14) + 'px';
-    btn.style.top = Math.round(r.top + (r.height - h) / 2) + 'px';
+    btn.style.left = Math.round(r.left) + 'px';
+    btn.style.top = Math.round(bottom + 8) + 'px';
     btn.style.visibility = '';
   }
   async function onLkwCopied(p) {

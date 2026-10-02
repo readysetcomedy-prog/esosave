@@ -211,8 +211,9 @@ to bad signal or a hung page.
   as a new assessment with the current time: every finding on every location, present or not,
   and each category's comments, written as ESO's own screen writes them. For the patient whose
   assessment barely changes between checks.
-- **Same as LKWT.** A button above Onset Time on the Narrative tab sets it to the same date and
-  time as Last Known Well Time, exactly as ESO holds it. Rows under Barriers to Care (Alcohol
+- **Same as LKWT.** A button under Onset Time on the Narrative tab sets it to the same date and
+  time as Last Known Well Time, as the screen shows it (a time just typed that ESO has not saved
+  yet counts), else as ESO holds it; the tab is re-read so Onset Time shows it. Rows under Barriers to Care (Alcohol
   Suspected, Drug Suspected, Obesity, Language, Psych Impaired) and Alcohol/Drugs (Smell of
   Alcohol, Admits Alcohol, Admits Drug) sit under those fields, only what ESO's own quick-picks
   lack.

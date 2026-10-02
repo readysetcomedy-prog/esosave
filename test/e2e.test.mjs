@@ -1035,12 +1035,17 @@ test('Narrative: Barriers to Care and Alcohol/Drugs chips (only what ESO lacks),
   const lkwBtn = () => T.page.evaluate(() => { const b = window.__q('.quick [data-group=lkw]'); const f = document.querySelector('eso-field[data-field-ref="COMPLAINTONSETTIME"]'); return b && f ? { text: b.textContent, cls: b.className, rect: b.getBoundingClientRect().toJSON(), field: f.getBoundingClientRect().toJSON() } : null; });
   const lb = await waitFor(lkwBtn, { label: 'Same as LKWT button' });
   assert.equal(lb.text, 'Same as LKWT');
-  assert.ok(lb.rect.left >= lb.field.right && Math.abs(lb.rect.top + lb.rect.height / 2 - (lb.field.top + lb.field.height / 2)) < 30, 'sits to the right of the Onset Time row, level with it, never over the row above');
+  assert.ok(lb.rect.top >= lb.field.bottom && Math.abs(lb.rect.left - lb.field.left) < 40 && lb.rect.top < lb.field.bottom + 40, 'sits under the Onset Time row, level with its left edge, so a narrow screen never loses it');
   await T.page.evaluate(() => window.__q('.quick [data-group=lkw]').click());
   await waitFor(async () => (await nar()).patientComplaint?.complaintOnsetTime === '09/18/2026 08:15:00', { label: 'onset time = LKW', timeout: 15000 });
   const op = (await T.record(id)).ops.find(o => /complaintOnsetTime/.test(o.address));
   assert.equal(op.dataType, 'datetime'); assert.equal(op.fieldRef, 'COMPLAINTONSETTIME');
   await waitFor(async () => (await app(() => document.querySelector('eso-field[data-field-ref="COMPLAINTONSETTIME"] .display-value').textContent)) === '09/18/2026 08:15:00', { label: 'the tab was re-read and shows it', timeout: 15000 });
+  // a Last Known Well just typed, not yet saved by ESO: the button goes by the screen
+  await waitFor(() => T.page.evaluate(() => !window.__q('.quick [data-group=lkw]').classList.contains('busy')), { label: 'button free again' });
+  await app(() => { document.querySelector('eso-field[data-field-ref="COMPLAINTLASTKNOWNWELL"] .display-value').textContent = '09/18/2026 09:30:00'; });
+  await T.page.evaluate(() => window.__q('.quick [data-group=lkw]').click());
+  await waitFor(async () => (await nar()).patientComplaint?.complaintOnsetTime === '09/18/2026 09:30:00', { label: 'onset time = the LKW on the screen', timeout: 15000 });
 });
 
 test('Narrative rows: impressions, care level, duration units and every anatomic location', async () => {
