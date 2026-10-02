@@ -16,12 +16,17 @@ switch existed; everything else starts open. `tplLocks`, `locks` and `managers` 
 agency's (`AGENCY_ONLY`), never a person's and never a switch. The agency row is written by merging
 the named keys over what it holds (`pushAgency(keys)`), never wholesale.
 
+The card's panel shows one view at a time (`panelView`: runs, unsent, settings, management); there
+is no export and no push into a new run (a restore goes into the run that is open).
+
 **Management** (`managementUi`, `onManagement`): the owner names managers from ESO's crew list
 (`facilityTypes.crew`) with per-person permissions (`PERMS`: lockSettings, lockTemplates,
 approveTemplates, deleteTemplates), kept as `managers` in the agency row; `can(perm)` gates every
 use. Template approval: `esosave_templates.approved/approved_by/approved_at`
 (`supabase/esosave_templates_approval.sql`); `tplSave` approves the saver's own when they hold
-approveTemplates; an unapproved template cannot fill (its owner sees it pending, `tplLoad` hides
+approveTemplates; template field locks (`tplLocks`) are set only there (`templateLocksBody`: every
+catalog field by tab, each item as a whole and its parts), never in the editor, which only shows
+them; an unapproved template cannot fill (its owner sees it pending, `tplLoad` hides
 another's), the queue is every row with `approved=is.false`.
 
 **Before adding any new setting, ask the repo owner whether it is locked or open.** Do not guess.

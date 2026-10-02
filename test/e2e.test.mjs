@@ -236,9 +236,13 @@ test('restore can copy only the chosen pages: incident and narrative go, patient
 
 test('the page picker opens from the panel with Incident and Narrative on, warns on Patient or Signatures, and Toggle all selects every page', async () => {
   const id = await app(() => window.app.recordId);
+  // a restore goes into the run that is open: open another run, then push the first into it
+  const other = await app(() => window.app.start());
+  await waitFor(async () => (await T.status()).currentRecordId === other, { label: 'the new run is the open one' });
   await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('[data-act=open]').click());
-  await waitFor(() => T.page.evaluate(() => !!document.getElementById('esosave-host').shadowRoot.querySelector('.panel .run')), { label: 'panel' });
-  await T.page.evaluate((i) => { const p = document.getElementById('esosave-host').shadowRoot; [...p.querySelectorAll('.run')].find(r => r.dataset.id === i).querySelector('[data-act=into-new]').click(); }, id);
+  await waitFor(() => T.page.evaluate((i) => { const r = [...document.getElementById('esosave-host').shadowRoot.querySelectorAll('.panel .run')].find(x => x.dataset.id === i); return !!(r && r.querySelector('[data-act=into-current]') && !r.querySelector('[data-act=into-current]').disabled); }, id), { label: 'panel, with the first run pushable' });
+  assert.equal(await T.page.evaluate(() => !!document.getElementById('esosave-host').shadowRoot.querySelector('.panel [data-act=into-new], .panel [data-act=export], .panel [data-act=export-all], .panel [data-act=push]')), false, 'no new-run push, no exports, no push-all on the card');
+  await T.page.evaluate((i) => { const p = document.getElementById('esosave-host').shadowRoot; [...p.querySelectorAll('.run')].find(r => r.dataset.id === i).querySelector('[data-act=into-current]').click(); }, id);
   const state = () => T.page.evaluate(() => { const p = document.getElementById('esosave-host').shadowRoot.querySelector('.pick'); return p && { on: [...p.querySelectorAll('.sw.on')].map(b => b.dataset.page), warn: !!p.querySelector('.warn'), go: p.querySelector('[data-act=go]').textContent }; });
   let st = await waitFor(state, { label: 'picker open' });
   assert.deepEqual(st.on, ['incident', 'narrative']);
@@ -516,9 +520,9 @@ test('lock: email-only destination offers email only; Not now leaves it in the N
     await waitFor(async () => { const s = await T.status(); return s.unsent && s.unsent.items.some(i => i.pcrId === id && i.email && !i.fax); }, { label: 'listed as not sent', timeout: 20000 });
     // send it from the list
     await shClick('.bar [data-act=open]');
-    await waitFor(() => sh('.unsent .head'), { label: 'the Not sent fold' });
-    assert.equal(await sh('.urow'), null, 'folded by default');
-    await shClick('.unsent [data-act=unsent-toggle]');
+    await waitFor(() => sh('.panel [data-act=unsent]'), { label: 'the Faxes Not Sent tab' });
+    assert.equal(await sh('.urow'), null, 'the runs view by default');
+    await shClick('.panel [data-act=unsent]');
     await waitFor(() => sh('.urow[data-pcr="' + id + '"] [data-act=send-email]'), { label: 'email button in the list' });
     await shClick('.urow[data-pcr="' + id + '"] [data-act=send-email]');
     await waitFor(async () => (await T.faxes()).emails.some(e => e.pcrId === id), { label: 'emailed' });
@@ -573,8 +577,8 @@ test('the Not sent list is agency-wide: locked runs from other devices with a de
   assert.ok(!s.unsent.items.some(i => i.pcrId === nowhere), 'run with no destination not listed');
   const item = s.unsent.items.find(i => i.pcrId === unsent);
   assert.equal(item.destinationName, 'Gateway Regional Med Center'); assert.equal(item.fax, true); assert.equal(item.email, true);
-  await waitFor(async () => /Not sent yet \(1\)/.test((await sh('.run.unsent')) || ''), { label: 'folded, with the count' });
-  await shClick('.unsent [data-act=unsent-toggle]');
+  await waitFor(async () => /Faxes Not Sent \(1\)/.test((await sh('.panel [data-act=unsent]')) || ''), { label: 'the tab, with the count' });
+  await shClick('.panel [data-act=unsent]');
   const text = await waitFor(async () => { const t = await sh('.run.unsent'); return t && /Gateway/.test(t) ? t : null; }, { label: 'unfolded' });
   assert.match(text, /Gateway Regional Med Center/);
   assert.match(await sh('.bar'), /1 run not faxed/);
@@ -2167,33 +2171,33 @@ test('templates: with no signal the fill is held and pushed when signal returns'
   await waitFor(async () => (await T.run(id)).batches.every(b => b.status === 'acked' || b.status === 'dropped'), { label: 'all acked', timeout: 30000 });
 });
 
-test('templates: the agency owner locks a field and a part of the vitals; the crew sees the lock, cannot set them, and a fill leaves them out', async () => {
+test('templates: the agency owner locks a field, a part of the vitals and an assessment category from Management; the crew sees the lock, cannot set them, and a fill leaves them out', async () => {
   const agency = async () => ((await fetch(T.base + '/__db_dump').then(r => r.json())).find(r => r.name === '__agency__') || {}).settings || {};
   await T.control({ userName: 'GASTON, MICHAEL', userId: 'd4e45fac-ee36-4ac8-bf9a-3fb3e265c0d0' });
   await freshRun();
-  await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.bar [data-act=templates]').click());
-  await waitFor(() => tw('[data-act=new]'), { label: 'window' });
-  await twClick('[data-act=new]');
-  await waitFor(() => tw('[data-act=lockmode]'), { label: 'the owner sees Lock fields' });
-  await twClick('[data-act=lockmode]');
-  await twClick('[data-page=incident]');
-  await waitFor(() => tw('[data-lock="incident.response.priorityId"]'), { label: 'lock buttons' });
-  await twClick('[data-lock="incident.response.priorityId"]');
-  await waitFor(async () => ((await agency()).tplLocks || []).includes('incident.response.priorityId'), { label: 'lock in the agency row' });
-  await twClick('[data-page=vitals]');
-  await twClick('[data-additem="vitals.vitalSigns"]');
-  await waitFor(() => tw('[data-lock="vitals.vitalSigns.bloodPressure"]'), { label: 'a lock per vital group' });
-  await twClick('[data-lock="vitals.vitalSigns.bloodPressure"]');
-  await waitFor(async () => ((await agency()).tplLocks || []).includes('vitals.vitalSigns.bloodPressure'), { label: 'group lock in the agency row' });
-  assert.match(await tw('[data-lock="vitals.vitalSigns.bloodPressure"]'), /Locked/);
-  await twClick('[data-page=assessments]');
-  await twClick('[data-additem="assessments.assessmentsV2"]');
-  await waitFor(() => tw('.item [data-cat="Skin"]'), { label: 'the assessment' });
-  await twClick('.item [data-cat="Skin"]');
-  await waitFor(() => tw('[data-lock="assessments.assessmentsV2.findings.Skin"]'), { label: 'a lock per assessment category' });
-  await twClick('[data-lock="assessments.assessmentsV2.findings.Skin"]');
-  await waitFor(async () => ((await agency()).tplLocks || []).includes('assessments.assessmentsV2.findings.Skin'), { label: 'category lock in the agency row' });
-  await twClick('[data-act=cancel]');
+  await waitFor(async () => !!(await T.storage()).catalog, { label: 'the field catalog on the device' });
+  const mg = (fn, ...args) => T.page.evaluate(fn, ...args);
+  await mg(() => document.getElementById('esosave-host').shadowRoot.querySelector('.bar [data-act=open]').click());
+  await waitFor(() => mg(() => !!document.getElementById('esosave-host').shadowRoot.querySelector('.panel [data-act=management]')), { label: 'panel' });
+  await mg(() => document.getElementById('esosave-host').shadowRoot.querySelector('.panel [data-act=management]').click());
+  await waitFor(() => mg(() => !!document.getElementById('esosave-host').shadowRoot.querySelector('.mgmt [data-tlock="incident.response.priorityId"]')), { label: 'every field listed with a lock switch' });
+  const lockBtn = (k) => mg((key) => { const b = document.getElementById('esosave-host').shadowRoot.querySelector(`.mgmt [data-tlock="${key}"]`); return b ? { text: b.textContent, disabled: b.disabled } : null; }, k);
+  assert.match((await lockBtn('incident.response.priorityId')).text, /Open/);
+  assert.ok(await lockBtn('vitals.vitalSigns'), 'an item as a whole'); assert.ok(await lockBtn('vitals.vitalSigns.bloodPressure'), 'a vital group'); assert.ok(await lockBtn('vitals.vitalSigns.pulse.pulseRate'), 'a vital field');
+  assert.ok(await lockBtn('assessments.assessmentsV2.findings'), 'every assessment category'); assert.ok(await lockBtn('assessments.assessmentsV2.findings.Skin'), 'one assessment category');
+  // the search narrows the list
+  await mg(() => { const i = document.getElementById('esosave-host').shadowRoot.querySelector('.mgmt [data-tlq]'); i.value = 'priority'; i.dispatchEvent(new Event('input', { bubbles: true })); });
+  await waitFor(() => mg(() => { const r = document.getElementById('esosave-host').shadowRoot; return !!r.querySelector('.mgmt [data-tlock="incident.response.priorityId"]') && !r.querySelector('.mgmt [data-tlock="vitals.vitalSigns"]'); }), { label: 'narrowed' });
+  await mg(() => { const i = document.getElementById('esosave-host').shadowRoot.querySelector('.mgmt [data-tlq]'); i.value = ''; i.dispatchEvent(new Event('input', { bubbles: true })); });
+  await waitFor(() => mg(() => !!document.getElementById('esosave-host').shadowRoot.querySelector('.mgmt [data-tlock="vitals.vitalSigns"]')), { label: 'the whole list again' });
+  const lock = async (k) => { await mg((key) => document.getElementById('esosave-host').shadowRoot.querySelector(`.mgmt [data-tlock="${key}"]`).click(), k); await waitFor(async () => ((await agency()).tplLocks || []).includes(k), { label: k + ' in the agency row' }); };
+  await lock('incident.response.priorityId');
+  await lock('vitals.vitalSigns.bloodPressure');
+  await waitFor(async () => /Locked/.test(((await lockBtn('vitals.vitalSigns.bloodPressure')) || {}).text || ''), { label: 'the switch shows Locked' });
+  const sys = await waitFor(() => lockBtn('vitals.vitalSigns.bloodPressure.bloodPressureSystolic'), { label: 'the systolic row' });
+  assert.ok(sys.disabled && /In a locked group/.test(sys.text), 'a field under a locked group says so');
+  await lock('assessments.assessmentsV2.findings.Skin');
+  await mg(() => document.getElementById('esosave-host').shadowRoot.querySelector('.panel [data-act=close]').click());
   // the crew: the lock shows, the field cannot be set, the template saves without it, the fill leaves it out
   await T.control({ userName: 'TEST, MEDIC', userId: 'person-1' });
   const id = await freshRun();
@@ -2201,7 +2205,7 @@ test('templates: the agency owner locks a field and a part of the vitals; the cr
   await app(() => window.app.edit('incident', 'incident.response.priorityId', 331, 'singleselect'));
   await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.bar [data-act=templates]').click());
   await waitFor(async () => /Chest pain/.test((await tw('.body')) || ''), { label: 'his templates' });
-  assert.equal(await tw('[data-act=lockmode]'), null, 'no Lock fields for the crew');
+  assert.equal(await tw('[data-act=lockmode]'), null, 'no lock buttons in the editor');
   await T.page.evaluate(() => { const row = Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.tplwin .tpl')).find(r => /^Chest pain/.test(r.querySelector('.tn').textContent)); row.querySelector('[data-act=edit]').click(); });
   await waitFor(() => tw('[data-page=incident]'), { label: 'editor' });
   await twClick('[data-page=incident]');

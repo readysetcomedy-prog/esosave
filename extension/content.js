@@ -189,7 +189,7 @@
       facilities = payload;
       facilityTypes = { locationTypes: payload.locationTypes || [], destinationTypes: payload.destinationTypes || [], crew: payload.crew || [], lists: payload.lists || null };
       await sset({ facilityTypes });
-      if (panelOpen && settingsOpen) renderPanel(); layoutQuick();
+      if (panelOpen && (panelView === 'settings' || panelView === 'management')) renderPanel(); layoutQuick();
     } else if (type === 'event' && payload && payload.name === 'attached') {
       onAttached(payload);
     } else if (type === 'event' && payload && payload.name === 'facesheetFilled') {
@@ -300,6 +300,10 @@
     .mgmt .slk { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 3px 0; font-size: 13px; border-top: 1px solid #f8fafc; }
     .mgmt .mgr { border: 1px solid #e5e7eb; border-radius: 8px; padding: 6px 10px; margin: 6px 0; } .mgmt .mgr .mn { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
     .mgmt .mgradd { display: flex; gap: 6px; margin-top: 6px; align-items: center; } .mgmt select { font: inherit; font-size: 13px; padding: 5px; flex: 1; min-width: 0; }
+    .mgmt .tlsec { font-weight: 700; color: #334155; margin: 8px 0 2px; font-size: 13px; }
+    .mgmt details.tlp { border: 1px solid #e5e7eb; border-radius: 8px; padding: 0 8px; margin: 6px 0; } .mgmt details.tlp > summary { cursor: pointer; font-weight: 700; padding: 8px 0; }
+    .mgmt .slk.on > span { color: #92400e; } .mgmt .facq { margin: 6px 0; }
+    .tabs .a { min-height: 32px; }
     .mgmt .tpl { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid #f1f5f9; font-size: 13px; } .mgmt .tpl .actions { margin: 0; }
     .bar .num { font-weight: 700; }
     .bar .btns { display: flex; gap: 6px; margin-top: 7px; }
@@ -496,9 +500,11 @@
     parts.push(`<div class="muted">${s.online ? 'Signal OK' : 'NO SIGNAL'}${s.loggedOut ? ' · logged out' : ''}${s.pushing ? ' · pushing' : ''} · ${nRuns} run${nRuns === 1 ? '' : 's'} on this device` +
       `${user ? ` · signed in as <b>${esc(user)}</b>` : ''}` +
       `${s.hasTemplates ? '' : ' · <span title="Start one run with signal so a blank-run template is saved">no offline new-run template yet</span>'}</div>`);
-    parts.push(`<div class="actions"><button class="a" data-act="push">Push all held changes now</button><button class="a sec" data-act="export-all">Export everything</button><button class="a sec" data-act="settings">Settings</button><button class="a sec" data-act="management">Management${can('approveTemplates') && mgmt.pending && mgmt.pending.length ? ` (${mgmt.pending.length})` : ''}</button></div>`);
-    if (mgmtOpen) parts.push(managementUi());
-    if (settingsOpen) {
+    const u = s.unsent, nUnsent = u ? u.items.length : 0;
+    const tab = (v, label) => `<button class="a ${panelView === v ? '' : 'sec'}" data-act="${v}">${label}</button>`;
+    parts.push(`<div class="actions tabs">${tab('runs', `Current Runs${nRuns ? ` (${nRuns})` : ''}`)}${settings.unsentList !== false ? tab('unsent', `Faxes Not Sent${nUnsent ? ` (${nUnsent})` : ''}`) : ''}${tab('settings', 'Settings')}${tab('management', `Management${can('approveTemplates') && mgmt.pending && mgmt.pending.length ? ` (${mgmt.pending.length})` : ''}`)}</div>`);
+    if (panelView === 'management') parts.push(managementUi());
+    if (panelView === 'settings') {
       const canA = can('lockSettings');
       const rowOf = (d) => {
         const lk = isLocked(d.k), dis = lk && !canA;
@@ -517,14 +523,14 @@
         SETTING_DEFS.map(rowOf).join('') +
         `<div class="actions"><button class="a" data-act="save-settings">Save</button></div></div>`);
     }
-    if (settings.unsentList !== false) {
-      const u = s.unsent;
+    if (panelView === 'unsent' && settings.unsentList !== false) {
       const items = u ? u.items : [];
-      parts.push(`<div class="run unsent"><div class="head" data-act="unsent-toggle" style="cursor:pointer"><span class="num">${unsentOpen ? '▾' : '▸'} Not sent yet${items.length ? ` (${items.length})` : ''}</span><span class="muted">${u ? `locked in the last 15 days · checked ${fmtTime(u.at)}` : 'checking…'}</span></div>` +
-        (!unsentOpen ? '' : items.length ? items.map(i => `<div class="urow" data-pcr="${esc(i.pcrId)}"><div><b>${esc(i.incidentNumber || '')}</b> · ${esc(fmtWhen(i.incidentDateTime))}<br><span class="muted">${esc(i.patientName || '')} → ${esc(i.destinationName || '')}</span></div><div class="actions">${i.fax ? '<button class="a" data-act="send-fax">Fax</button>' : ''}${i.email ? '<button class="a sec" data-act="send-email">Email</button>' : ''}</div></div>`).join('')
+      parts.push(`<div class="run unsent"><div class="head"><span class="num">Faxes Not Sent${items.length ? ` (${items.length})` : ''}</span><span class="muted">${u ? `locked in the last 15 days · checked ${fmtTime(u.at)}` : 'checking…'}</span></div>` +
+        (items.length ? items.map(i => `<div class="urow" data-pcr="${esc(i.pcrId)}"><div><b>${esc(i.incidentNumber || '')}</b> · ${esc(fmtWhen(i.incidentDateTime))}<br><span class="muted">${esc(i.patientName || '')} → ${esc(i.destinationName || '')}</span></div><div class="actions">${i.fax ? '<button class="a" data-act="send-fax">Fax</button>' : ''}${i.email ? '<button class="a sec" data-act="send-email">Email</button>' : ''}</div></div>`).join('')
           : `<p class="muted">${u ? 'Every locked run with a fax or email destination has been sent.' : 'Looking at ESO\'s fax history and the locked runs…'}</p>`) +
-        (unsentOpen ? `<div class="actions"><button class="a sec" data-act="rescan">Check again</button></div>` : '') + `</div>`);
+        `<div class="actions"><button class="a sec" data-act="rescan">Check again</button></div></div>`);
     }
+    if (panelView === 'runs') {
     const listed = s.runs.filter(r => mine(r) && (r.counts.total || r.pendingCreate) && !(r.locked && !r.counts.held && !r.counts.rejected && !r.sends.some(x => x.status === 'held')));
     if (!listed.length) parts.push(`<p class="muted">No runs recorded yet. Open a run in ESO and every save will be recorded here.</p>`);
     for (const r of listed) {
@@ -543,10 +549,8 @@
         <div class="head"><span class="num">${esc(r.incidentNumber || '(no incident number yet)')}</span><span>${pills.join('')}</span></div>
         <div class="muted">${c.total} save${c.total === 1 ? '' : 's'} recorded · started ${fmtWhen(r.createdAt)} · last activity ${fmtWhen(r.lastSeenAt)}${r.lastSavedAt ? ' · last confirmed by ESO ' + fmtTime(r.lastSavedAt) : ''}${sigs.length ? ` · ${sigs.length} signature image${sigs.length === 1 ? '' : 's'}` : ''}</div>
         <div class="actions">
-          <button class="a" data-act="into-current" ${!s.currentRecordId || s.currentRecordId === r.recordId || !c.total ? 'disabled' : ''} title="Push every recorded change of this run into the run that is open in ESO right now">Push into the open run</button>
-          <button class="a" data-act="into-new" ${!c.total || !s.online ? 'disabled' : ''} title="Create a brand-new run on ESO and push every recorded change into it">Push into a NEW run</button>
+          <button class="a" data-act="into-current" ${!s.currentRecordId || s.currentRecordId === r.recordId || !c.total ? 'disabled' : ''} title="Push every recorded change of this run into the run that is open in ESO right now (open a new run first to restore into a fresh one)">Push into the open run</button>
           ${c.rejected ? '<button class="a sec" data-act="retry">Retry rejected</button><button class="a sec" data-act="drop">Drop rejected</button>' : ''}
-          <button class="a sec" data-act="export">Export backup</button>
           <button class="a sec" data-act="toggle-log">Log</button>
           <button class="a danger" data-act="clear" title="Remove this run's recorded changes and signature images from this device">Clear</button>
         </div>
@@ -555,6 +559,7 @@
       </div>`);
     }
     parts.push(`<p class="muted">Everything here stays on this device until ESO confirms it. Locked runs clear ${Number(settings.purgeHoursAfterLock) ? esc(settings.purgeHoursAfterLock) + ' hour(s) after locking' : 'as soon as the lock is seen'}. Runs untouched for 30 days clear too. Signature images are a backup in case a signature never reaches ESO.</p>`);
+    }
     panel.innerHTML = parts.join('');
     panel.querySelectorAll('.fac .facq').forEach(inp => inp.addEventListener('input', () => {
       const key = inp.closest('.fac').dataset.key; facSearch[key] = inp.value;
@@ -562,7 +567,14 @@
       box.querySelector('.facm').innerHTML = fresh.querySelector('.facm').innerHTML;
       box.querySelectorAll('[data-act]').forEach(a => a.addEventListener('click', onPanelAction));
     }));
-    panel.querySelectorAll('.mgmt [data-act], .mgmt [data-slock], .mgmt [data-tunlock]').forEach(el => el.addEventListener('click', onManagement));
+    const wireTl = () => {
+      panel.querySelectorAll('.mgmt [data-tlock]').forEach(el => el.addEventListener('click', onManagement));
+      panel.querySelectorAll('.mgmt details.tlp').forEach(d => d.addEventListener('toggle', () => { if (d.open) openTl.add(d.dataset.tlp); else openTl.delete(d.dataset.tlp); }));
+    };
+    wireTl();
+    const tlIn = panel.querySelector('.mgmt [data-tlq]');
+    if (tlIn) tlIn.addEventListener('input', () => { tlq = tlIn.value; const box = panel.querySelector('.mgmt .tlbody'); if (box) { box.innerHTML = templateLocksBody(); wireTl(); } });
+    panel.querySelectorAll('.mgmt [data-act], .mgmt [data-slock]').forEach(el => el.addEventListener('click', onManagement));
     panel.querySelectorAll('.mgmt [data-perm]').forEach(el => el.addEventListener('change', onManagement));
     panel.querySelectorAll('[data-act]').forEach(el => { if (!el.closest('.mgmt')) el.addEventListener('click', onPanelAction); });
   }
@@ -653,7 +665,6 @@
     try { const row = user ? await findPerson(user, userId) : null; if (row && row.settings && typeof row.settings === 'object' && k in row.settings) settings[k] = row.settings[k]; else if (k in DEFAULT_SETTINGS) settings[k] = DEFAULT_SETTINGS[k]; } catch (e) { /* offline: the agency's value stays until the next sync */ }
   }
   // ---- Management: the owner names managers and their permissions; locks; template approval
-  let mgmtOpen = false;
   let mgmt = { pending: null, all: null, at: 0, note: '' };
   async function mgmtLoad() {
     if (!(can('approveTemplates') || can('deleteTemplates'))) { mgmt = { pending: null, all: null, at: 0, note: '' }; return; }
@@ -666,7 +677,36 @@
     } catch (e) { mgmt.note = 'No signal: the templates could not be read.'; }
     if (panelOpen) renderPanel();
   }
-  const lockName = (k) => k.split('.').map(humanize).join(' › ');
+  // the field list for the template locks: each tab's sections and fields, each item as a whole
+  // and its parts (the vital groups, the assessment categories, the item's own fields)
+  function templateLocksBody() {
+    if (!catalog) return '<div class="muted">Open a run once so ESO\'s field list is loaded; then every field is listed here.</div>';
+    const q = tlq.trim().toLowerCase(); const hit = (name) => !q || String(name).toLowerCase().includes(q);
+    const btn = (key) => { const own = tplLocks().includes(key), inh = !own && tplLocked(key); return `<button class="a ${own ? '' : 'sec'}" data-tlock="${esc(key)}" ${inh ? 'disabled title="In a locked group: unlock the group to reach it"' : ''}>${own ? '🔒 Locked' : inh ? '🔒 In a locked group' : '🔓 Open'}</button>`; };
+    const row = (name, key, sub) => `<div class="slk${tplLocked(key) ? ' on' : ''}"><span>${sub ? '<span class="muted">· </span>' : ''}${esc(name)}</span>${btn(key)}</div>`;
+    let html = '';
+    for (const [page, label] of TPL_PAGES) {
+      const rows = [];
+      for (const [sec, fields] of sectionsOf(page)) {
+        const fs = fields.filter(f => hit(pnTitle(f)) || hit(humanize(sec)));
+        if (fs.length) rows.push(`<div class="tlsec">${esc(humanize(sec))}</div>` + fs.map(f => row(pnTitle(f), f.a)).join(''));
+      }
+      for (const [root, kind] of itemRootsOf(page)) {
+        const name = ITEM_NAMES[kind] || humanize(root.split('.').pop());
+        const parts = [];
+        if (kind === 'vital') for (const [g, gl] of VITAL_GROUPS) parts.push([gl, `${root}.${g}`]);
+        if (kind === 'assessment') { parts.push(['Findings, every category', `${root}.findings`]); const A = AX(); if (A) for (const c of A.layout) parts.push([`Findings: ${c.n}`, `${root}.findings.${c.id}`]); }
+        for (const m of memberFields(root)) parts.push([pnTitle(m), m.a]);
+        const ps = hit(name) ? parts : parts.filter(([n]) => hit(n));
+        if (!hit(name) && !ps.length) continue;
+        rows.push(`<div class="tlsec">${esc(name)}</div>` + row(`${name}, as a whole`, root) + ps.map(([n, k]) => row(n, k, true)).join(''));
+      }
+      if (!rows.length) continue;
+      const nl = tplLocks().filter(k => k.split('.')[0] === page).length;
+      html += `<details class="tlp" data-tlp="${page}" ${q || openTl.has(page) ? 'open' : ''}><summary>${esc(label)}${nl ? ` <span class="pill warn">${nl} locked</span>` : ''}</summary>${rows.join('')}</details>`;
+    }
+    return html || '<div class="muted">No field matches.</div>';
+  }
   function managementUi() {
     const locked = (title) => `<div class="msec off"><div class="mh">🔒 ${esc(title)}</div><div class="muted">Ask Admin for Approval for this Feature</div></div>`;
     const parts = [];
@@ -684,8 +724,8 @@
     } else parts.push(locked('Settings locks'));
     if (can('lockTemplates')) {
       const L = tplLocks();
-      parts.push(`<div class="msec"><div class="mh">Template locks</div><div class="muted">A locked field, item or part cannot be set by a template: the crew enters it on the run. Lock one with Lock fields in any template's editor; unlock it there or here.</div>` +
-        (L.length ? L.map(k => `<div class="slk"><span>${esc(lockName(k))}</span><button class="a sec" data-tunlock="${esc(k)}">Unlock</button></div>`).join('') : '<div class="muted">Nothing is locked.</div>') + '</div>');
+      parts.push(`<div class="msec"><div class="mh">Template locks${L.length ? ` (${L.length})` : ''}</div><div class="muted">Every field a template can carry, by tab. A locked field, item or part cannot be set by any template: the crew enters it on the run. Locking an item as a whole (vitals, say) or a group (blood pressure) locks everything under it.</div>` +
+        `<input type="text" class="facq" data-tlq placeholder="Find a field…" value="${esc(tlq)}"><div class="tlbody">${templateLocksBody()}</div></div>`);
     } else parts.push(locked('Template locks'));
     if (can('approveTemplates')) {
       const P = mgmt.pending;
@@ -730,8 +770,8 @@
         settings.locks = on ? L.concat([k]) : L.filter(x => x !== k);
         await saveAgency(['locks', k]);
         if (!on) { await reopenSetting(k); await sset({ settings }); toPage('settings', settings); layoutQuick(); if (panelOpen) renderPanel(); }
-      } else if (el.dataset.tunlock) {
-        await toggleLock(el.dataset.tunlock);
+      } else if (el.dataset.tlock) {
+        await toggleLock(el.dataset.tlock);
       } else if (act === 'tpl-approve' && tid) {
         if (!can('approveTemplates')) return;
         await tplReq(`${TPL_URL}?id=eq.${encodeURIComponent(tid)}`, { method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ approved: true, approved_by: user, approved_at: new Date().toISOString() }) });
@@ -778,8 +818,9 @@
     { k: 'facilityDestination', id: 'facd', type: 'facility', title: 'Destination facility chips', short: 'Destination facility chips' },
   ];
   const openLogs = new Set();
-  let settingsOpen = false;
-  let unsentOpen = false; // the Not sent list stays folded until asked for
+  let panelView = 'runs'; // the card shows one thing at a time: runs, the faxes not sent, settings, or management
+  let tlq = ''; // the search in Management's template locks
+  const openTl = new Set(); // the pages unfolded there
   const facSearch = {};
   function facilityPicker(key, title) {
     const ro = isLocked(key) && !can('lockSettings');
@@ -799,8 +840,9 @@
     const runEl = el.closest('.run');
     const id = runEl && runEl.dataset.id;
     if (act === 'close') togglePanel(false);
-    else if (act === 'push') toPage('action', { name: 'pushNow' });
-    else if (act === 'settings') { settingsOpen = !settingsOpen; renderPanel(); }
+    else if (act === 'runs') { panelView = 'runs'; renderPanel(); }
+    else if (act === 'unsent') { panelView = 'unsent'; renderPanel(); if (!lastStatus || !lastStatus.unsent || Date.now() - lastStatus.unsent.at > 2 * 60 * 1000) toPage('action', { name: 'scanUnsent' }); }
+    else if (act === 'settings') { panelView = 'settings'; renderPanel(); }
     else if (act === 'save-settings') {
       // the locked settings go to the agency row (for whoever may change them), the open ones to the login's row
       const canA = can('lockSettings'); const agencyKeys = [];
@@ -814,13 +856,12 @@
       }
       if (agencyKeys.length) pushAgency(agencyKeys);
       layoutQuick();
-      await sset({ settings }); toPage('settings', settings); settingsOpen = false; renderPanel(); renderTimes();
+      await sset({ settings }); toPage('settings', settings); renderPanel(); renderTimes();
       pushUser();
     }
-    else if (act === 'management') { mgmtOpen = !mgmtOpen; if (mgmtOpen) { settingsOpen = false; if (can('approveTemplates') || can('deleteTemplates')) mgmtLoad(); } renderPanel(); }
+    else if (act === 'management') { panelView = 'management'; if (can('approveTemplates') || can('deleteTemplates')) mgmtLoad(); renderPanel(); }
     else if (act === 'toggle-log') { if (openLogs.has(id)) openLogs.delete(id); else openLogs.add(id); renderPanel(); }
     else if (act === 'rescan') { toPage('action', { name: 'scanUnsent' }); }
-    else if (act === 'unsent-toggle') { unsentOpen = !unsentOpen; renderPanel(); }
     else if (act === 'fac-add' || act === 'fac-remove') {
       const key = el.closest('.fac').dataset.key; const fid = el.dataset.id;
       if (isLocked(key) && !can('lockSettings')) return;
@@ -845,11 +886,9 @@
       showVeilMessage(kind === 'fax' ? 'Sending fax…' : 'Sending email…', 'Asking ESO to send the chart to ' + dest + '.');
       toPage('action', { name: 'send', recordId: pcr, kind });
     }
-    else if (act === 'into-current' || act === 'into-new') showPagePicker(id, act === 'into-new');
+    else if (act === 'into-current') showPagePicker(id, false);
     else if (act === 'retry') toPage('action', { name: 'retryRejected', recordId: id });
     else if (act === 'drop') { if (confirm('Drop the rejected changes? They will stay in the export but will not be pushed again.')) toPage('action', { name: 'dropRejected', recordId: id }); }
-    else if (act === 'export') exportRuns([id]);
-    else if (act === 'export-all') exportRuns(null);
     else if (act === 'clear') {
       if (!confirm('Remove this run\'s recorded changes and signature images from this device? This cannot be undone.')) return;
       await sremove(['run:' + id, 'sigs:' + id]);
@@ -857,20 +896,6 @@
       openLogs.delete(id);
       renderPanel();
     }
-  }
-  async function exportRuns(ids) {
-    const all = await sget(null);
-    const out = { exportedAt: new Date().toISOString(), version: (lastStatus && lastStatus.version) || null, runs: {}, signatures: {} };
-    for (const [k, v] of Object.entries(all)) {
-      if (k.startsWith('run:') && (!ids || ids.includes(k.slice(4)))) out.runs[k.slice(4)] = v;
-      if (k.startsWith('sigs:') && (!ids || ids.includes(k.slice(5)))) out.signatures[k.slice(5)] = v;
-    }
-    const name = ids && ids.length === 1 && out.runs[ids[0]] ? (out.runs[ids[0]].incidentNumber || ids[0]) : 'all-runs';
-    const blob = new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = `esosave-${String(name).replace(/[^\w.-]+/g, '_')}.json`; a.target = '_blank';
-    shadow.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 60000);
   }
 
   // ---------------------------------------------------------------- tab warm-up
@@ -3055,16 +3080,14 @@
   // a field's address, an item root, or root.part; a lock covers everything under it.
   const tplLocks = () => Array.isArray(settings.tplLocks) ? settings.tplLocks : [];
   const tplLocked = (key) => tplLocks().some(k => key === k || key.startsWith(k + '.'));
-  let lockMode = false;
   async function toggleLock(key) {
     if (!can('lockTemplates')) return;
     const cur = tplLocks();
     settings.tplLocks = cur.includes(key) ? cur.filter(k => k !== key) : cur.concat([key]);
     await sset({ settings }); await pushAgency(['tplLocks']);
-    if (tplWin && tplView === 'edit') renderEditor();
+    if (tplWin) renderTemplates();
     if (panelOpen) renderPanel();
   }
-  const lockBtn = (key, extra) => lockMode && can('lockTemplates') ? `<button type="button" class="tb sec" data-lock="${esc(key)}" title="${tplLocked(key) ? 'Locked: the crew cannot set this' : 'Open: lock it'}" style="padding:6px 10px;min-height:36px;${extra || ''}">${tplLocks().includes(key) ? '🔒 Locked' : tplLocked(key) ? '🔒 (in a locked group)' : '🔓 Lock'}</button>` : '';
   const lockNote = () => `<span class="muted" style="font-weight:600">🔒 Locked by the agency</span>`;
   // Fields ESO shows only once something else is picked (the mutual aid agency once the run type is
   // mutual aid, the injury fields once there is an injury, the transport fields once the patient
@@ -3128,6 +3151,15 @@
     return out;
   }
   function itemRootsOf(page) { return Object.entries(catalog.items || {}).filter(([root]) => root.split('.')[0] === page); }
+  // ESO names its unable-to-obtain fields "UTO" or "Reason Unable To Obtain"; name the field each stands in for (Last Known Well · UTO)
+  const pnTitle = (f) => {
+    if (f.t !== 'pertinentNegative') return f.n;
+    const generic = /^(UTO|Reason Unable To Obtain|Pertinent Negative)$/i.test(f.n.trim());
+    const partnerA = f.a.replace(/PertinentNegative(I[dD])?$/, '').replace(/\.pertinentNegativeId$/, '');
+    const partner = partnerA !== f.a && (catalog.fields || []).find(x => x.a === partnerA);
+    const base = generic ? (partner ? partner.n : humanize(partnerA.split('.').pop())) : f.n;
+    return `${base} · UTO`;
+  };
   const memberFields = (root) => (catalog.fields || []).filter(f => f.i === root).map(f => ({ ...f, rel: f.a.slice(root.length + 1) }));
   function renderEditor() {
     if (!tplWin || !ed) return;
@@ -3149,21 +3181,13 @@
     const page = ed.page;
     const secs = sectionsOf(page), roots = itemRootsOf(page);
     // ESO names its unable-to-obtain fields "UTO" or "Reason Unable To Obtain"; the editor names the field each stands in for (Last Known Well · UTO)
-    const pnTitle = (f) => {
-      if (f.t !== 'pertinentNegative') return f.n;
-      const generic = /^(UTO|Reason Unable To Obtain|Pertinent Negative)$/i.test(f.n.trim());
-      const partnerA = f.a.replace(/PertinentNegative(I[dD])?$/, '').replace(/\.pertinentNegativeId$/, '');
-      const partner = partnerA !== f.a && (catalog.fields || []).find(x => x.a === partnerA);
-      const base = generic ? (partner ? partner.n : humanize(partnerA.split('.').pop())) : f.n;
-      return `${base} · UTO`;
-    };
     const fieldRow = (f, cur, prefix) => {
       const on = !!cur; const key = prefix ? `${prefix}|${f.rel}` : f.a;
       const locked = tplLocked(f.a);
       const shut = locked && !can('lockTemplates');
       const rule = prefix ? null : ruleFor(f.a); const unmet = rule && !ruleMet(rule, ed.fields);
       const blanks = f.t === 'string' && /narrative/i.test(f.a) && /narrativeText|narrative$/i.test(f.a) ? '<div class="muted" style="font-weight:400">Leave blanks like ____ to fill on the run; {incident}, {unit}, {date} and {time} are filled in for you.</div>' : '';
-      return `<div class="tf ${on ? 'on' : ''} ${shut ? 'shut' : ''}" data-key="${esc(key)}"><input type="checkbox" data-sel ${on ? 'checked' : ''} ${shut ? 'disabled' : ''}><div class="fl">${esc(pnTitle(f))}<div class="muted" style="font-weight:400">${esc(f.t === 'pertinentNegative' ? 'unable to obtain: the reason' : '')}${locked ? lockNote() : ''}${unmet ? `<div style="color:#b45309">Only on the run when ${esc(rule.why)}; left out until then.</div>` : ''}</div>${blanks}</div><div>${shut ? '' : inputFor(f, cur ? cur.v : null, key)}${lockBtn(f.a, 'margin-top:4px')}</div></div>`;
+      return `<div class="tf ${on ? 'on' : ''} ${shut ? 'shut' : ''}" data-key="${esc(key)}"><input type="checkbox" data-sel ${on ? 'checked' : ''} ${shut ? 'disabled' : ''}><div class="fl">${esc(pnTitle(f))}<div class="muted" style="font-weight:400">${esc(f.t === 'pertinentNegative' ? 'unable to obtain: the reason' : '')}${locked ? lockNote() : ''}${unmet ? `<div style="color:#b45309">Only on the run when ${esc(rule.why)}; left out until then.</div>` : ''}</div>${blanks}</div><div>${shut ? '' : inputFor(f, cur ? cur.v : null, key)}</div></div>`;
     };
     for (const [sec, fields] of secs) {
       const shown = (q ? fields.filter(f => f.n.toLowerCase().includes(q) || sec.toLowerCase().includes(q)) : fields).filter(f => fieldShown(f.a, ed.fields) || ed.fields[f.a]);
@@ -3178,7 +3202,7 @@
       const items = ed.items.map((it, i) => ({ it, i })).filter(x => x.it.root === root);
       const members = memberFields(root);
       const rootLocked = tplLocked(root), rootShut = rootLocked && !can('lockTemplates');
-      content += `<details class="sec" ${items.length || q ? 'open' : ''}><summary><span style="flex:1">${esc(ITEM_NAMES[kind] || humanize(root.split('.').pop()))}${items.length ? ` <span class="cnt" style="background:#fbbf24;border-radius:10px;padding:0 7px;font-size:12px">${items.length}</span>` : ''}${rootLocked ? ' ' + lockNote() : ''}</span>${lockBtn(root)}</summary>
+      content += `<details class="sec" ${items.length || q ? 'open' : ''}><summary><span style="flex:1">${esc(ITEM_NAMES[kind] || humanize(root.split('.').pop()))}${items.length ? ` <span class="cnt" style="background:#fbbf24;border-radius:10px;padding:0 7px;font-size:12px">${items.length}</span>` : ''}${rootLocked ? ' ' + lockNote() : ''}</span></summary>
         ${rootShut ? `<div class="muted" style="padding:0 0 10px">${esc(ITEM_NAMES[kind] || 'These')} are locked by the agency: a template cannot add them. Enter them on the run yourself.</div>` : ''}
         ${!rootShut && utoSet(ed.fields, root) ? `<div data-utonote style="color:#b45309;padding:0 0 10px">Unable to obtain is set for ${esc((ITEM_NAMES[kind] || 'these').toLowerCase())}: ESO takes one or the other, so a fill writes the Unable to obtain and leaves ${items.length ? 'these entries' : 'any entries'} out. Clear it to fill entries instead.</div>` : ''}
         ${items.map(({ it, i }) => `<div class="item" data-item="${i}"><div class="ih">${esc(itemTitle(it))}<span style="flex:1"></span><button class="tb danger" data-remove>Remove</button></div>
@@ -3187,7 +3211,7 @@
     }
     if (!content) content = '<div class="muted">Nothing on this tab can be templated.</div>';
     const nf = Object.keys(ed.fields).length, ni = ed.items.length;
-    tplWin.innerHTML = `<div class="tophead"><input class="name" type="text" placeholder="Template name" value="${esc(ed.name)}" data-name><span class="muted" style="color:#d1fae5">${nf} field${nf === 1 ? '' : 's'}${ni ? `, ${ni} item${ni === 1 ? '' : 's'}` : ''}</span><span style="flex:1"></span>${can('lockTemplates') ? `<button class="tb ${lockMode ? 'pri' : 'sec'}" data-act="lockmode" title="Lock fields the crew must enter themselves">${lockMode ? 'Done locking' : 'Lock fields'}</button>` : ''}<button class="tb pri" data-act="save">Save</button><button class="tb sec" data-act="cancel">Cancel</button></div>
+    tplWin.innerHTML = `<div class="tophead"><input class="name" type="text" placeholder="Template name" value="${esc(ed.name)}" data-name><span class="muted" style="color:#d1fae5">${nf} field${nf === 1 ? '' : 's'}${ni ? `, ${ni} item${ni === 1 ? '' : 's'}` : ''}</span><span style="flex:1"></span><button class="tb pri" data-act="save">Save</button><button class="tb sec" data-act="cancel">Cancel</button></div>
       <div class="body">${shareUi}<input type="text" class="search" placeholder="Find a field on this tab…" value="${esc(ed.q)}" data-q><div class="pages">${pageBtns}</div>${content}</div>`;
     if (tplWin._page === page) {
       for (const d of tplWin.querySelectorAll('details.sec')) { const t = d.querySelector('summary') && d.querySelector('summary').textContent.trim(); if (t && openFolds.has(t)) d.open = true; }
@@ -3216,7 +3240,7 @@
       return `<div style="display:flex;flex-direction:column;gap:10px">` + keys.map(g => {
         const gk = g === 'other' ? null : `${it.root}.${g}`; const gl = gk && tplLocked(gk);
         const rows = gl && !can('lockTemplates') ? '' : groups.get(g).filter(m => !/PertinentNegativeId$/.test(m.rel)).map(m => fieldRow(m, it.fields[m.rel], String(i))).join('') + groups.get(g).filter(m => /PertinentNegativeId$/.test(m.rel)).map(m => fieldRow({ ...m, n: 'Unable to obtain' }, it.fields[m.rel], String(i))).join('');
-        return `<div style="border:1px solid #e2e8f0;border-radius:10px;background:#fff"><div style="padding:8px 12px;background:#f1f5f9;border-radius:10px 10px 0 0;font-weight:700;color:#334155;display:flex;gap:10px;align-items:center">${esc(VITAL_GROUP_NAMES[g] || humanize(g))}${g === 'glasgowComaScale' && total ? ` <span class="muted">total ${total}</span>` : ''}${gl ? lockNote() : ''}${gk ? lockBtn(gk) : ''}</div><div style="padding:4px 12px 8px">${rows}</div></div>`;
+        return `<div style="border:1px solid #e2e8f0;border-radius:10px;background:#fff"><div style="padding:8px 12px;background:#f1f5f9;border-radius:10px 10px 0 0;font-weight:700;color:#334155;display:flex;gap:10px;align-items:center">${esc(VITAL_GROUP_NAMES[g] || humanize(g))}${g === 'glasgowComaScale' && total ? ` <span class="muted">total ${total}</span>` : ''}${gl ? lockNote() : ''}</div><div style="padding:4px 12px 8px">${rows}</div></div>`;
       }).join('') + '</div>';
     }
     if (kind === 'treatment') {
@@ -3315,7 +3339,7 @@
       <div style="flex:1;min-width:280px">`;
     const cat = cats.find(c => c.id === it._cat);
     const catLocked = lockAll || tplLocked(catKeyOf(cat));
-    html += `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 8px"><b style="font-size:17px">${esc(cat.n)}</b>${catLocked ? lockNote() : ''}${lockBtn(catKeyOf(cat))}</div>`;
+    html += `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 8px"><b style="font-size:17px">${esc(cat.n)}</b>${catLocked ? lockNote() : ''}</div>`;
     const toggle = (loc, id) => { const f = has(loc, id); const on = f && f.present !== false, off = f && f.present === false; return `<span style="display:inline-flex;border:1px solid #cbd5e1;border-radius:20px;overflow:hidden;flex:none"><button type="button" data-tog="${esc(loc)}|${esc(id)}|1" title="Present" style="border:0;padding:6px 12px;font:inherit;font-weight:700;cursor:pointer;background:${on ? '#22c55e' : '#fff'};color:${on ? '#fff' : '#64748b'}">✓</button><button type="button" data-tog="${esc(loc)}|${esc(id)}|0" title="Not present" style="border:0;border-left:1px solid #cbd5e1;padding:6px 12px;font:inherit;font-weight:700;cursor:pointer;background:${off ? '#ef4444' : '#fff'};color:${off ? '#fff' : '#64748b'}">✕</button></span>`; };
     const group = (g, fold) => {
       const fs = at(g.loc).filter(f => !isNA(f.id));
@@ -3364,9 +3388,7 @@
       // clicking away closes the list (a moment later, so a tap on a name still lands)
       pp.addEventListener('blur', () => setTimeout(() => { if (!list.contains(shadow.activeElement)) list.hidden = true; }, 250));
     }
-    W.querySelector('[data-act=cancel]').addEventListener('click', () => { tplView = 'list'; ed = null; lockMode = false; renderTemplates(); });
-    const lm = W.querySelector('[data-act=lockmode]'); if (lm) lm.addEventListener('click', () => { lockMode = !lockMode; renderEditor(); });
-    W.querySelectorAll('[data-lock]').forEach(b => b.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); toggleLock(b.dataset.lock); }));
+    W.querySelector('[data-act=cancel]').addEventListener('click', () => { tplView = 'list'; ed = null; renderTemplates(); });
     W.querySelector('[data-act=save]').addEventListener('click', saveEditor);
     W.querySelectorAll('[data-additem]').forEach(b => b.addEventListener('click', () => {
       const root = b.dataset.additem, kind = b.dataset.kind, rootField = null;

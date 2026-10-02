@@ -12,8 +12,8 @@ to bad signal or a hung page.
   works; ESO assigns the incident number when signal returns.
 - **Signal back? Everything pushes itself**, in the original order, and the card turns green only when
   ESO has really accepted every change. Signatures are just data in those saves, so they go too.
-- **Reloaded page, hung run, ruined run?** Open the run list on the card and push a whole recorded run
-  back into the run that is open, or into a brand-new run, with one tap.
+- **Reloaded page, hung run, ruined run?** Open Current Runs on the card and push a whole recorded run
+  back into the run that is open with one tap (open a new run first to restore into a fresh one).
 - **Always loud.** Logged out, a change ESO rejected, a run that has been held for a while: the card
   turns red or amber and stays that way until it is resolved. There is a per-run log of everything
   that was sent and when.
@@ -192,8 +192,9 @@ to bad signal or a hung page.
   everyone and one shared with named people may both exist, two shared to everyone may not) and
   once among a person's own private ones; the editor says so and asks for a change, "Refusal2"
   say, and the table's own unique indexes hold the line. The agency owner, or a manager with that permission, can lock any field, any
-  kind of item (vitals as a whole) or a part of one (blood pressure, the skin of an assessment) from any template's editor
-  (Lock fields): the crew sees the lock, cannot set it, and a fill leaves it out, so a template
+  kind of item (vitals as a whole) or a part of one (blood pressure, the skin of an assessment) under
+  Management, where every field a template can carry is listed by tab with a Locked/Open switch and a
+  search: the crew sees the lock in the editor, cannot set it, and a fill leaves it out, so a template
   can never make up what the crew must measure themselves. A narrative can be prewritten per
   call type with blanks (____) to fill on the run; {incident}, {unit}, {date} and {time} are
   filled in from the run. Filling needs an open, unlocked
@@ -221,7 +222,7 @@ to bad signal or a hung page.
   were not. Settings lists the groups a vital is made of (blood pressure, pulse, respirations,
   SpO2/EtCO2/CO, glucose and temperature, pain, AVPU, side and posture, GCS, trauma score, ECG):
   untick one and the copy leaves it out, for things that change every time.
-- **Not sent list.** Folded in the panel until tapped.
+- **Not sent list.** Its own view on the card, Faxes Not Sent, with the count on the tab.
 
 Nothing is invented. The extension only replays what ESO's own app tried to send.
 
@@ -351,13 +352,14 @@ off a facesheet by Vision, to the extension through native messaging.
   "–" collapses it to just the logo with a coloured ring (and a count of held changes); tap the logo
   to expand. It stays collapsed through amber (no signal, changes held) and only expands by itself
   when it turns red.
-- Tap the card or **Runs** to open the panel: every run recorded on the device, how many saves are
-  held, the log, signature images, and the restore buttons:
-  - **Push into the open run** / **Push into a NEW run** — first pick which pages to copy (Incident
-    and Narrative are on by default; Toggle all for a full recovery). Turning on Patient or
-    Signatures shows a warning: those overwrite the target run's patient details and signatures,
-    so only for the same patient. A new run is opened from the records list when it finishes.
-  - **Export backup** — a JSON file with every recorded save and signature image.
+- Tap the card or **Runs** to open the panel. It shows one thing at a time: **Current Runs**,
+  **Faxes Not Sent**, **Settings** or **Management**. Current Runs lists every run recorded on the
+  device, how many saves are held, and per run:
+  - **Push into the open run** — first pick which pages to copy (Incident and Narrative are on by
+    default; Toggle all for a full recovery). Turning on Patient or Signatures shows a warning:
+    those overwrite the target run's patient details and signatures, so only for the same patient.
+    To restore into a fresh run, open a new run in ESO first, then push into it.
+  - **Log** — what happened to each save, and the signature images kept as a backup.
   - **Clear** — remove the run from the device.
 - The toolbar icon shows the number of held changes and offers export/clear when ESO is not open.
 
@@ -366,7 +368,7 @@ off a facesheet by Vision, to the extension through native messaging.
 Everything recorded is protected health information and stays in the extension's local storage on
 that device only. Templates carry no patient: they are the crew member's own fill-ins and go to
 the agency's table (`esosave_templates`, `esosave_template_shares`) under their ESO id. It is never sent anywhere but ESO. Locked runs are purged automatically as soon as the lock is seen; a
-retention window can be set in Settings. Exports are plain JSON files: treat them like a printed chart.
+retention window can be set in Settings.
 
 ## Development
 
