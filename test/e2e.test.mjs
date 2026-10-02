@@ -1877,8 +1877,13 @@ test("validation highlight: what ESO's validation summary wants is outlined on t
 
 test('templates: made from ESO\'s own field catalog, saved under the person\'s id, and filled into a run tab by tab with a progress bar', async () => {
   await fetch(T.base + '/__db_tpl_reset', { method: 'POST' });
+  // no template can be used until approved: for the template tests the medic holds the approve
+  // permission, so his are approved as he saves them (the approval queue has its own test)
+  const agencyRow0 = async () => (await fetch(T.base + '/__db_dump').then(r => r.json())).find(r => r.name === '__agency__') || { name: '__agency__', settings: {} };
+  await fetch(T.base + '/__db_set', { method: 'POST', body: JSON.stringify({ name: '__agency__', settings: { ...(await agencyRow0()).settings, managers: { 'person-1': { name: 'TEST, MEDIC', perms: { approveTemplates: true } } } } }) });
   await T.control({ userName: 'TEST, MEDIC', userId: 'person-1' });
   const id = await freshRun();
+  await waitFor(async () => !!(((await T.storage()).settings.managers || {})['person-1']), { label: 'the permission reached the tablet' });
   const inc = (await T.record(id)).incidentNumber;
   await app(() => window.app.openTab('Incident'));
   await waitFor(async () => !!(await T.storage()).catalog, { label: 'the field catalog kept on the device' });
@@ -2050,14 +2055,9 @@ test('templates: a field ESO refuses is left out and named to the medic; everyth
 });
 
 test('templates: shared to everyone or to named people show up for them, named after who shared them; a copy becomes theirs', async () => {
-  // a shared template is seen by others once approved: for this test the sharer holds the approve
-  // permission, so his are approved as he saves them (the approval queue has its own test)
-  const agencyRow = async () => (await fetch(T.base + '/__db_dump').then(r => r.json())).find(r => r.name === '__agency__') || { name: '__agency__', settings: {} };
-  await fetch(T.base + '/__db_set', { method: 'POST', body: JSON.stringify({ name: '__agency__', settings: { ...(await agencyRow()).settings, managers: { 'person-1': { name: 'TEST, MEDIC', perms: { approveTemplates: true } } } } }) });
-  try {
   await T.control({ userName: 'TEST, MEDIC', userId: 'person-1' });
   await freshRun();
-  await waitFor(async () => !!(((await T.storage()).settings.managers || {})['person-1']), { label: 'the permission reached the tablet' });
+  await waitFor(async () => !!(((await T.storage()).settings.managers || {})['person-1']), { label: 'his approve permission (set at the start of the template tests) is on the tablet' });
   await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.bar [data-act=templates]').click());
   await waitFor(async () => /Chest pain/.test((await tw('.body')) || ''), { label: 'his template listed' });
   // share it with everyone
@@ -2144,10 +2144,7 @@ test('templates: shared to everyone or to named people show up for them, named a
   assert.ok(!(await T.page.evaluate(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.tplwin .tpl [data-act]')).some(b => /edit|delete/.test(b.dataset.act)))), 'no Edit or Delete on what others made');
   assert.equal((await tplDb()).templates.find(t => t.name === 'Chest pain').owner_id, 'person-1', 'the original is still his after the copy');
   await twClick('[data-act=close]');
-  } finally {
-    await fetch(T.base + '/__db_set', { method: 'POST', body: JSON.stringify({ name: '__agency__', settings: { ...(await agencyRow()).settings, managers: {} } }) });
-    await T.control({ userName: 'TEST, MEDIC', userId: 'person-1' });
-  }
+  await T.control({ userName: 'TEST, MEDIC', userId: 'person-1' });
 });
 
 test('templates: with no signal the fill is held and pushed when signal returns', async () => {
@@ -2388,7 +2385,7 @@ test('Management: a locked setting takes the agency value on every tablet and th
   await fetch(T.base + '/__db_set', { method: 'POST', body: JSON.stringify({ ...own, settings: { ...own.settings, quickDelays: true } }) });
 });
 
-test('templates: one shared by the crew waits for a manager\'s approval and is theirs to use meanwhile; the approver sees the count and approves it, then everyone sees it; an approver\'s own is approved as saved; the delete permission reaches anyone\'s', async () => {
+test('templates: one made by the crew is pending, unusable even by its owner, until a manager approves it; the approver sees the count and approves it, then everyone sees it; an approver\'s own is approved as saved; the delete permission reaches anyone\'s', async () => {
   const onDialog = (d) => d.accept().catch(() => {});
   T.page.on('dialog', onDialog);
   try {
@@ -2405,12 +2402,12 @@ test('templates: one shared by the crew waits for a manager\'s approval and is t
     await twClick('[data-page=incident]');
     await pick('incident.response.runTypeId', '911 Response (Scene)');
     await sr(() => { const r = document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin input[name=share][value=everyone]'); r.checked = true; r.dispatchEvent(new Event('change', { bubbles: true })); });
-    await waitFor(() => tw('[data-approvalnote]'), { label: 'the editor says others see it once approved' });
+    await waitFor(() => tw('[data-approvalnote]'), { label: 'the editor says it will be pending' });
     await twClick('[data-act=save]');
     const waiting = await waitFor(async () => (await tplDb()).templates.find(t => t.name === 'Waiting room'), { label: 'saved' });
     assert.equal(waiting.approved, false); assert.equal(waiting.share, 'everyone');
-    await waitFor(async () => /Waiting room[\s\S]*waiting for a manager/.test((await tw('.body')) || ''), { label: 'his list says it is waiting' });
-    assert.ok(await sr(() => !!Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.tplwin .tpl')).find(r => /^Waiting room/.test(r.querySelector('.tn').textContent) && r.querySelector('[data-act=fill]'))), 'he can fill with it meanwhile');
+    await waitFor(async () => /Waiting room[\s\S]*pending: it can be used once a manager approves it/.test((await tw('.body')) || ''), { label: 'his list says it is pending' });
+    assert.equal(await sr(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.tplwin .tpl')).find(r => /^Waiting room/.test(r.querySelector('.tn').textContent)).querySelector('[data-act=fill]').disabled), true, 'not his to use until approved');
     // Jane does not see it yet
     await T.control({ userName: 'SMITH, JANE', userId: 'person-j' });
     await freshRun();
@@ -2429,7 +2426,7 @@ test('templates: one shared by the crew waits for a manager\'s approval and is t
     await waitFor(() => sr(() => /Management \(\d+\)/.test(document.getElementById('esosave-host').shadowRoot.querySelector('.panel [data-act=management]').textContent)), { label: 'the waiting count on the button' });
     await openMgmt();
     await waitFor(() => sr(() => !!Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.mgmt [data-tid]')).find(r => /Waiting room/.test(r.textContent) && r.querySelector('[data-act=tpl-approve]'))), { label: 'the queue' });
-    assert.match(await mgmtText(), /Waiting room[\s\S]*by TEST, MEDIC · to everyone · 1 field/);
+    assert.match(await mgmtText(), /Waiting room[\s\S]*by TEST, MEDIC · shared to everyone · 1 field/);
     const nBefore = await sr(() => (document.getElementById('esosave-host').shadowRoot.querySelector('.panel [data-act=management]').textContent.match(/\((\d+)\)/) || [])[1]);
     await sr(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.mgmt [data-tid]')).find(r => /Waiting room/.test(r.textContent)).querySelector('[data-act=tpl-approve]').click());
     const approved = await waitFor(async () => { const t = (await tplDb()).templates.find(x => x.name === 'Waiting room'); return t && t.approved ? t : null; }, { label: 'approved' });

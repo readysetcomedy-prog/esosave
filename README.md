@@ -122,10 +122,10 @@ to bad signal or a hung page.
   lock and unlock template fields, approve templates, delete anyone's template. A permission is
   taken back by unticking it, a manager by Remove. Everyone sees the tab; a section not granted
   shows locked with "Ask Admin for Approval for this Feature". The owner's and an approving
-  manager's own templates are approved as they are saved; a template anyone else shares waits in
-  the approval queue (its count on the Management button), is theirs to use meanwhile, and is seen
-  by others once approved; a change to it puts it back in the queue. Send back makes it private
-  again for its owner to change and share anew.
+  manager's own templates are approved as they are saved; a template anyone else makes, shared or
+  private, is pending until approved in Management (its count on the Management button): its
+  owner sees it as pending and nobody can fill with it before then; a change to an approved
+  template puts it back in the queue.
 - **Loaded mileage.** Once the scene and the destination both have an address (a predefined
   place, or a typed street, city, state and zip), ESO's own Calculate Mileage button is pressed
   once for the crew, and again only if an address changes. A complaint ESO raises about it is

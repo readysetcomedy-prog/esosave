@@ -659,7 +659,7 @@
     if (!(can('approveTemplates') || can('deleteTemplates'))) { mgmt = { pending: null, all: null, at: 0, note: '' }; return; }
     try {
       const [pending, all] = await Promise.all([
-        can('approveTemplates') ? tplReq(`${TPL_URL}?approved=is.false&share=neq.private&select=id,owner_id,owner_name,name,body,share,updated_at&order=updated_at.asc`) : null,
+        can('approveTemplates') ? tplReq(`${TPL_URL}?approved=is.false&select=id,owner_id,owner_name,name,body,share,updated_at&order=updated_at.asc`) : null,
         can('deleteTemplates') ? tplReq(`${TPL_URL}?select=id,owner_id,owner_name,name,share,approved,updated_at&order=name.asc`) : null,
       ]);
       mgmt = { pending: pending || (can('approveTemplates') ? [] : null), all: all || (can('deleteTemplates') ? [] : null), at: Date.now(), note: '' };
@@ -689,8 +689,8 @@
     } else parts.push(locked('Template locks'));
     if (can('approveTemplates')) {
       const P = mgmt.pending;
-      parts.push(`<div class="msec"><div class="mh">Templates waiting for approval${P && P.length ? ` (${P.length})` : ''}</div><div class="muted">A template someone shares is seen by others only once it is approved here; its owner can use it meanwhile. Yours are approved as you save them. Send back makes it private again so its owner can change it and share it anew.</div>` +
-        (P === null ? '<div class="muted">Looking…</div>' : P.length ? P.map(t => `<div class="tpl" data-tid="${esc(t.id)}"><div><b>${esc(t.name)}</b><div class="muted">by ${esc(t.owner_name || '')} · ${t.share === 'everyone' ? 'to everyone' : 'to certain people'} · ${esc(tplHeld(t))} · ${esc(fmtWhen(t.updated_at))}</div></div><div class="actions"><button class="a" data-act="tpl-approve">Approve</button><button class="a sec" data-act="tpl-return">Send back</button></div></div>`).join('') : '<div class="muted">Nothing is waiting.</div>') + '</div>');
+      parts.push(`<div class="msec"><div class="mh">Templates waiting for approval${P && P.length ? ` (${P.length})` : ''}</div><div class="muted">No template can be used, by its owner or anyone it is shared with, until it is approved here; its owner sees it as pending. Yours are approved as you save them. A change to an approved template puts it back here.</div>` +
+        (P === null ? '<div class="muted">Looking…</div>' : P.length ? P.map(t => `<div class="tpl" data-tid="${esc(t.id)}"><div><b>${esc(t.name)}</b><div class="muted">by ${esc(t.owner_name || '')} · ${t.share === 'everyone' ? 'shared to everyone' : t.share === 'some' ? 'shared with certain people' : 'private'} · ${esc(tplHeld(t))} · ${esc(fmtWhen(t.updated_at))}</div></div><div class="actions"><button class="a" data-act="tpl-approve">Approve</button>${can('deleteTemplates') ? '<button class="a danger" data-act="tpl-del">Delete</button>' : ''}</div></div>`).join('') : '<div class="muted">Nothing is waiting.</div>') + '</div>');
     } else parts.push(locked('Approve templates'));
     if (can('deleteTemplates')) {
       const A = mgmt.all;
@@ -736,16 +736,9 @@
         if (!can('approveTemplates')) return;
         await tplReq(`${TPL_URL}?id=eq.${encodeURIComponent(tid)}`, { method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ approved: true, approved_by: user, approved_at: new Date().toISOString() }) });
         await mgmtLoad(); if (tplWin) tplLoad().then(() => renderTemplates()).catch(() => {});
-      } else if (act === 'tpl-return' && tid) {
-        if (!can('approveTemplates')) return;
-        const t = (mgmt.pending || []).find(x => x.id === tid);
-        if (!confirm(`Send "${t ? t.name : 'this template'}" back to ${t ? t.owner_name : 'its owner'} as a private template? They keep it and can share it again once it is changed.`)) return;
-        await tplReq(`${TPL_URL}?id=eq.${encodeURIComponent(tid)}`, { method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ share: 'private' }) });
-        await tplReq(`${SHARE_URL}?template_id=eq.${encodeURIComponent(tid)}`, { method: 'DELETE', headers: { Prefer: 'return=minimal' } });
-        await mgmtLoad();
       } else if (act === 'tpl-del' && tid) {
         if (!can('deleteTemplates')) return;
-        const t = (mgmt.all || []).find(x => x.id === tid);
+        const t = (mgmt.all || []).concat(mgmt.pending || []).find(x => x.id === tid);
         if (!confirm(`Delete the template "${t ? t.name : ''}"${t && t.owner_id !== userId ? ` made by ${t.owner_name}` : ''}? People it was shared with lose it too.`)) return;
         await tplDelete(tid); await mgmtLoad(); if (tplWin) tplLoad().then(() => renderTemplates()).catch(() => {});
       }
@@ -3020,9 +3013,9 @@
     const run = currentRun();
     const canFill = !!run && !run.locked;
     const held = tplHeld;
-    const wait = (t) => t.share !== 'private' && !t.approved ? ' · <span style="color:#b45309;font-weight:600">waiting for a manager\'s approval: others see it once approved</span>' : '';
+    const wait = (t) => !t.approved ? ' · <span style="color:#b45309;font-weight:600">pending: it can be used once a manager approves it under Management</span>' : '';
     const row = (t, kind) => `<div class="tpl" data-id="${esc(t.id)}"><div><div class="tn">${esc(t.name)}</div><div class="by">${kind !== 'mine' ? `shared by ${esc(t.owner_name || '')}` : (t.share === 'everyone' ? 'yours, shared with everyone' : t.share === 'some' ? 'yours, shared with some people' : 'yours, private')} · ${esc(held(t))}${kind === 'mine' ? wait(t) : ''}</div></div>
-      <button class="tb pri" data-act="fill" ${canFill ? '' : 'disabled title="Open an unlocked run first"'}>Fill this run</button>
+      <button class="tb pri" data-act="fill" ${!t.approved ? 'disabled title="Waiting for a manager\'s approval"' : canFill ? '' : 'disabled title="Open an unlocked run first"'}>Fill this run</button>
       ${kind === 'mine' ? '<button class="tb sec" data-act="edit">Edit</button><button class="tb sec" data-act="copy" title="A new template of your own, starting from this one">Copy</button><button class="tb danger" data-act="delete">Delete</button>' : '<button class="tb sec" data-act="copy" title="A new template of your own, starting from this one">Copy to mine</button>' + (can('deleteTemplates') ? '<button class="tb danger" data-act="delete" title="A manager\'s delete: the owner and everyone it was shared with lose it">Delete</button>' : '')}</div>`;
     // a copy's name: "(copy)", then "(copy 2)", "(copy 3)"... among the person's own
     const copyName = (name) => { const base = name.replace(/ \(copy( \d+)?\)$/, ''); const taken = new Set(tpls.mine.map(x => x.name.toLowerCase())); let n = 1, cand = `${base} (copy)`; while (taken.has(cand.toLowerCase())) { n++; cand = `${base} (copy ${n})`; } return cand; };
@@ -3151,7 +3144,7 @@
       <label><input type="radio" name="share" value="everyone" ${ed.share === 'everyone' ? 'checked' : ''}> Everyone</label>
       <label><input type="radio" name="share" value="some" ${ed.share === 'some' ? 'checked' : ''}> Certain people</label>
       ${ed.share === 'some' ? `<div class="pick" style="min-width:260px"><input type="text" class="search" data-people placeholder="Search a name…"><div class="picklist" hidden data-peoplelist></div><div class="chosen">${ed.people.map(p => `<span>${esc(p.name)} <a data-unshare="${esc(p.id)}" style="cursor:pointer">✕</a></span>`).join('')}</div></div>` : ''}
-      ${ed.share !== 'private' && !can('approveTemplates') ? `<div class="muted" data-approvalnote style="flex-basis:100%">Others see a shared template once a manager approves it under Management; you can use it right away.</div>` : ''}</div>`;
+      ${!can('approveTemplates') ? `<div class="muted" data-approvalnote style="flex-basis:100%">Once saved, the template is pending until a manager approves it under Management; it cannot be used before that, by you or anyone it is shared with.</div>` : ''}</div>`;
     let content = '';
     const page = ed.page;
     const secs = sectionsOf(page), roots = itemRootsOf(page);
@@ -3528,6 +3521,7 @@
   function fillWithTemplate(t) {
     const run = currentRun();
     if (!run || run.locked) { alert('ESO Save: open an unlocked run first.'); return; }
+    if (!t.approved) { alert(`ESO Save: "${t.name}" is waiting for a manager's approval and cannot be used until then.`); return; }
     const { body, dropped } = applyLocks(onlyOffered(t.body || {}));
     for (const it of body.items) if (it.kind === 'assessment') it.findings = axComplete(it.findings);
     for (const f of Object.values(body.fields)) if (f && f.t === 'string' && typeof f.v === 'string') f.v = fillBlanks(f.v, run);

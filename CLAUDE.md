@@ -21,8 +21,8 @@ the named keys over what it holds (`pushAgency(keys)`), never wholesale.
 approveTemplates, deleteTemplates), kept as `managers` in the agency row; `can(perm)` gates every
 use. Template approval: `esosave_templates.approved/approved_by/approved_at`
 (`supabase/esosave_templates_approval.sql`); `tplSave` approves the saver's own when they hold
-approveTemplates, `tplLoad` hides another's unapproved shared template, the queue is read with
-`approved=is.false&share=neq.private`.
+approveTemplates; an unapproved template cannot fill (its owner sees it pending, `tplLoad` hides
+another's), the queue is every row with `approved=is.false`.
 
 **Before adding any new setting, ask the repo owner whether it is locked or open.** Do not guess.
 
