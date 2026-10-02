@@ -43,7 +43,7 @@
   const sget = (keys) => new Promise(res => storage.get(keys, (v) => res(v || {})));
   const sset = (obj) => new Promise(res => storage.set(obj, () => res()));
   const sremove = (keys) => new Promise(res => storage.remove(keys, () => res()));
-  const DEFAULT_SETTINGS = { valHighlight: true, purgeHoursAfterLock: 0, probeSec: 20, heldProbeSec: 8, warmTabs: true, cardCollapsed: false, showTimes: true, sendPrompt: true, unsentList: true, quickHistory: true, quickMeds: true, quickAllergies: true, quickAcuity: true, quickDelays: true, quickTransport: true, quickAssess: true, quickDisposition: true, autoResponse: true, quickIncident: true, quickMechanism: true, quickFacilities: true, quickNarrative: true, quickPatient: true, quickRefusal: true, autoMileage: true, askBeforeLock: true, cadGate: true, scanDocs: true, vitalCopySkip: [], tplLocks: [], facilitySending: [], facilityDestination: [] };
+  const DEFAULT_SETTINGS = { valHighlight: true, quickTreatments: true, purgeHoursAfterLock: 0, probeSec: 20, heldProbeSec: 8, warmTabs: true, cardCollapsed: false, showTimes: true, sendPrompt: true, unsentList: true, quickHistory: true, quickMeds: true, quickAllergies: true, quickAcuity: true, quickDelays: true, quickTransport: true, quickAssess: true, quickDisposition: true, autoResponse: true, quickIncident: true, quickMechanism: true, quickFacilities: true, quickNarrative: true, quickPatient: true, quickRefusal: true, autoMileage: true, askBeforeLock: true, cadGate: true, scanDocs: true, vitalCopySkip: [], tplLocks: [], facilitySending: [], facilityDestination: [] };
   // The agency's standard facility chips (ids and names from ESO's saved facilities). Every install
   // starts with these; Settings can add or remove per device.
   const FAC = {
@@ -71,7 +71,7 @@
   // the groups a saved vital is made of, as ESO's own view lays them out; the copy can leave any out
   const VITAL_GROUPS = [['bloodPressure', 'Blood pressure'], ['pulse', 'Pulse'], ['respiration', 'Respirations'], ['etCO2SPO2CO', 'SpO2, EtCO2 and CO'], ['glucoseAndTemp', 'Glucose and temperature'],
     ['pain', 'Pain scale'], ['avpu', 'AVPU'], ['position', 'Patient side and posture'], ['glasgowComaScale', 'Glasgow Coma Scale'], ['revisedTraumaScore', 'Revised trauma score'], ['cardiacMonitoring', 'Cardiac monitoring (ECG)']];
-  const OPEN_SETTINGS = ['valHighlight', 'quickHistory', 'quickMeds', 'quickAllergies', 'quickAcuity', 'quickDelays', 'quickTransport', 'quickAssess', 'quickDisposition', 'autoResponse', 'quickIncident', 'quickMechanism', 'quickFacilities', 'quickNarrative', 'quickPatient', 'quickRefusal', 'autoMileage', 'scanDocs', 'vitalCopySkip', 'facilitySending', 'facilityDestination'];
+  const OPEN_SETTINGS = ['valHighlight', 'quickTreatments', 'quickHistory', 'quickMeds', 'quickAllergies', 'quickAcuity', 'quickDelays', 'quickTransport', 'quickAssess', 'quickDisposition', 'autoResponse', 'quickIncident', 'quickMechanism', 'quickFacilities', 'quickNarrative', 'quickPatient', 'quickRefusal', 'autoMileage', 'scanDocs', 'vitalCopySkip', 'facilitySending', 'facilityDestination'];
   // The open settings follow the ESO login: one row per login in the agency's table, written when
   // the login is first seen and whenever they change something. Only these settings go there;
   // never a run, nor which runs were worked. The key is the project's public one.
@@ -159,6 +159,8 @@
       await sset({ fieldDefs2: payload.fieldDefs });
     } else if (type === 'event' && payload && payload.name === 'vitalCopied') {
       onVitalCopied(payload);
+    } else if (type === 'event' && payload && payload.name === 'treatmentCopied') {
+      onTreatmentCopied(payload);
     } else if (type === 'event' && payload && payload.name === 'assessmentCopied') {
       onAssessmentCopied(payload);
     } else if (type === 'event' && payload && payload.name === 'lkwCopied') {
@@ -263,6 +265,7 @@
     .times .t.empty .v { opacity: .35; font-weight: 400; }
     .times.tight { gap: 3px; } .times.tight .t { min-width: 40px; padding: 2px 3px; } .times.tight .t .v { font-size: 13px; } .times.tight .t .l { font-size: 9px; }
     .times.micro { gap: 2px; } .times.micro .t { min-width: 33px; padding: 1px 2px; border-radius: 5px; } .times.micro .t .v { font-size: 11px; } .times.micro .t .l { font-size: 7px; letter-spacing: 0; }
+    .quick .allnone.tcopy { width: 26px; height: 22px; min-height: 22px; padding: 0; border-radius: 6px; background: #15803d; color: #fff; font: 15px/22px system-ui, sans-serif; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,.35); }
     .copylayer .esosave-copy { position: fixed; pointer-events: auto; width: 26px; height: 22px; margin: 0; padding: 0; border: 0; border-radius: 6px; background: #15803d; color: #fff; font: 15px/22px system-ui, sans-serif; text-align: center; cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,.35); }
     .copylayer .esosave-copy:hover { background: #166534; }
     @keyframes pulse { 0%,100% { filter: brightness(1); } 50% { filter: brightness(1.25); } }
@@ -491,6 +494,7 @@
         `<label class="s"><input type="checkbox" id="qmechanism" ${settings.quickMechanism === false ? '' : 'checked'}> Mechanism of injury: Blunt, Burn, Penetrating, Other chips (Narrative tab)</label>` +
         `<label class="s"><input type="checkbox" id="qdisposition" ${settings.quickDisposition === false ? '' : 'checked'}> Disposition: Transported ALS/BLS, Refusal, Canceled (Prior/Scene) buttons under Unit Disposition; Transport Mode and Reason for Refusal outlined in red until answered (Incident tab)</label>` +
         `<label class="s"><input type="checkbox" id="qautoresp" ${settings.autoResponse === false ? '' : 'checked'}> Auto-fill: choosing Emergent or Non-Emergent (response or transport mode) fills the lights/sirens, intersection, scheduled, speed and method fields that are still empty, and sets EMD Performed to No</label>` +
+        `<label class="s"><input type="checkbox" id="qtreat" ${settings.quickTreatments === false ? '' : 'checked'}> Flowchart: a copy button beside each saved treatment enters it again as a new one with the current time, every other value the same (Flowchart tab)</label>` +
         `<label class="s"><input type="checkbox" id="qassess" ${settings.quickAssess === false ? '' : 'checked'}> Assessment: Copy (enters an assessment again as a new one with the current time, every finding and comment the same); "All normal" (presses No Abnormalities on every category in ESO's Quick Ax) and "A&amp;Ox4" on each assessment (Assessments tab)</label>` +
         `<label class="s"><input type="checkbox" id="qnarrative" ${settings.quickNarrative === false ? '' : 'checked'}> Narrative: rows for Primary and Secondary Impression, Provided Care Level, Chief Complaint System, Anatomic Location, the complaint duration units, Barriers to Care and Alcohol/Drugs, and a Same as LKWT button above Onset Time (Narrative tab)</label>` +
         `<label class="s"><input type="checkbox" id="qpatient" ${settings.quickPatient === false ? '' : 'checked'}> Patient: Race row (every race, shortened) (Patient tab)</label>` +
@@ -659,6 +663,7 @@
       settings.quickTransport = !!panel.querySelector('#qtransport').checked;
       settings.quickFacilities = !!panel.querySelector('#qfacilities').checked;
       settings.quickAssess = !!panel.querySelector('#qassess').checked;
+      settings.quickTreatments = !!panel.querySelector('#qtreat').checked;
       settings.quickDisposition = !!panel.querySelector('#qdisposition').checked;
       settings.quickIncident = !!panel.querySelector('#qincident').checked;
       settings.quickMechanism = !!panel.querySelector('#qmechanism').checked;
@@ -1703,7 +1708,7 @@
       // done when every category row of the record shows the No Abnormalities check
       const rows = Array.from(rec.querySelectorAll('.assessment-summary')).filter(r => !/Neonatal/i.test(r.textContent));
       const normal = rows.length && rows.every(r => r.querySelector('.no-abnormalities-or-not-assessed .assess-circle-check-bg, .no-abnormalities-or-not-assessed.assess-circle-check-bg'));
-      const defs = [['all', normal ? '✓ All normal' : 'All normal', 'Press No Abnormalities on every category of this assessment (ESO\'s Quick Ax), then OK'], ['ao', 'A&Ox4', 'Open Mental Status and press Alert and Oriented x4'], ['copy', 'Copy', 'Enter this assessment again as a new one with the current time: every finding and comment the same']];
+      const defs = [['all', normal ? '✓ Normal' : 'Normal', 'Press No Abnormalities on every category of this assessment (ESO\'s Quick Ax), then OK'], ['ao', 'A&Ox4', 'Open Mental Status and press Alert and Oriented x4'], ['copy', 'Copy', 'Enter this assessment again as a new one with the current time: every finding and comment the same']];
       let right = ar.left - 10;
       for (const [k, text, title] of defs.reverse()) {
         const key = `x:${id}:${k}`; keep.add(key);
@@ -1790,6 +1795,27 @@
   // whatever ESO still needs (Transport Mode, Reason for Refusal) until it is answered.
   const fieldValue = (ref) => { const f = fieldEl(ref); if (!f) return null; const v = f.querySelector('.display-value'); return norm(v ? v.textContent : ''); };
   const fieldReady = (ref) => { const f = fieldEl(ref); return f && !f.hasAttribute('disabled') ? f : null; };
+  // Tick or untick one item of a multi-select field through its picker, by the row's own check
+  // mark, so the only item in the field can be taken out as well as the first of several.
+  async function toggleMulti(ref, fullName, on) {
+    const f = await until(() => fieldReady(ref), 3000);
+    if (!f) return false;
+    openPicker(f);
+    const shelf = await until(() => Array.from(document.querySelectorAll('shelf-panel')).find(visible), 4000);
+    if (!shelf) throw new Error('the list did not open');
+    const li = await pickRow(shelf, fullName);
+    if (!li) throw new Error(`"${fullName}" is not in the list`);
+    const ticked = () => { const m = li.querySelector('check-mark'); return !!(m && m.classList.contains('selected')); };
+    if (ticked() !== on) {
+      (li.querySelector('.label-content') || li).click();
+      await until(() => ticked() === on, 1500);
+    }
+    await clearSearch(shelf);
+    const okBtn = Array.from(shelf.querySelectorAll('header button, button')).find(b => /^OK$/i.test(norm(b.textContent)));
+    if (okBtn) okBtn.click(); else throw new Error('no OK button');
+    await until(() => closed(shelf), 3000);
+    return true;
+  }
   // Set a single-select field: ESO's own quick-pick button when it has one, else its picker.
   async function setSingle(ref, fullName, quickLabel) {
     const f = await until(() => fieldReady(ref), 3000);
@@ -1875,11 +1901,11 @@
     units: { setting: 'quickNarrative', tab: 'Narrative', ref: 'CHIEFTIMEUNITSOFCOMPLAINTDURATION', what: 'Duration Unit', items: [['Minutes', 'Minutes'], ['Hours', 'Hours'], ['Days', 'Days']] },
     // Chief Complaint System: ESO shows Global/General, Musculoskeletal/Skin, Cardiovascular and Other itself
     system: { setting: 'quickNarrative', tab: 'Narrative', ref: 'CHIEFCOMPLAINTORGANSYSTEMID', what: 'Chief Complaint System', noOther: true, items: [['Psych', 'Behavioral/Psychiatric'], ['Neuro', 'CNS/Neuro'], ['GI', 'GI'], ['Immune', 'Lymphatic/Immune'], ['Reproductive', 'Reproductive'], ['Pulmonary', 'Pulmonary'], ['Renal', 'Renal']] },
-    barriers: { setting: 'quickNarrative', tab: 'Narrative', ref: 'BARRIERSTOCAREIDS', what: 'Barriers to Care', noOther: true, hideShown: true, items: [['Alcohol Suspected', 'Alcohol Use, Suspected'], ['Drug Suspected', 'Drug Use, Suspected'], ['Obesity', 'Obesity'], ['Language', 'Language'], ['Psych Impaired', 'Psychologically Impaired']] },
-    alcohol: { setting: 'quickNarrative', tab: 'Narrative', ref: 'ALCOHOLDRUGUSAGEIDS', what: 'Alcohol/Drugs', noOther: true, hideShown: true, items: [['Smell of Alcohol', 'Smell of Alcohol on Breath'], ['Admits Alcohol', 'Patient Admits to Alcohol Use', 'Patient Admits to Alcohol Use'], ['Admits Drug', 'Patient Admits to Drug Use', 'Patient Admits to Drug Use']] },
+    barriers: { setting: 'quickNarrative', tab: 'Narrative', ref: 'BARRIERSTOCAREIDS', multi: true, what: 'Barriers to Care', noOther: true, hideShown: true, items: [['Alcohol Suspected', 'Alcohol Use, Suspected'], ['Drug Suspected', 'Drug Use, Suspected'], ['Obesity', 'Obesity'], ['Language', 'Language'], ['Psych Impaired', 'Psychologically Impaired']] },
+    alcohol: { setting: 'quickNarrative', tab: 'Narrative', ref: 'ALCOHOLDRUGUSAGEIDS', multi: true, what: 'Alcohol/Drugs', noOther: true, hideShown: true, items: [['Smell of Alcohol', 'Smell of Alcohol on Breath'], ['Admits Alcohol', 'Patient Admits to Alcohol Use', 'Patient Admits to Alcohol Use'], ['Admits Drug', 'Patient Admits to Drug Use', 'Patient Admits to Drug Use']] },
     anatomic: { setting: 'quickNarrative', tab: 'Narrative', ref: 'CHIEFCOMPLAINTANATOMICLOCATIONID', what: 'Anatomic Location', noOther: true, items: [['Head', 'Head'], ['Neck', 'Neck'], ['Chest', 'Chest'], ['Abd', 'Abdomen'], ['Back', 'Back'], ['Upper Ext', 'Extremity-Upper'], ['Lower Ext', 'Extremity-Lower'], ['Genitalia', 'Genitalia'], ['General', 'General/Global']] },
     // Patient tab
-    race: { setting: 'quickPatient', tab: 'Patient', ref: 'PATIENTRACEIDS', what: 'Race', noOther: true, items: [['White', 'White', 'White'], ['Black', 'Black or African American', 'Black'], ['Asian', 'Asian'], ['Latino', 'Hispanic or Latino'], ['Am Indian', 'American Indian or Alaska Native'], ['Mid East', 'Middle Eastern or North African'], ['Pac Islander', 'Native Hawaiian or Other Pacific Islander']] },
+    race: { setting: 'quickPatient', tab: 'Patient', ref: 'PATIENTRACEIDS', multi: true, what: 'Race', noOther: true, items: [['White', 'White', 'White'], ['Black', 'Black or African American', 'Black'], ['Asian', 'Asian'], ['Latino', 'Hispanic or Latino'], ['Am Indian', 'American Indian or Alaska Native'], ['Mid East', 'Middle Eastern or North African'], ['Pac Islander', 'Native Hawaiian or Other Pacific Islander']] },
   };
   function layoutSingleRows() {
     const run = currentRun();
@@ -1888,7 +1914,7 @@
       if (!f) { dropQuick(`sr:${rk}:`); continue; }
       const r = f.getBoundingClientRect();
       if (!r.width) { dropQuick(`sr:${rk}:`); continue; }
-      const cur = shownParts(row.ref);
+      const curText = norm(fieldValue(row.ref) || '').toUpperCase(); const cur = { includes: (name) => curText.includes(name) };
       const esoShows = row.hideShown ? new Set(Array.from(f.querySelectorAll('.quick-picks button')).filter(visible).map(b => norm(b.textContent).toUpperCase())) : null;
       const items = row.items.map((it, i) => [String(i), ...it]).filter(([, , full, quick]) => !esoShows || !(esoShows.has(String(full).toUpperCase()) || (quick && esoShows.has(String(quick).toUpperCase()))));
       for (const [k] of row.items.map((it, i) => [String(i)])) if (!items.some(x => x[0] === k)) dropQuick(`sr:${rk}:${k}`);
@@ -1905,8 +1931,9 @@
             const f2 = fieldEl(row.ref); if (!f2) return;
             if (k === 'other') { openPicker(f2); return; }
             quickBusy = true; layoutSingleRows();
-            lateVeil('Setting it in ESO…', `${row.what}: ${full}`);
-            try { await setSingle(row.ref, full, quick); } catch (err) { alert(`ESO Save: could not set ${row.what}. ` + (err && err.message ? err.message : '')); }
+            const wasOn = row.multi && b.classList.contains('added');
+            lateVeil(wasOn ? 'Taking it out in ESO…' : 'Setting it in ESO…', `${row.what}: ${full}`);
+            try { if (row.multi) await toggleMulti(row.ref, full, !wasOn); else await setSingle(row.ref, full, quick); } catch (err) { alert(`ESO Save: could not ${wasOn ? 'take out' : 'set'} ${row.what}. ` + (err && err.message ? err.message : '')); }
             endVeil(); quickBusy = false; layoutSingleRows();
           });
           return el;
@@ -2163,6 +2190,7 @@
     for (const gk of Object.keys(FACILITY_GROUPS)) { try { layoutFacilities(gk); } catch (e) { /* keep going */ } }
     try { layoutDelays(); } catch (e) { /* keep going */ }
     try { layoutLkw(); } catch (e) { /* keep going */ }
+    try { layoutTreatmentCopies(); } catch (e) { /* keep going */ }
     try { layoutAcuity(); } catch (e) { /* keep going */ }
   }
 
@@ -3509,13 +3537,57 @@
     notice('Assessment copied', p.held ? 'Entered again with the current time; held until ESO answers.' : 'Entered again with the current time.', 3500);
     setTimeout(layoutQuick, 300);
   }
+  // Copy a treatment: a button just left of each saved treatment's time on the Flowchart tab
+  // (ESO lists them as grid-rows, each with its key and a date cell), as the vitals copy does
+  function layoutTreatmentCopies() {
+    const run = currentRun();
+    const ok = settings.quickTreatments !== false && run && !run.locked && onTab('FlowchartTreatments') && !shelfOpen();
+    const rows = ok ? Array.from(document.querySelectorAll('grid-row[data-key]')).filter(r => r.querySelector('grid-cell.date') && !r.closest('shelf-panel, eso-modal, eso-modal-dialog') && visible(r) && onTop(r)) : [];
+    const keep = new Set();
+    for (const row of rows) {
+      const key = row.getAttribute('data-key'); const cell = row.querySelector('grid-cell.date');
+      const cr = cell.getBoundingClientRect(); if (!cr.width) continue;
+      const qk = `tc:${key}`; keep.add(qk);
+      const b = quickEl(qk, () => {
+        const el = document.createElement('button'); el.type = 'button'; el.className = 'allnone tcopy'; el.dataset.group = 'treat-copy'; el.textContent = '⧉'; el.title = 'Enter this treatment again as a new one with the current time, every other value the same';
+        el.addEventListener('pointerdown', (e) => e.stopPropagation());
+        el.addEventListener('click', (e) => {
+          e.preventDefault(); e.stopPropagation();
+          if (copyBusy || quickBusy) return;
+          copyBusy = true; layoutTreatmentCopies();
+          showVeilMessage('Copying treatment…', 'Entering the same treatment again with the current time.');
+          toPage('action', { name: 'copyTreatment', recordId: lastStatus.currentRecordId, key, time: norm(cell.textContent).slice(-8) });
+          setTimeout(() => { if (copyBusy) { copyBusy = false; hideVeil(); } }, 20000);
+        });
+        return el;
+      });
+      b.classList.toggle('busy', copyBusy);
+      b.style.visibility = 'hidden'; b.style.display = 'block';
+      const w = b.getBoundingClientRect().width || 26, h = b.getBoundingClientRect().height || 24;
+      b.style.left = Math.round(cr.left - w - 6) + 'px';
+      b.style.top = Math.round(cr.top + (cr.height - h) / 2) + 'px';
+      b.style.visibility = '';
+    }
+    for (const [k, el] of quickEls) if (k.startsWith('tc:') && !keep.has(k)) { el.remove(); quickEls.delete(k); }
+  }
+  async function onTreatmentCopied(p) {
+    if (!p.ok) { copyBusy = false; hideVeil(); alert('ESO Save: ' + (p.error || 'could not copy the treatment')); return; }
+    await reloadTab('FlowchartTreatments');
+    copyBusy = false; hideVeil();
+    notice('Treatment copied', p.held ? 'Entered again with the current time; held until ESO answers.' : 'Entered again with the current time.', 3500);
+    setTimeout(layoutQuick, 300);
+  }
   // Same as LKWT: a button above Onset Time that sets it to the Last Known Well time
   function layoutLkw() {
     const run = currentRun();
     const f = settings.quickNarrative === false || !run || run.locked || !onTab('Narrative') || shelfOpen() ? null : fieldEl('COMPLAINTONSETTIME');
     if (!f) { dropQuick('lkw:'); return; }
-    const r = f.getBoundingClientRect();
+    const box = f.querySelector('.field-area') || f; const r = box.getBoundingClientRect();
     if (!r.width) { dropQuick('lkw:'); return; }
+    // the row the field sits in (its time, date, Estimated and UTO): the button goes after the last of them
+    const rowEl = f.closest('tr, grid-row, .field-group, .field-row') || f.parentElement;
+    let rightMost = r.right;
+    for (const el of Array.from(rowEl.children)) { const er = el.getBoundingClientRect(); if (er.width && er.top < r.bottom && er.bottom > r.top) rightMost = Math.max(rightMost, er.right); }
     const btn = quickEl('lkw:same', () => {
       const b = document.createElement('button'); b.type = 'button'; b.className = 'allnone'; b.dataset.group = 'lkw'; b.title = 'Set Onset Time to the same date and time as Last Known Well Time';
       b.addEventListener('pointerdown', (e) => e.stopPropagation());
@@ -3532,9 +3604,9 @@
     btn.textContent = 'Same as LKWT';
     btn.classList.toggle('busy', copyBusy);
     btn.style.visibility = 'hidden'; btn.style.display = 'block';
-    const w = btn.getBoundingClientRect().width || 130;
-    btn.style.left = Math.round(r.right - w) + 'px';
-    btn.style.top = Math.round(r.top - 36) + 'px';
+    const h = btn.getBoundingClientRect().height || 30;
+    btn.style.left = Math.round(rightMost + 14) + 'px';
+    btn.style.top = Math.round(r.top + (r.height - h) / 2) + 'px';
     btn.style.visibility = '';
   }
   async function onLkwCopied(p) {

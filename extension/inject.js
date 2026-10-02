@@ -27,7 +27,7 @@
   if (ext) return;
   if (window.__esosave) return;
 
-  const VERSION = '0.15.16';
+  const VERSION = '0.15.17';
   const API_PREFIX_RE = /^\/ehr\/api\/+/i;
   const FAKE_OK_TEXT = '{"result":"Success","data":[]}';
   const PROBE_PATH = '/ehr/api/thirdpartydata/partners';
@@ -1086,6 +1086,49 @@
     if (ops.length < 2) return fail('Nothing in that assessment can be copied.');
     await sendSynthetic(run, 'assessments', ops, 'copyAssessment', `Copied the ${timeText || ''} assessment as a new one (${ops.length - 1} findings and comments)`, 'assessmentCopied', 'copy the assessment');
   }
+  // A treatment entered again as a new one with the current time. Every field ESO's field list
+  // knows for a treatment is carried (dose, measure, route, provider, response, lot, expiry...);
+  // ESO's own bookkeeping on the row is not. Written as ESO's own shelf writes them.
+  const TREAT_META = new Set(['itemId', 'treatmentDate', 'mobileToMobile', 'softDeleted', 'fileId', 'imageType', 'version', 'summary', 'treatmentName']);
+  async function copyTreatment(recordId, key, timeText) {
+    const fail = (error) => post('event', { name: 'treatmentCopied', ok: false, error });
+    const run = S.runs[recordId];
+    if (!run) return fail('Run not found.');
+    const m = await currentModel(run, 'FlowchartTreatments');
+    const list = m && Array.isArray(m.treatments) ? m.treatments : (m && m.treatments ? Object.values(m.treatments) : null);
+    if (!list) return fail('Could not read the treatments.');
+    const keys = new Set([String(key), String(run.keyMap[key] || ''), ...Object.entries(run.keyMap).filter(([, v]) => String(v) === String(key)).map(([k]) => String(k))].filter(Boolean));
+    const src = list.find(t => t && keys.has(String(t.itemId))) || list.find(t => t && typeof t.treatmentDate === 'string' && timeText && t.treatmentDate.slice(-8) === timeText);
+    if (!src) return fail('That treatment has not been saved by ESO yet. Wait a moment and try again.');
+    if (src.flowchartTreatmentRegistryId == null) return fail('That treatment has no treatment picked.');
+    const k = uuid(), base = `flowchartTreatments.treatments.['${k}']`;
+    const ops = [{ verb: 'ADD', address: base, fieldRef: 'FLOWCHARTTREATMENT', value: { flowchartTreatmentRegistryId: src.flowchartTreatmentRegistryId, treatmentDate: fmtEsoLocal(new Date()) }, dataType: 'collectionWithData', isComplexType: true }];
+    const defs = new Map(((S.catalog && S.catalog.fields) || []).filter(f => f.a.startsWith('flowchartTreatments.treatments.')).map(f => [f.a.slice('flowchartTreatments.treatments.'.length), f]));
+    const skipped = [];
+    // text as text, an integer as a number; a dose ("15") goes exactly as ESO holds it, as the app itself sends it
+    const coerce = (v, t) => t === 'string' || t === 'phone' || t === 'ssn' ? String(v) : t === 'integer' && typeof v === 'string' && v.trim() !== '' && !isNaN(Number(v)) ? Number(v) : v;
+    const walk = (obj, path) => {
+      for (const [kk, v] of Object.entries(obj)) {
+        if (v === null || v === undefined || v === '') continue;
+        if (!path && (TREAT_META.has(kk) || kk === 'flowchartTreatmentRegistryId')) continue;
+        const pth = path ? path + '.' + kk : kk;
+        const def = defs.get(pth);
+        if (Array.isArray(v)) {
+          const vals = v.filter(el => el !== null && typeof el !== 'object');
+          if (!vals.length) { if (v.length) skipped.push(pth); continue; }
+          if (!def) { skipped.push(pth); continue; }
+          for (const el of vals) ops.push({ verb: 'ADD', address: `${base}.${pth}.['${el}']`, fieldRef: def.r, value: el, dataType: 'multiselect' });
+        } else if (typeof v === 'object') { if (def && (def.t === 'strokes' || def.t === 'binary')) { skipped.push(pth); continue; } walk(v, pth); }
+        else if (!def) skipped.push(pth);
+        else if (['collection', 'collectionWithData', 'fieldGroup', 'strokes', 'binary'].includes(def.t)) skipped.push(pth);
+        else if (def.t === 'multiselect') ops.push({ verb: 'ADD', address: `${base}.${pth}.['${v}']`, fieldRef: def.r, value: v, dataType: 'multiselect' });
+        else ops.push({ verb: 'EDIT', address: `${base}.${pth}`, fieldRef: def.r, value: coerce(v, def.t), dataType: def.t });
+      }
+    };
+    walk(src, '');
+    const note = skipped.length ? `; not copied (not a field ESO's list knows): ${skipped.join(', ')}` : '';
+    await sendSynthetic(run, 'flowchartTreatments', ops, 'copyTreatment', `Copied the ${timeText || ''} treatment as a new one (${ops.length - 1} fields)${note}`, 'treatmentCopied', `copy the ${timeText || ''} treatment`);
+  }
   // Onset Time set to the Last Known Well time, exactly as ESO holds it
   async function sameAsLkw(recordId) {
     const fail = (error) => post('event', { name: 'lkwCopied', ok: false, error });
@@ -1807,6 +1850,7 @@
         else if (a.name === 'status') { emit(); }
         else if (a.name === 'note') { const run = S.runs[a.recordId]; if (run) log(run, String(a.msg || ''), a.level || 'info'); }
         else if (a.name === 'copyVital') { copyVital(a.recordId || S.currentRecordId, String(a.time || ''), Number(a.nth) || 0); }
+        else if (a.name === 'copyTreatment') { copyTreatment(a.recordId || S.currentRecordId, String(a.key || ''), String(a.time || '')); }
         else if (a.name === 'copyAssessment') { copyAssessment(a.recordId || S.currentRecordId, String(a.key || ''), String(a.time || '')); }
         else if (a.name === 'sameAsLkw') { sameAsLkw(a.recordId || S.currentRecordId); }
         else if (a.name === 'send') { sendRecord(a.recordId, a.kind === 'email' ? 'email' : 'fax'); }

@@ -236,6 +236,8 @@ export function createMockEso() {
     'flowchartTreatments.treatments.doseUnitId': F('FLOWCHARTTREATMENTDOSEUNITID', 'singleselect', 'Measure', 'UDL.AGENCYFLOWCHARTMEDICATIONMEASURE'),
     'flowchartTreatments.treatments.comments': F('FLOWCHARTTREATMENTCOMMENTS', 'string', 'Comments'),
     'flowchartTreatments.treatments.successful': F('FLOWCHARTTREATMENTSUCCESSFUL', 'boolean', 'Successful'),
+    'flowchartTreatments.treatments.routeId': F('FLOWCHARTTREATMENTROUTEID', 'singleselect', 'Route', 'UDL.FLOWCHARTROUTE'),
+    'flowchartTreatments.treatments.provider': F('FLOWCHARTTREATMENTPROVIDER', 'singleselect', 'Provider', 'UDL.CREW'),
     'assessments.assessments': F('ASSESSMENT', 'collectionWithData', 'Assessments'),
     'assessments.assessments.mentalStatus.orientation.person': F('ORIENTATIONPERSON', 'singleselect', 'Person', 'SL.ASSESSMENTSUBCATEGORIES'), // ESO's retired form, still in its field list
     'assessments.assessmentsV2': F('ASSESSMENT2', 'collectionWithData', 'Assessments'),
@@ -271,6 +273,7 @@ export function createMockEso() {
     'SL.PERTINENTNEGATIVEFORTIMES': V([[11854, 'Unable to Obtain'], [11855, 'Not Applicable']]),
     'UDL.FLOWCHARTTREATMENTREGISTRY': { values: [{ itemId: 1416, itemName: 'Oxygen', isMedication: true }, { itemId: 1417, itemName: 'Aspirin', isMedication: true }, { itemId: 1418, itemName: 'IV Therapy', isMedication: false }] },
     'UDL.AGENCYFLOWCHARTMEDICATIONMEASURE': { values: [{ itemId: 9001, itemName: 'L/min', parentItemId: 1416 }, { itemId: 9002, itemName: 'mg', parentItemId: 1417 }] },
+    'UDL.FLOWCHARTROUTE': { values: [{ itemId: 9101, itemName: 'Nasal Cannula' }, { itemId: 9102, itemName: 'Oral' }] },
     'SL.PRIMARYIMPRESSION': V([[500, 'Chest Pain'], [501, 'Abdominal Pain'], [502, 'Weakness']]),
     'SL.SUPPORTINGPRIMARY': V([[711, 'Cardiovascular'], [712, 'Respiratory']]),
     'SL.SUPPORTINGSIGNSYMPTOM': V([[791, 'Chest pain'], [792, 'Shortness of breath']]),

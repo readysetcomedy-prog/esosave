@@ -254,6 +254,38 @@ test('the page picker opens from the panel with Incident and Narrative on, warns
   await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.pick [data-act=cancel]').click());
 });
 
+test('a copy button beside a saved treatment on the Flowchart tab enters it again as a new one with the current time, every other value the same', async () => {
+  const id = await freshRun();
+  const k = await app(() => window.app.uuid());
+  await app((k) => {
+    window.app.add('flowchartTreatments', `flowchartTreatments.treatments.['${k}']`, { flowchartTreatmentRegistryId: 1416, treatmentDate: '09/16/2026 15:39:12' });
+    window.app.edit('flowchartTreatments', `flowchartTreatments.treatments.['${k}'].dose`, '15', 'number');
+    window.app.edit('flowchartTreatments', `flowchartTreatments.treatments.['${k}'].doseUnitId`, 9001, 'singleselect');
+    window.app.edit('flowchartTreatments', `flowchartTreatments.treatments.['${k}'].routeId`, 9101, 'singleselect');
+    window.app.edit('flowchartTreatments', `flowchartTreatments.treatments.['${k}'].provider`, 'person-1', 'singleselect');
+    window.app.edit('flowchartTreatments', `flowchartTreatments.treatments.['${k}'].comments`, 'tolerated well', 'string');
+  }, k);
+  await waitFor(async () => (await T.record(id)).tree.flowchartTreatments?.treatments?.[0]?.comments === 'tolerated well', { label: 'treatment saved' });
+  await app(() => window.app.openTab('FlowchartTreatments'));
+  const btns = () => T.page.evaluate(() => Array.from(window.__qa('.quick [data-group=treat-copy]')).map(b => ({ cls: b.className, rect: b.getBoundingClientRect().toJSON() })));
+  await waitFor(async () => (await btns()).length === 1, { label: 'one copy button, beside the row' });
+  const cell = await T.page.evaluate(() => document.querySelector('grid-row[data-key] grid-cell.date').getBoundingClientRect().toJSON());
+  const b0 = (await btns())[0];
+  assert.ok(b0.rect.right <= cell.left && Math.abs(b0.rect.top + b0.rect.height / 2 - (cell.top + cell.height / 2)) < 8, 'just left of the time cell, on its line');
+  await T.page.evaluate(() => window.__q('.quick [data-group=treat-copy]').click());
+  const rec = await waitFor(async () => { const r = await T.record(id); return (r.tree.flowchartTreatments?.treatments || []).length === 2 ? r : null; }, { label: 'a second treatment', timeout: 20000 });
+  const [t0, t1] = rec.tree.flowchartTreatments.treatments;
+  assert.equal(t1.flowchartTreatmentRegistryId, 1416); assert.equal(t1.dose, '15'); assert.equal(t1.doseUnitId, 9001); assert.equal(t1.routeId, 9101); assert.equal(t1.provider, 'person-1'); assert.equal(t1.comments, 'tolerated well');
+  assert.notEqual(t1.treatmentDate, t0.treatmentDate, 'a new time');
+  assert.notEqual(t1.itemId, t0.itemId);
+  const add = rec.ops.filter(o => o.verb === 'ADD' && /^flowchartTreatments\.treatments\.\['[^']+'\]$/.test(o.address));
+  assert.equal(add.length, 2); assert.equal(add[1].fieldRef, 'FLOWCHARTTREATMENT'); assert.deepEqual(Object.keys(add[1].value).sort(), ['flowchartTreatmentRegistryId', 'treatmentDate'], 'added the way ESO adds a treatment');
+  await waitFor(async () => (await app(() => document.querySelectorAll('grid-row[data-key]').length)) === 2, { label: 'the tab was re-read and shows both', timeout: 15000 });
+  await waitFor(async () => (await btns()).length === 2, { label: 'a button on each' });
+  const log = (await T.run(id)).log.map(l => l.msg).join('\n');
+  assert.match(log, /Copied the 15:39:12 treatment as a new one \(5 fields\)/);
+});
+
 test('a copy button on a saved vital re-enters it as a new vital with the current time', async () => {
   await T.setStorage({ fieldDefs: { mobileToMobile: ['MOBILETOMOBILE', 'boolean'] } }); // left behind by an earlier version
   const id = await freshRun();
@@ -983,6 +1015,14 @@ test('Narrative: Barriers to Care and Alcohol/Drugs chips (only what ESO lacks),
   await waitFor(async () => (await row('sr-alcohol')).map(b => b.text).join() === 'Smell of Alcohol', { label: 'alcohol row carries only what ESO lacks' });
   await tap('sr-barriers', 'Obesity');
   await waitFor(async () => ((await nar()).otherFactors?.barriersToCareIds || []).map(Number).includes(9370), { label: 'Obesity on the run', timeout: 15000 });
+  // a second tap takes it out, even when it is the only one in the field
+  await waitFor(async () => (await row('sr-barriers')).some(b => b.text === 'Obesity' && /added/.test(b.cls)), { label: 'Obesity shown as set' });
+  await tap('sr-barriers', 'Obesity');
+  await waitFor(async () => !((await nar()).otherFactors?.barriersToCareIds || []).map(Number).includes(9370), { label: 'Obesity taken out', timeout: 15000 });
+  await waitFor(async () => (await row('sr-barriers')).some(b => b.text === 'Obesity' && !/added/.test(b.cls) && !/busy/.test(b.cls)), { label: 'chip cleared' });
+  await tap('sr-barriers', 'Alcohol Suspected');
+  await waitFor(async () => ((await nar()).otherFactors?.barriersToCareIds || []).map(Number).includes(14836), { label: 'a name with a comma in it', timeout: 15000 });
+  await waitFor(async () => (await row('sr-barriers')).some(b => b.text === 'Alcohol Suspected' && /added/.test(b.cls)), { label: 'shown as set despite the comma' });
   await tap('sr-alcohol', 'Smell of Alcohol');
   await waitFor(async () => ((await nar()).otherFactors?.alcoholDrugUsageIds || []).map(Number).includes(703), { label: 'Smell of Alcohol on the run', timeout: 15000 });
   // once set, ESO's quick-picks go away and the row offers Admits Alcohol and Admits Drug as well
@@ -991,7 +1031,7 @@ test('Narrative: Barriers to Care and Alcohol/Drugs chips (only what ESO lacks),
   const lkwBtn = () => T.page.evaluate(() => { const b = window.__q('.quick [data-group=lkw]'); const f = document.querySelector('eso-field[data-field-ref="COMPLAINTONSETTIME"]'); return b && f ? { text: b.textContent, cls: b.className, rect: b.getBoundingClientRect().toJSON(), field: f.getBoundingClientRect().toJSON() } : null; });
   const lb = await waitFor(lkwBtn, { label: 'Same as LKWT button' });
   assert.equal(lb.text, 'Same as LKWT');
-  assert.ok(lb.rect.bottom <= lb.field.top + 2 && lb.rect.right <= lb.field.right + 2, 'sits just above the Onset Time field, right-aligned');
+  assert.ok(lb.rect.left >= lb.field.right && Math.abs(lb.rect.top + lb.rect.height / 2 - (lb.field.top + lb.field.height / 2)) < 30, 'sits to the right of the Onset Time row, level with it, never over the row above');
   await T.page.evaluate(() => window.__q('.quick [data-group=lkw]').click());
   await waitFor(async () => (await nar()).patientComplaint?.complaintOnsetTime === '09/18/2026 08:15:00', { label: 'onset time = LKW', timeout: 15000 });
   const op = (await T.record(id)).ops.find(o => /complaintOnsetTime/.test(o.address));

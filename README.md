@@ -57,7 +57,7 @@ to bad signal or a hung page.
   and picks the name. Each chip keeps the kind of place ESO says it is, on the Scene side (location
   type) and on the Destination side (destination type), so a nursing home sets Nursing Home and a
   rehab sets Rehabilitation Center, never Hospital by default; ESO's type tables are kept on the
-  device from the last bundle seen, and Settings shows the type beside each chip. On the Assessments tab, "All normal" on each assessment opens ESO's own Quick Ax,
+  device from the last bundle seen, and Settings shows the type beside each chip. On the Assessments tab, "Normal" on each assessment opens ESO's own Quick Ax,
   presses No Abnormalities on every category still unset and presses OK; "A&Ox4" opens Mental Status
   and presses Alert and Oriented x4. On the Incident tab, Transported ALS / BLS, Refusal, Canceled
   (Prior) and Canceled (Scene) set the whole disposition set through ESO's pickers (Closest
@@ -191,7 +191,11 @@ to bad signal or a hung page.
   later. Should ESO refuse a tab's batch (HTTP 400), the batch is split until the refused
   fields stand alone: they are left out and named to the medic with ESO's own reason (and
   written to the run's log with ESO's full reply), and everything else still goes in. The list seen last is kept on the device, so it works with no signal.
-- **Copy an assessment.** A Copy button beside All normal on each saved assessment enters it again
+- **Copy a treatment.** A small copy button just left of each saved treatment's time on the
+  Flowchart tab enters it again as a new treatment with the current time: dose, measure, route,
+  provider, response, lot, expiry, comments, every field ESO's field list knows for a treatment
+  the same, written the way ESO's own shelf writes them. A setting, on by default.
+- **Copy an assessment.** A Copy button beside Normal on each saved assessment enters it again
   as a new assessment with the current time: every finding on every location, present or not,
   and each category's comments, written as ESO's own screen writes them. For the patient whose
   assessment barely changes between checks.

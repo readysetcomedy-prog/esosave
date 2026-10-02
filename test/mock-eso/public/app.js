@@ -75,6 +75,12 @@
       document.getElementById('patient').style.display = view === 'Patient' ? 'block' : 'none';
       document.getElementById('incident').style.display = view === 'Incident' ? 'block' : 'none';
       document.getElementById('assess').style.display = view === 'Assessments' ? 'block' : 'none';
+      document.getElementById('flow').style.display = view === 'FlowchartTreatments' ? 'block' : 'none';
+      if (view === 'FlowchartTreatments') {
+        const list = (out.body && out.body.data && out.body.data.model && out.body.data.model.treatments) || [];
+        const b = await loadBundle(); const reg = b.lists['UDL.FLOWCHARTTREATMENTREGISTRY'].values;
+        document.getElementById('flowlist').innerHTML = list.map(t => `<grid-row data-key="${t.itemId}" style="display:flex;gap:12px;border:1px solid #ddd;margin:4px 0;padding:6px"><grid-cell class="date"><strong>${String(t.treatmentDate || '').slice(-8)}</strong></grid-cell><grid-cell class="treatment"><strong>${(reg.find(r => r.itemId === Number(t.flowchartTreatmentRegistryId)) || {}).itemName || t.flowchartTreatmentRegistryId}</strong></grid-cell><grid-cell class="summary">${t.dose || ''} ${t.doseUnitId ? '#' + t.doseUnitId : ''}</grid-cell></grid-row>`).join('');
+      }
       if (view === 'Assessments') {
         const list = (out.body && out.body.data && out.body.data.model && out.body.data.model.assessmentsV2) || [];
         app.assessments = list.map(a => ({ key: String(a.itemId), time: String(a.assessmentTime || '').slice(-8), findings: (a.findings || []).map(f => ({ key: String(f.itemId), findingId: f.findingId, findingLocationId: f.findingLocationId, present: f.present })) }));
