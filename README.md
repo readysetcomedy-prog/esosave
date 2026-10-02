@@ -212,8 +212,12 @@ to bad signal or a hung page.
   and each category's comments, written as ESO's own screen writes them. For the patient whose
   assessment barely changes between checks.
 - **Same as LKWT.** A button under Onset Time on the Narrative tab sets it to the same date and
-  time as Last Known Well Time, as the screen shows it (a time just typed that ESO has not saved
-  yet counts), else as ESO holds it; the tab is re-read so Onset Time shows it. Rows under Barriers to Care (Alcohol
+  time as Last Known Well Time, read off the screen (its time box and its date box; a time just
+  typed that ESO has not saved yet counts) and entered through ESO's own time shelf: the time on
+  its numpad, the date on its calendar (stepping the month arrows when needed), then OK. ESO saves
+  it, draws it and validates it itself; nothing is written behind its back and the tab is not
+  re-read. The re-reads the vitals, treatment and assessment copies still need bring the page back
+  to where the medic was scrolled, not to the top. Rows under Barriers to Care (Alcohol
   Suspected, Drug Suspected, Obesity, Language, Psych Impaired) and Alcohol/Drugs (Smell of
   Alcohol, Admits Alcohol, Admits Drug) sit under those fields, only what ESO's own quick-picks
   lack.

@@ -88,7 +88,7 @@
       }
       if (view === 'Incident') { renderDelays(out.body); renderSS(out.body); renderCrew(out.body); loadBundle(); }
       document.getElementById('narrative').style.display = view === 'Narrative' ? 'block' : 'none';
-      if (view === 'Narrative') { const pc = (out.body && out.body.data && out.body.data.model && out.body.data.model.patientComplaint) || {}; for (const [ref, k] of [['COMPLAINTLASTKNOWNWELL', 'complaintLastKnownWell'], ['COMPLAINTONSETTIME', 'complaintOnsetTime']]) { const f = document.querySelector(`eso-field[data-field-ref="${ref}"] .display-value`); if (f) f.textContent = pc[k] || ''; } }
+      if (view === 'Narrative') { const pc = (out.body && out.body.data && out.body.data.model && out.body.data.model.patientComplaint) || {}; for (const [ref, k] of [['COMPLAINTLASTKNOWNWELL', 'complaintLastKnownWell'], ['COMPLAINTONSETTIME', 'complaintOnsetTime']]) { app.combo[ref] = pc[k] || null; comboRender(ref); } }
       document.getElementById('signatures').style.display = view === 'Signatures' ? 'block' : 'none';
       if (view === 'Patient') { renderHistory(out.body); renderSS(out.body, 'patient'); renderNum(out.body, 'patient'); }
       if (view === 'Narrative') { renderAcuity(out.body); renderTransport(out.body); renderSS(out.body, 'narrative'); renderNum(out.body, 'narrative'); }
@@ -313,6 +313,45 @@
     const f = document.querySelector(`eso-field[data-field-ref="${ref}"]`);
     f.querySelector('.shelf-click-indicator').addEventListener('click', () => openNumShelf({ title: d.label + (d.suffix ? ` (${d.suffix})` : ''), value: app.num[ref], max: d.max, onOk: (v) => { app.num[ref] = v; app.edit(d.scope, d.addr, v, d.type); numRender(ref); } }));
   }
+  // ---- date+time combos (Last Known Well, Onset Time), as ESO draws them: a time box and a date
+  // box sharing one field ref; tapping either opens one shelf with two masked inputs, a numpad for
+  // the time (shown while the time box is selected) and a calendar for the date (shown while the
+  // date box is), and OK writes both as one datetime, or nothing unless both are there
+  const COMBO = { COMPLAINTLASTKNOWNWELL: 'narrative.patientComplaint.complaintLastKnownWell', COMPLAINTONSETTIME: 'narrative.patientComplaint.complaintOnsetTime' };
+  app.combo = {};
+  function comboRender(ref) { const v = app.combo[ref] || ''; const [t, d] = document.querySelectorAll(`eso-field[data-field-ref="${ref}"] .display-value`); if (t) t.textContent = v ? v.slice(11) : ''; if (d) d.textContent = v ? v.slice(0, 10) : ''; }
+  const maskDigits = (digits, m) => { let out = '', i = 0; for (const ch of m) { if (i >= digits.length) break; out += ch === '9' ? digits[i++] : ch; } return out; };
+  function openComboShelf(ref) {
+    app.shelfOpens++;
+    const cur = app.combo[ref] || '';
+    const el = document.createElement('shelf-panel');
+    const now = new Date(); const view = { m: now.getMonth(), y: now.getFullYear() }; let sel = cur ? cur.slice(0, 10) : ''; let selected = 0;
+    el.innerHTML = `<header><h1>${ref === 'COMPLAINTONSETTIME' ? 'Onset Time' : 'Last Known Well'}</h1><button class="btn green-btn workflow-btn">OK</button></header><main class="viewport"><div class="content">
+      <div class="banded"><eso-display-field><eso-masked-input mask="99:99:99"><input value="${cur ? cur.slice(11) : ''}" placeholder="hh:mm:ss"></eso-masked-input></eso-display-field><eso-display-field><eso-masked-input mask="99/99/9999"><input value="${sel}" placeholder="mm/dd/yyyy"></eso-masked-input></eso-display-field></div>
+      <eso-numpad><numpad>${['7', '8', '9', '4', '5', '6', '1', '2', '3', '.', '0', 'back'].map(c => `<button class="btn numpad-btn" data-char="${c}" tabindex="-1">${c === 'back' ? '<div class="back"></div>' : c}</button>`).join('')}<button class="btn numpad-btn clear" data-char="clear" tabindex="-1">C</button></numpad></eso-numpad>
+      <eso-date-picker-panel hidden><nav><button class="btn back" tabindex="-1">&#8249;</button><header><a></a></header><button class="btn forward" tabindex="-1">&#8250;</button></nav><main><ul class="day-list"></ul></main></eso-date-picker-panel></div></main>`;
+    const [timeIn, dateIn] = el.querySelectorAll('input'); const pad = el.querySelector('eso-numpad'), panel = el.querySelector('eso-date-picker-panel');
+    const show = () => { pad.hidden = selected !== 0; panel.hidden = selected !== 1; };
+    const key = (d) => `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}/${d.getFullYear()}`;
+    const drawCal = () => {
+      el.querySelector('nav header a').textContent = `${new Date(view.y, view.m, 1).toLocaleString('en-US', { month: 'long' })} ${view.y}`;
+      const first = new Date(view.y, view.m, 1); const start = new Date(first); start.setDate(1 - first.getDay());
+      const ul = el.querySelector('ul.day-list'); ul.innerHTML = '';
+      for (let i = 0; i < 42; i++) { const d = new Date(start); d.setDate(start.getDate() + i); const li = document.createElement('li'); li.innerHTML = `<div class="date-item${d.getMonth() !== view.m ? ' not-this-month' : ''}${key(d) === sel ? ' selected' : ''}">${d.getDate()}</div>`; li.addEventListener('click', () => { sel = key(d); dateIn.value = sel; drawCal(); }); ul.appendChild(li); }
+    };
+    timeIn.addEventListener('click', () => { selected = 0; show(); }); dateIn.addEventListener('click', () => { selected = 1; show(); });
+    el.querySelector('nav .back').addEventListener('click', () => { view.m--; if (view.m < 0) { view.m = 11; view.y--; } drawCal(); });
+    el.querySelector('nav .forward').addEventListener('click', () => { view.m++; if (view.m > 11) { view.m = 0; view.y++; } drawCal(); });
+    // like ESO: the numpad keys act on mousedown and feed the selected box through its mask
+    el.querySelectorAll('[data-char]').forEach(b => b.addEventListener('mousedown', (e) => { e.preventDefault(); const input = selected === 0 ? timeIn : dateIn; const m = input.closest('eso-masked-input').getAttribute('mask'); let digits = input.value.replace(/\D/g, ''); const c = b.dataset.char; digits = c === 'clear' ? '' : c === 'back' ? digits.slice(0, -1) : /\d/.test(c) ? digits + c : digits; input.value = maskDigits(digits.slice(0, m.replace(/[^9]/g, '').length), m); if (selected === 1) sel = input.value; }));
+    el.querySelector('header button').addEventListener('click', () => {
+      const t = timeIn.value, d = dateIn.value;
+      const v = /^\d{2}:\d{2}:\d{2}$/.test(t) && /^\d{2}\/\d{2}\/\d{4}$/.test(d) ? `${d} ${t}` : null;
+      app.combo[ref] = v; app.edit('narrative', COMBO[ref], v, 'datetime'); comboRender(ref); el.remove();
+    });
+    show(); drawCal(); shelfHost.appendChild(el);
+  }
+  for (const ref of Object.keys(COMBO)) document.querySelectorAll(`eso-field[data-field-ref="${ref}"] .field-area`).forEach(a => a.addEventListener('click', () => openComboShelf(ref)));
   // ---- the Patient Refusal Form (Signatures tab): a modal of ESO's own, not a picker; each
   // multi-select inside opens a picker on top. Ids are the agency's GUIDs or ESO's.
   const RF = {

@@ -27,7 +27,7 @@
   if (ext) return;
   if (window.__esosave) return;
 
-  const VERSION = '0.15.21';
+  const VERSION = '0.15.22';
   const API_PREFIX_RE = /^\/ehr\/api\/+/i;
   const FAKE_OK_TEXT = '{"result":"Success","data":[]}';
   const PROBE_PATH = '/ehr/api/thirdpartydata/partners';
@@ -1130,17 +1130,6 @@
     await sendSynthetic(run, 'flowchartTreatments', ops, 'copyTreatment', `Copied the ${timeText || ''} treatment as a new one (${ops.length - 1} fields)${note}`, 'treatmentCopied', `copy the ${timeText || ''} treatment`);
   }
   // Onset Time set to the Last Known Well time, exactly as ESO holds it
-  async function sameAsLkw(recordId, onScreen) {
-    const fail = (error) => post('event', { name: 'lkwCopied', ok: false, error });
-    const run = S.runs[recordId];
-    if (!run) return fail('Run not found.');
-    // what the screen shows first (a time just typed may not be saved yet), else what ESO holds
-    let lkw = onScreen || null;
-    if (!lkw) { const m = await currentModel(run, 'Narrative'); lkw = m && m.patientComplaint ? m.patientComplaint.complaintLastKnownWell : null; }
-    if (!lkw) return fail('Last Known Well Time is empty. Enter it first, then press Same as LKWT.');
-    const ops = [{ verb: 'EDIT', address: 'narrative.patientComplaint.complaintOnsetTime', fieldRef: 'COMPLAINTONSETTIME', value: lkw, dataType: 'datetime' }];
-    await sendSynthetic(run, 'narrative', ops, 'sameAsLkw', `Onset Time set to the Last Known Well time (${lkw})`, 'lkwCopied', 'set Onset Time');
-  }
   // A copy is a batch the extension made up, so it is treated more carefully than the app's own
   // saves: sent directly when there is signal, and never allowed to flip the card to NO SIGNAL or
   // to sit in the queue blocking real saves if ESO refuses it.
@@ -1853,7 +1842,6 @@
         else if (a.name === 'copyVital') { copyVital(a.recordId || S.currentRecordId, String(a.time || ''), Number(a.nth) || 0); }
         else if (a.name === 'copyTreatment') { copyTreatment(a.recordId || S.currentRecordId, String(a.key || ''), String(a.time || '')); }
         else if (a.name === 'copyAssessment') { copyAssessment(a.recordId || S.currentRecordId, String(a.key || ''), String(a.time || '')); }
-        else if (a.name === 'sameAsLkw') { sameAsLkw(a.recordId || S.currentRecordId, a.lkw || null); }
         else if (a.name === 'send') { sendRecord(a.recordId, a.kind === 'email' ? 'email' : 'fax'); }
         else if (a.name === 'scanUnsent') { scheduleUnsentScan(0); }
         else if (a.name === 'facilities') { if (S.facilities) post('facilities', S.facilities); }

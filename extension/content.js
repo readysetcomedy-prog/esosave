@@ -183,8 +183,6 @@
       onTreatmentCopied(payload);
     } else if (type === 'event' && payload && payload.name === 'assessmentCopied') {
       onAssessmentCopied(payload);
-    } else if (type === 'event' && payload && payload.name === 'lkwCopied') {
-      onLkwCopied(payload);
     } else if (type === 'facilities' && payload && Array.isArray(payload.items)) {
       facilities = payload;
       facilityTypes = { locationTypes: payload.locationTypes || [], destinationTypes: payload.destinationTypes || [], crew: payload.crew || [], lists: payload.lists || null };
@@ -3684,15 +3682,31 @@
     if (panelOpen) renderPanel();
   }
   // The app only shows what it has loaded: step off the tab and back so it re-reads it
+  // Where the medic was: the window's scroll and every scrolled box on the page, each found again
+  // after the tab is re-read (the same element when it survived, else the same place in the tree).
+  function scrollSnapshot() {
+    const path = (el) => { const parts = []; for (let e = el; e && e !== document.body && e.nodeType === 1; e = e.parentElement) { const sibs = e.parentElement ? Array.from(e.parentElement.children).filter(x => x.tagName === e.tagName) : [e]; parts.unshift(`${e.tagName.toLowerCase()}:nth-of-type(${sibs.indexOf(e) + 1})`); } return parts.join(' > '); };
+    const boxes = Array.from(document.querySelectorAll('body *')).filter(el => el.scrollTop > 0 && !(host && host.contains(el))).map(el => ({ el, path: path(el), top: el.scrollTop }));
+    return { y: window.scrollY, boxes };
+  }
+  function scrollRestore(snap) {
+    if (!snap) return;
+    window.scrollTo(0, snap.y);
+    for (const b of snap.boxes) { let el = b.el.isConnected ? b.el : null; if (!el) { try { el = document.querySelector(b.path); } catch (e) { el = null; } } if (el) el.scrollTop = b.top; }
+  }
+  // A tab is re-read by stepping to another tab and back, so ESO draws what was just written; the
+  // page comes back scrolled to where the medic was, not to the top.
   async function reloadTab(view) {
     const id = lastStatus && lastStatus.currentRecordId;
     const awayView = view === 'Incident' ? 'Patient' : 'Incident';
     const away = tabElement(TAB_LABELS[awayView]), back = tabElement(TAB_LABELS[view]);
     if (!away || !back) return;
+    const snap = scrollSnapshot();
     away.click();
     await waitViewLoaded(awayView, id, 1500).catch(() => {});
     back.click();
     await waitViewLoaded(view, id, 3000).catch(() => {});
+    scrollRestore(snap); setTimeout(() => scrollRestore(snap), 150); setTimeout(() => scrollRestore(snap), 600);
   }
   function copyAssessment(rec) {
     if (copyBusy || quickBusy) return;
@@ -3750,15 +3764,78 @@
     setTimeout(layoutQuick, 300);
   }
   // Same as LKWT: a button under Onset Time that sets it to the Last Known Well time, as the screen shows it
-  // The Last Known Well time as the screen shows it, "MM/DD/YYYY HH:mm:ss": ESO may not have saved
-  // a time just typed, so the button goes by what the medic sees, not only by what ESO holds.
+  // The Last Known Well time as the screen shows it. ESO draws it as a time box and a date box
+  // that share one field ref, so both are read; the button goes by what the medic sees, not by
+  // what ESO has saved so far.
   function lkwOnScreen() {
-    const f = fieldEl('COMPLAINTLASTKNOWNWELL'); if (!f) return null;
-    const text = Array.from(f.querySelectorAll('input')).map(i => norm(i.value || '')).concat([fieldValue('COMPLAINTLASTKNOWNWELL') || '']).join(' ');
-    const date = (text.match(/(^|\s)(\d{1,2}\/\d{1,2}\/\d{4})(?=\s|$)/) || [])[2], time = (text.match(/(^|\s)(\d{1,2}:\d{2}(?::\d{2})?)(?=\s|$)/) || [])[2];
-    if (!date || !time) return null;
+    const fs = Array.from(document.querySelectorAll('eso-field[data-field-ref="COMPLAINTLASTKNOWNWELL"]'));
+    if (!fs.length) return { time: null, date: null, seen: 'no field' };
+    const texts = []; for (const f of fs) { for (const i of f.querySelectorAll('input')) texts.push(norm(i.value || '')); texts.push(norm(f.textContent || '')); }
+    const text = texts.join(' ');
+    const date = (text.match(/(^|[^\d\/])(\d{1,2}\/\d{1,2}\/\d{4})(?!\d)/) || [])[2], time = (text.match(/(^|[^\d:])(\d{1,2}:\d{2}(?::\d{2})?)(?![\d:])/) || [])[2];
+    const seen = `${fs.length} boxes, "${text.slice(0, 160)}"`;
+    if (!date || !time) return { time: null, date: null, seen };
     const [mm, dd, yyyy] = date.split('/'); const [h, mi, ss] = time.split(':');
-    return `${mm.padStart(2, '0')}/${dd.padStart(2, '0')}/${yyyy} ${h.padStart(2, '0')}:${mi}:${ss || '00'}`;
+    return { time: `${h.padStart(2, '0')}:${mi}:${ss || '00'}`, date: `${mm.padStart(2, '0')}/${dd.padStart(2, '0')}/${yyyy}`, seen };
+  }
+  // A key on ESO's numpad: it acts on mousedown (as a finger does); a key that did nothing that
+  // way is clicked. The box must show the change before the next key.
+  async function tapKey(shelf, input, ch) {
+    const b = Array.from(shelf.querySelectorAll('[data-char]')).find(x => x.dataset.char === ch);
+    if (!b) throw new Error(`no "${ch}" key on ESO's numpad`);
+    const before = input.value;
+    for (const t of ['mousedown', 'mouseup']) b.dispatchEvent(new MouseEvent(t, { bubbles: true, cancelable: true, view: window }));
+    if (await until(() => input.value !== before, 250)) return;
+    b.click();
+    if (!(await until(() => input.value !== before, 600))) throw new Error(`ESO's numpad did not take "${ch}"`);
+  }
+  // ESO's calendar: step the month arrows to the month wanted, then tap the day
+  async function pickDay(shelf, input, want) {
+    const [mm, dd, yyyy] = want.split('/').map(Number);
+    const panel = await until(() => Array.from(shelf.querySelectorAll('eso-date-picker-panel')).find(visible), 2000);
+    if (!panel) throw new Error("ESO's calendar did not open");
+    const shown = () => { const h = panel.querySelector('nav header a, nav header, header'); const m = h && /([A-Za-z]+)\s+(\d{4})/.exec(norm(h.textContent)); if (!m) return null; const mi = new Date(`${m[1]} 1, ${m[2]}`).getMonth(); return isNaN(mi) ? null : { m: mi + 1, y: Number(m[2]) }; };
+    for (let i = 0; i < 60; i++) {
+      const cur = shown(); if (!cur) throw new Error("ESO's calendar shows no month");
+      if (cur.y === yyyy && cur.m === mm) break;
+      const b = panel.querySelector(cur.y * 12 + cur.m < yyyy * 12 + mm ? 'button.forward' : 'button.back'); if (!b) throw new Error("no month arrows on ESO's calendar");
+      b.click();
+      if (!(await until(() => { const n = shown(); return n && (n.m !== cur.m || n.y !== cur.y); }, 1500))) throw new Error("ESO's calendar did not turn the month");
+      await new Promise(r => setTimeout(r, 350)); // the arrows are debounced
+    }
+    const li = Array.from(panel.querySelectorAll('li')).find(l => { const d = l.querySelector('.date-item'); return d && !d.classList.contains('not-this-month') && Number(norm(d.textContent)) === dd; });
+    if (!li) throw new Error(`no day ${dd} on ESO's calendar`);
+    li.click();
+    if (!(await until(() => norm(input.value) === want, 1500))) throw new Error(`ESO's calendar set "${input.value}", not ${want}`);
+  }
+  // Same as LKWT: read Last Known Well off the screen, open Onset Time's own shelf, type the time
+  // on ESO's numpad, pick the date on ESO's calendar, press OK. ESO saves it, draws it and
+  // validates it itself, so nothing is written behind its back and the tab is not re-read.
+  async function sameAsLkwUi() {
+    const lk = lkwOnScreen();
+    if (!lk.time || !lk.date) throw new Error('Last Known Well Time is empty. Enter it first, then press Same as LKWT.');
+    const tf = fieldReady('COMPLAINTONSETTIME'); if (!tf) throw new Error('Onset Time is not on the screen.');
+    openPicker(tf);
+    const shelf = await until(() => Array.from(document.querySelectorAll('shelf-panel')).find(visible), 4000);
+    if (!shelf) throw new Error("ESO's time shelf did not open.");
+    const maskOf = (i) => `${i.placeholder || ''} ${(i.closest('eso-masked-input') && i.closest('eso-masked-input').getAttribute('mask')) || ''}`;
+    const inputs = () => Array.from(shelf.querySelectorAll('eso-masked-input input, input'));
+    const timeIn = await until(() => inputs().find(i => /hh:mm|99:99/i.test(maskOf(i))), 2000);
+    const dateIn = inputs().find(i => /yyyy|9999/i.test(maskOf(i)));
+    if (!timeIn || !dateIn) throw new Error("ESO's time shelf has no time and date boxes.");
+    timeIn.click(); timeIn.focus();
+    if (norm(timeIn.value)) await tapKey(shelf, timeIn, 'clear');
+    for (const d of lk.time.replace(/\D/g, '')) await tapKey(shelf, timeIn, d);
+    if (!(await until(() => norm(timeIn.value) === lk.time, 1500))) throw new Error(`the time came out as "${timeIn.value}", not ${lk.time}.`);
+    dateIn.click(); dateIn.focus();
+    await pickDay(shelf, dateIn, lk.date);
+    const ok = Array.from(shelf.querySelectorAll('header button, button')).find(b => /^(OK|Done)$/i.test(norm(b.textContent)));
+    if (!ok) throw new Error("no OK button on ESO's time shelf.");
+    ok.click();
+    if (!(await until(() => closed(shelf), 4000))) throw new Error("ESO's time shelf did not close, so it may not have taken the time and date.");
+    const shows = () => Array.from(document.querySelectorAll('eso-field[data-field-ref="COMPLAINTONSETTIME"] .display-value')).map(d => norm(d.textContent)).join(' ');
+    if (!(await until(() => shows().includes(lk.time) && shows().includes(lk.date), 4000))) throw new Error('Onset Time does not show the Last Known Well time after OK.');
+    return lk;
   }
   function layoutLkw() {
     const run = currentRun();
@@ -3774,13 +3851,14 @@
     const btn = quickEl('lkw:same', () => {
       const b = document.createElement('button'); b.type = 'button'; b.className = 'allnone'; b.dataset.group = 'lkw'; b.title = 'Set Onset Time to the same date and time as Last Known Well Time';
       b.addEventListener('pointerdown', (e) => e.stopPropagation());
-      b.addEventListener('click', (e) => {
+      b.addEventListener('click', async (e) => {
         e.preventDefault(); e.stopPropagation();
         if (copyBusy || quickBusy) return;
         copyBusy = true;
-        showVeilMessage('Setting Onset Time…', 'to the same date and time as Last Known Well Time.');
-        toPage('action', { name: 'sameAsLkw', recordId: lastStatus.currentRecordId, lkw: lkwOnScreen() });
-        setTimeout(() => { if (copyBusy) { copyBusy = false; hideVeil(); } }, 20000);
+        showVeilMessage('Setting Onset Time…', 'to the same date and time as Last Known Well Time, through ESO\'s own time shelf.');
+        try { const lk = await sameAsLkwUi(); hideVeil(); notice('Onset Time set', `Same as Last Known Well: ${lk.date} ${lk.time}.`, 3000); }
+        catch (err) { hideVeil(); alert('ESO Save: ' + err.message); }
+        finally { copyBusy = false; setTimeout(layoutQuick, 300); }
       });
       return b;
     });
@@ -3790,13 +3868,6 @@
     btn.style.left = Math.round(r.left) + 'px';
     btn.style.top = Math.round(bottom + 8) + 'px';
     btn.style.visibility = '';
-  }
-  async function onLkwCopied(p) {
-    if (!p.ok) { copyBusy = false; hideVeil(); alert('ESO Save: ' + (p.error || 'could not set Onset Time')); return; }
-    await reloadTab('Narrative');
-    copyBusy = false; hideVeil();
-    notice('Onset Time set', p.held ? 'Same as Last Known Well; held until ESO answers.' : 'Same as Last Known Well.', 3000);
-    setTimeout(layoutQuick, 300);
   }
   async function onVitalCopied(p) {
     if (!p.ok) { copyBusy = false; hideVeil(); alert('ESO Save: ' + (p.error || 'could not copy the vital')); return; }

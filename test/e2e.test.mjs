@@ -1031,21 +1031,40 @@ test('Narrative: Barriers to Care and Alcohol/Drugs chips (only what ESO lacks),
   await waitFor(async () => ((await nar()).otherFactors?.alcoholDrugUsageIds || []).map(Number).includes(703), { label: 'Smell of Alcohol on the run', timeout: 15000 });
   // once set, ESO's quick-picks go away and the row offers Admits Alcohol and Admits Drug as well
   await waitFor(async () => (await row('sr-alcohol')).map(b => b.text).join() === 'Smell of Alcohol,Admits Alcohol,Admits Drug', { label: 'full alcohol row once ESO hides its quick-picks' });
-  // Same as LKWT sits above Onset Time; one tap writes the Last Known Well time into Onset Time, as ESO holds it
-  const lkwBtn = () => T.page.evaluate(() => { const b = window.__q('.quick [data-group=lkw]'); const f = document.querySelector('eso-field[data-field-ref="COMPLAINTONSETTIME"]'); return b && f ? { text: b.textContent, cls: b.className, rect: b.getBoundingClientRect().toJSON(), field: f.getBoundingClientRect().toJSON() } : null; });
+  // Same as LKWT sits under Onset Time; one tap reads Last Known Well off the screen and enters it
+  // into Onset Time through ESO's own shelf (numpad for the time, calendar for the date, OK)
+  const lkwBtn = () => T.page.evaluate(() => { const b = window.__q('.quick [data-group=lkw]'); const f = document.querySelector('eso-field[data-field-ref="COMPLAINTONSETTIME"]'); if (!b || !f) return null; const row = f.closest('tr'); const rowBottom = Math.max(...Array.from(row.children).map(c => c.getBoundingClientRect().bottom)); return { text: b.textContent, cls: b.className, rect: b.getBoundingClientRect().toJSON(), box: f.querySelector('.field-area').getBoundingClientRect().toJSON(), rowBottom }; });
   const lb = await waitFor(lkwBtn, { label: 'Same as LKWT button' });
   assert.equal(lb.text, 'Same as LKWT');
-  assert.ok(lb.rect.top >= lb.field.bottom && Math.abs(lb.rect.left - lb.field.left) < 40 && lb.rect.top < lb.field.bottom + 40, 'sits under the Onset Time row, level with its left edge, so a narrow screen never loses it');
+  assert.ok(lb.rect.top >= lb.rowBottom && lb.rect.top < lb.rowBottom + 40 && Math.abs(lb.rect.left - lb.box.left) < 4, 'sits under the whole Onset Time row (time, date, Estimated, UTO), level with the time box, so a narrow screen never loses it: ' + JSON.stringify(lb));
+  const onsetShown = () => app(() => Array.from(document.querySelectorAll('eso-field[data-field-ref="COMPLAINTONSETTIME"] .display-value')).map(d => d.textContent.trim()));
+  assert.deepEqual(await app(() => Array.from(document.querySelectorAll('eso-field[data-field-ref="COMPLAINTLASTKNOWNWELL"] .display-value')).map(d => d.textContent.trim())), ['08:15:00', '09/18/2026'], 'the LKW time box and date box');
+  const shelfOpens = await app(() => window.app.shelfOpens);
+  await app(() => { document.body.style.minHeight = '3000px'; window.scrollTo(0, 420); });
+  const dialogs = []; const onDialog = (d) => { dialogs.push(d.message()); d.dismiss().catch(() => {}); }; T.page.on('dialog', onDialog);
+  try {
   await T.page.evaluate(() => window.__q('.quick [data-group=lkw]').click());
-  await waitFor(async () => (await nar()).patientComplaint?.complaintOnsetTime === '09/18/2026 08:15:00', { label: 'onset time = LKW', timeout: 15000 });
+  try { await waitFor(async () => (await nar()).patientComplaint?.complaintOnsetTime === '09/18/2026 08:15:00', { label: 'onset time = LKW, saved by ESO itself', timeout: 15000 }); }
+  catch (e) { throw new Error(e.message + ' · dialogs: ' + JSON.stringify(dialogs) + ' · shelf: ' + (await app(() => (document.querySelector('shelf-panel') || {}).innerHTML || 'none')).slice(0, 400)); }
   const op = (await T.record(id)).ops.find(o => /complaintOnsetTime/.test(o.address));
-  assert.equal(op.dataType, 'datetime'); assert.equal(op.fieldRef, 'COMPLAINTONSETTIME');
-  await waitFor(async () => (await app(() => document.querySelector('eso-field[data-field-ref="COMPLAINTONSETTIME"] .display-value').textContent)) === '09/18/2026 08:15:00', { label: 'the tab was re-read and shows it', timeout: 15000 });
+  assert.equal(op.dataType, 'datetime');
+  assert.equal(await app(() => window.app.shelfOpens), shelfOpens + 1, "through ESO's own time shelf");
+  assert.deepEqual(await onsetShown(), ['08:15:00', '09/18/2026'], 'Onset Time shows it at once, no tab re-read');
+  assert.equal(await app(() => window.scrollY), 420, 'the page did not move');
+  assert.equal(await app(() => !!document.querySelector('shelf-panel')), false, 'the shelf is closed');
   // a Last Known Well just typed, not yet saved by ESO: the button goes by the screen
   await waitFor(() => T.page.evaluate(() => !window.__q('.quick [data-group=lkw]').classList.contains('busy')), { label: 'button free again' });
-  await app(() => { document.querySelector('eso-field[data-field-ref="COMPLAINTLASTKNOWNWELL"] .display-value').textContent = '09/18/2026 09:30:00'; });
+  await app(() => { document.querySelector('eso-field[data-field-ref="COMPLAINTLASTKNOWNWELL"] .display-value').textContent = '09:30:00'; });
   await T.page.evaluate(() => window.__q('.quick [data-group=lkw]').click());
   await waitFor(async () => (await nar()).patientComplaint?.complaintOnsetTime === '09/18/2026 09:30:00', { label: 'onset time = the LKW on the screen', timeout: 15000 });
+  // the calendar is stepped to another month when the date calls for it
+  await waitFor(() => T.page.evaluate(() => !window.__q('.quick [data-group=lkw]').classList.contains('busy')), { label: 'button free again' });
+  await app(() => { const d = document.querySelectorAll('eso-field[data-field-ref="COMPLAINTLASTKNOWNWELL"] .display-value'); d[0].textContent = '23:05:00'; d[1].textContent = '07/31/2026'; });
+  await T.page.evaluate(() => window.__q('.quick [data-group=lkw]').click());
+  await waitFor(async () => (await nar()).patientComplaint?.complaintOnsetTime === '07/31/2026 23:05:00', { label: 'two months back on the calendar', timeout: 20000 });
+  assert.deepEqual(await onsetShown(), ['23:05:00', '07/31/2026']);
+  assert.deepEqual(dialogs, [], 'no complaint from the extension');
+  } finally { T.page.off('dialog', onDialog); }
 });
 
 test('Narrative rows: impressions, care level, duration units and every anatomic location', async () => {
