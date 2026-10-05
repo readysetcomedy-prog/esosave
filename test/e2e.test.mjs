@@ -1032,7 +1032,7 @@ test('Narrative: Barriers to Care and Alcohol/Drugs chips (only what ESO lacks),
   // once set, ESO's quick-picks go away and the row offers Admits Alcohol and Admits Drug as well
   await waitFor(async () => (await row('sr-alcohol')).map(b => b.text).join() === 'Smell of Alcohol,Admits Alcohol,Admits Drug', { label: 'full alcohol row once ESO hides its quick-picks' });
   // Same as LKWT sits under Onset Time; one tap reads Last Known Well off the screen and enters it
-  // into Onset Time through ESO's own shelf (numpad for the time, calendar for the date, OK)
+  // into Onset Time through ESO's own shelf (typed into its Time and Date boxes, then OK)
   const lkwBtn = () => T.page.evaluate(() => { const b = window.__q('.quick [data-group=lkw]'); const f = document.querySelector('eso-field[data-field-ref="COMPLAINTONSETTIME"]'); if (!b || !f) return null; const row = f.closest('tr'); const rowBottom = Math.max(...Array.from(row.children).map(c => c.getBoundingClientRect().bottom)); return { text: b.textContent, cls: b.className, rect: b.getBoundingClientRect().toJSON(), box: f.querySelector('.field-area').getBoundingClientRect().toJSON(), rowBottom }; });
   const lb = await waitFor(lkwBtn, { label: 'Same as LKWT button' });
   assert.equal(lb.text, 'Same as LKWT');
@@ -1057,11 +1057,11 @@ test('Narrative: Barriers to Care and Alcohol/Drugs chips (only what ESO lacks),
   await app(() => { document.querySelector('eso-field[data-field-ref="COMPLAINTLASTKNOWNWELL"] .display-value').textContent = '09:30:00'; });
   await T.page.evaluate(() => window.__q('.quick [data-group=lkw]').click());
   await waitFor(async () => (await nar()).patientComplaint?.complaintOnsetTime === '09/18/2026 09:30:00', { label: 'onset time = the LKW on the screen', timeout: 15000 });
-  // the calendar is stepped to another month when the date calls for it
+  // a date in another month, typed into the date box like the rest
   await waitFor(() => T.page.evaluate(() => !window.__q('.quick [data-group=lkw]').classList.contains('busy')), { label: 'button free again' });
   await app(() => { const d = document.querySelectorAll('eso-field[data-field-ref="COMPLAINTLASTKNOWNWELL"] .display-value'); d[0].textContent = '23:05:00'; d[1].textContent = '07/31/2026'; });
   await T.page.evaluate(() => window.__q('.quick [data-group=lkw]').click());
-  await waitFor(async () => (await nar()).patientComplaint?.complaintOnsetTime === '07/31/2026 23:05:00', { label: 'two months back on the calendar', timeout: 20000 });
+  await waitFor(async () => (await nar()).patientComplaint?.complaintOnsetTime === '07/31/2026 23:05:00', { label: 'another month', timeout: 20000 });
   assert.deepEqual(await onsetShown(), ['23:05:00', '07/31/2026']);
   assert.deepEqual(dialogs, [], 'no complaint from the extension');
   } finally { T.page.off('dialog', onDialog); }

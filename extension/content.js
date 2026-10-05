@@ -3778,81 +3778,34 @@
     const [mm, dd, yyyy] = date.split('/'); const [h, mi, ss] = time.split(':');
     return { time: `${h.padStart(2, '0')}:${mi}:${ss || '00'}`, date: `${mm.padStart(2, '0')}/${dd.padStart(2, '0')}/${yyyy}`, seen };
   }
-  // A key on ESO's numpad. Which event its keys answer to is not known for sure (a mouse press,
-  // a click, a pointer press, a touch), so each is tried until the box changes; the way that
-  // worked is kept for the next key. If none does, the digits are typed into the box itself.
   const digitsOf = (v) => String(v == null ? '' : v).replace(/\D/g, '');
-  const fireMouse = (el, types) => { for (const t of types) el.dispatchEvent(new MouseEvent(t, { bubbles: true, cancelable: true, view: window, button: 0, buttons: t.endsWith('down') ? 1 : 0 })); };
-  const firePointer = (el, types) => { if (typeof PointerEvent !== 'function') throw new Error('no pointer events'); for (const t of types) el.dispatchEvent(new PointerEvent(t, { bubbles: true, cancelable: true, view: window, pointerId: 1, pointerType: 'touch', isPrimary: true, button: 0, buttons: t.endsWith('down') ? 1 : 0 })); };
-  const fireTouch = (el) => {
-    if (typeof Touch !== 'function' || typeof TouchEvent !== 'function') throw new Error('no touch events');
-    const r = el.getBoundingClientRect(); const touch = new Touch({ identifier: Date.now() % 100000, target: el, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2, pageX: r.left + r.width / 2 + window.scrollX, pageY: r.top + r.height / 2 + window.scrollY });
-    el.dispatchEvent(new TouchEvent('touchstart', { bubbles: true, cancelable: true, touches: [touch], targetTouches: [touch], changedTouches: [touch] }));
-    el.dispatchEvent(new TouchEvent('touchend', { bubbles: true, cancelable: true, touches: [], targetTouches: [], changedTouches: [touch] }));
-  };
-  const KEY_WAYS = [
-    ['mouse', (b) => fireMouse(b, ['mousedown', 'mouseup'])],
-    ['click', (b) => b.click()],
-    ['pointer', (b) => firePointer(b, ['pointerdown', 'pointerup'])],
-    ['touch', (b) => fireTouch(b)],
-    ['pointer+click', (b) => { firePointer(b, ['pointerdown', 'pointerup']); b.click(); }],
-  ];
-  let padWay = null;
-  async function tapKey(shelf, input, ch) {
-    const b = Array.from(shelf.querySelectorAll('[data-char]')).find(x => x.dataset.char === ch);
-    if (!b) throw new Error(`no "${ch}" key on ESO's numpad`);
-    const before = digitsOf(input.value);
-    const took = () => ch === 'clear' ? !digitsOf(input.value) : digitsOf(input.value) !== before;
-    const ways = padWay ? [KEY_WAYS.find(w => w[0] === padWay)].concat(KEY_WAYS.filter(w => w[0] !== padWay)) : KEY_WAYS;
-    for (const [name, go] of ways) {
-      try { go(b); } catch (e) { continue; }
-      if (await until(took, 300)) { padWay = name; return; }
-    }
-    throw new Error(`ESO's numpad did not take "${ch}" (tried ${KEY_WAYS.map(w => w[0]).join(', ')})`);
-  }
-  // the digits typed into the masked box itself, as a keyboard would, when the numpad will not
+  // Digits typed into one of ESO's masked boxes, as a keyboard would send them: a mask that takes
+  // the keypress itself puts the digit in; otherwise the digit goes in through the mask here, and
+  // the box is told it changed, so ESO's model follows.
   async function typeInto(input, text) {
-    input.focus();
+    input.click(); input.focus();
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
     const put = (v) => { setter.call(input, v); input.dispatchEvent(new Event('input', { bubbles: true })); };
     const mask = (input.closest('eso-masked-input') && input.closest('eso-masked-input').getAttribute('mask')) || null;
     const fmt = (digits) => { if (!mask) return digits; let out = '', i = 0; for (const ch of mask) { if (i >= digits.length) break; out += ch === '9' ? digits[i++] : ch; } return out; };
     const keyEv = (type, ch) => { const code = 48 + Number(ch); return new KeyboardEvent(type, { key: ch, code: 'Digit' + ch, keyCode: code, which: code, charCode: type === 'keypress' ? code : 0, bubbles: true, cancelable: true }); };
-    put('');
+    if (digitsOf(input.value)) put('');
     let typed = '';
     for (const ch of digitsOf(text)) {
       typed += ch;
       input.dispatchEvent(keyEv('keydown', ch));
       const was = digitsOf(input.value);
       input.dispatchEvent(keyEv('keypress', ch));
-      if (digitsOf(input.value) === was) put(fmt(typed)); // the mask did not take the key itself: the digit goes in
+      if (digitsOf(input.value) === was) put(fmt(typed));
       input.dispatchEvent(keyEv('keyup', ch));
     }
     if (digitsOf(input.value) !== digitsOf(text)) put(fmt(digitsOf(text)));
     input.dispatchEvent(new Event('change', { bubbles: true }));
-    input.dispatchEvent(new Event('blur', { bubbles: true }));
-  }
-  // ESO's calendar: step the month arrows to the month wanted, then tap the day
-  async function pickDay(shelf, input, want) {
-    const [mm, dd, yyyy] = want.split('/').map(Number);
-    const panel = await until(() => Array.from(shelf.querySelectorAll('eso-date-picker-panel')).find(visible), 2000);
-    if (!panel) throw new Error("ESO's calendar did not open");
-    const shown = () => { const h = panel.querySelector('nav header a, nav header, header'); const m = h && /([A-Za-z]+)\s+(\d{4})/.exec(norm(h.textContent)); if (!m) return null; const mi = new Date(`${m[1]} 1, ${m[2]}`).getMonth(); return isNaN(mi) ? null : { m: mi + 1, y: Number(m[2]) }; };
-    for (let i = 0; i < 60; i++) {
-      const cur = shown(); if (!cur) throw new Error("ESO's calendar shows no month");
-      if (cur.y === yyyy && cur.m === mm) break;
-      const b = panel.querySelector(cur.y * 12 + cur.m < yyyy * 12 + mm ? 'button.forward' : 'button.back'); if (!b) throw new Error("no month arrows on ESO's calendar");
-      b.click();
-      if (!(await until(() => { const n = shown(); return n && (n.m !== cur.m || n.y !== cur.y); }, 1500))) throw new Error("ESO's calendar did not turn the month");
-      await new Promise(r => setTimeout(r, 350)); // the arrows are debounced
-    }
-    const li = Array.from(panel.querySelectorAll('li')).find(l => { const d = l.querySelector('.date-item'); return d && !d.classList.contains('not-this-month') && Number(norm(d.textContent)) === dd; });
-    if (!li) throw new Error(`no day ${dd} on ESO's calendar`);
-    li.click();
-    if (!(await until(() => digitsOf(input.value) === digitsOf(want), 1500))) throw new Error(`ESO's calendar set "${input.value}", not ${want}`);
+    input.blur(); input.dispatchEvent(new Event('blur', { bubbles: true }));
+    if (!(await until(() => digitsOf(input.value) === digitsOf(text), 1500))) throw new Error(`the box took "${input.value}", not ${text}.`);
   }
   // Same as LKWT: read Last Known Well off the screen, open Onset Time's own shelf, type the time
-  // on ESO's numpad, pick the date on ESO's calendar, press OK. ESO saves it, draws it and
+  // into its Time box and the date into its Date box, press OK. ESO saves it, draws it and
   // validates it itself, so nothing is written behind its back and the tab is not re-read.
   async function sameAsLkwUi() {
     const lk = lkwOnScreen();
@@ -3866,23 +3819,8 @@
     const timeIn = await until(() => inputs().find(i => /hh:mm|99:99/i.test(maskOf(i))), 2000);
     const dateIn = inputs().find(i => /yyyy|9999/i.test(maskOf(i)));
     if (!timeIn || !dateIn) throw new Error("ESO's time shelf has no time and date boxes.");
-    // the shelf may open on the date box with the calendar up: pick the time box first and make
-    // sure the numpad is the one showing before a key is pressed
-    const padUp = () => Array.from(shelf.querySelectorAll('eso-numpad, numpad')).some(visible);
-    timeIn.click(); timeIn.focus();
-    if (!(await until(padUp, 1000))) { timeIn.dispatchEvent(new Event('focus', { bubbles: true })); const wrap = timeIn.closest('eso-display-field, eso-masked-input'); if (wrap) wrap.click(); }
-    if (!(await until(padUp, 1500))) throw new Error("ESO's numpad did not come up for the Time box.");
-    try {
-      if (digitsOf(timeIn.value)) await tapKey(shelf, timeIn, 'clear'); // only a time already in the box is cleared first
-      for (const d of digitsOf(lk.time)) await tapKey(shelf, timeIn, d);
-    } catch (e) {
-      // the numpad would not answer: the time goes into the box as typed
-      await typeInto(timeIn, lk.time);
-      if (digitsOf(timeIn.value) !== digitsOf(lk.time)) throw new Error(`${e.message}; typing into the box gave "${timeIn.value}".`);
-    }
-    if (!(await until(() => digitsOf(timeIn.value) === digitsOf(lk.time), 1500))) throw new Error(`the time came out as "${timeIn.value}", not ${lk.time}.`);
-    dateIn.click(); dateIn.focus();
-    await pickDay(shelf, dateIn, lk.date);
+    await typeInto(timeIn, lk.time);
+    await typeInto(dateIn, lk.date);
     const ok = Array.from(shelf.querySelectorAll('header button, button')).find(b => /^(OK|Done)$/i.test(norm(b.textContent)));
     if (!ok) throw new Error("no OK button on ESO's time shelf.");
     ok.click();

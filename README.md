@@ -213,8 +213,8 @@ to bad signal or a hung page.
   assessment barely changes between checks.
 - **Same as LKWT.** A button under Onset Time on the Narrative tab sets it to the same date and
   time as Last Known Well Time, read off the screen (its time box and its date box; a time just
-  typed that ESO has not saved yet counts) and entered through ESO's own time shelf: the time on
-  its numpad, the date on its calendar (stepping the month arrows when needed), then OK. ESO saves
+  typed that ESO has not saved yet counts) and entered through ESO's own time shelf: typed into
+  its Time box and its Date box the way a keyboard would, then OK. ESO saves
   it, draws it and validates it itself; nothing is written behind its back and the tab is not
   re-read. The re-reads the vitals, treatment and assessment copies still need bring the page back
   to where the medic was scrolled, not to the top. Rows under Barriers to Care (Alcohol

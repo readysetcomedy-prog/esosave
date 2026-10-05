@@ -58,8 +58,8 @@ that ESO refuses (400) is bisected (`saveOpsIsolating`), the refused ops named t
 ## Quick buttons go through ESO's own controls
 
 A quick button sets a field the way a finger would: ESO's quick-picks, its list shelf (`openPicker`,
-`pickRow`, `toggleMulti`), and for a date+time its combo shelf (`sameAsLkwUi`: numpad keys act on
-mousedown, `tapKey`; the calendar's month arrows and day list, `pickDay`; OK). ESO then saves,
+`pickRow`, `toggleMulti`), and for a date+time its combo shelf (`sameAsLkwUi`: the time and the
+date typed into its masked boxes, `typeInto`, then OK). ESO then saves,
 draws and validates on its own. Only the copies (vital, treatment, assessment) and a template fill
 write the app's own autosave ops (`sendSynthetic`), and those re-read the tab afterwards
 (`reloadTab`, which restores the scroll position).

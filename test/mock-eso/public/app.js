@@ -340,6 +340,8 @@
       for (let i = 0; i < 42; i++) { const d = new Date(start); d.setDate(start.getDate() + i); const li = document.createElement('li'); li.innerHTML = `<div class="date-item${d.getMonth() !== view.m ? ' not-this-month' : ''}${key(d) === sel ? ' selected' : ''}">${d.getDate()}</div>`; li.addEventListener('click', () => { sel = key(d); dateIn.value = sel; drawCal(); }); ul.appendChild(li); }
     };
     timeIn.addEventListener('click', () => { selected = 0; show(); }); dateIn.addEventListener('click', () => { selected = 1; show(); });
+    // typed into: the mask shapes the digits, and the date box's value is what the calendar shows selected
+    for (const input of [timeIn, dateIn]) input.addEventListener('input', () => { const m = input.closest('eso-masked-input').getAttribute('mask'); const v = maskDigits(input.value.replace(/\D/g, '').slice(0, m.replace(/[^9]/g, '').length), m); if (input.value !== v) input.value = v; if (input === dateIn) { sel = /_/.test(v) ? '' : v; drawCal(); } });
     el.querySelector('nav .back').addEventListener('click', () => { view.m--; if (view.m < 0) { view.m = 11; view.y--; } drawCal(); });
     el.querySelector('nav .forward').addEventListener('click', () => { view.m++; if (view.m > 11) { view.m = 0; view.y++; } drawCal(); });
     // the numpad keys feed the selected box through its mask; this shelf's keys answer to a pointer
