@@ -342,8 +342,9 @@
     timeIn.addEventListener('click', () => { selected = 0; show(); }); dateIn.addEventListener('click', () => { selected = 1; show(); });
     el.querySelector('nav .back').addEventListener('click', () => { view.m--; if (view.m < 0) { view.m = 11; view.y--; } drawCal(); });
     el.querySelector('nav .forward').addEventListener('click', () => { view.m++; if (view.m > 11) { view.m = 0; view.y++; } drawCal(); });
-    // like ESO: the numpad keys act on mousedown and feed the selected box through its mask
-    el.querySelectorAll('[data-char]').forEach(b => b.addEventListener('mousedown', (e) => { e.preventDefault(); const input = selected === 0 ? timeIn : dateIn; const m = input.closest('eso-masked-input').getAttribute('mask'); let digits = input.value.replace(/\D/g, ''); const c = b.dataset.char; digits = c === 'clear' ? '' : c === 'back' ? digits.slice(0, -1) : /\d/.test(c) ? digits + c : digits; input.value = maskDigits(digits.slice(0, m.replace(/[^9]/g, '').length), m); if (selected === 1) sel = input.value; }));
+    // the numpad keys feed the selected box through its mask; this shelf's keys answer to a pointer
+    // press only (ESO's number shelf answers to mousedown), so the extension has to find the way in
+    el.querySelectorAll('[data-char]').forEach(b => b.addEventListener('pointerdown', (e) => { e.preventDefault(); const input = selected === 0 ? timeIn : dateIn; const m = input.closest('eso-masked-input').getAttribute('mask'); let digits = input.value.replace(/\D/g, ''); const c = b.dataset.char; digits = c === 'clear' ? '' : c === 'back' ? digits.slice(0, -1) : /\d/.test(c) ? digits + c : digits; input.value = maskDigits(digits.slice(0, m.replace(/[^9]/g, '').length), m); if (selected === 1) sel = input.value; }));
     el.querySelector('header button').addEventListener('click', () => {
       const t = timeIn.value, d = dateIn.value;
       const v = /^\d{2}:\d{2}:\d{2}$/.test(t) && /^\d{2}\/\d{2}\/\d{4}$/.test(d) ? `${d} ${t}` : null;
