@@ -597,7 +597,8 @@ test('quick history chips: tap several, one open of ESO\'s Add History list tick
   assert.ok(all[0].rect.left > btn.right, 'first chip sits to the right of Add History');
   assert.ok(all.some(c => c.rect.top > btn.bottom), 'later chips wrap under the button');
   assert.ok(all.every(c => c.rect.bottom < next.top), 'no chip sits on the next field: the button made room');
-  const tap = async (name) => { await waitFor(() => T.page.evaluate((n) => !!Array.from(window.__qa('.quick .chip')).find(x => x.title === n), name), { label: 'chip ' + name }); await T.page.evaluate((n) => { Array.from(window.__qa('.quick .chip')).find(x => x.title === n).click(); }, name); };
+  // found and tapped in one step: the chips are redrawn with every status, so a chip found a moment ago may be gone
+  const tap = async (name) => { await waitFor(() => T.page.evaluate((n) => { const c = Array.from(window.__qa('.quick .chip')).find(x => x.title === n); if (!c) return false; c.click(); return true; }, name), { label: 'chip ' + name }); };
   // each tap goes straight into ESO's list: open, tick, OK. Two quick taps may share one open.
   await tap('Hypertension (HTN)');
   await tap('Diabetes');
@@ -632,7 +633,8 @@ test('quick chips for medications and allergies work the same way, and every qui
   await app(() => window.app.openTab('Patient'));
   const chips = () => T.page.evaluate(() => Array.from(window.__qa('.quick .chip')).map(c => ({ short: c.textContent, name: c.title, cls: c.className, rect: c.getBoundingClientRect().toJSON() })));
   await waitFor(async () => (await chips()).length >= 55, { label: 'all three groups drawn' });
-  const tap = async (name) => { await waitFor(() => T.page.evaluate((n) => !!Array.from(window.__qa('.quick .chip')).find(x => x.title === n), name), { label: 'chip ' + name }); await T.page.evaluate((n) => { Array.from(window.__qa('.quick .chip')).find(x => x.title === n).click(); }, name); };
+  // found and tapped in one step: the chips are redrawn with every status, so a chip found a moment ago may be gone
+  const tap = async (name) => { await waitFor(() => T.page.evaluate((n) => { const c = Array.from(window.__qa('.quick .chip')).find(x => x.title === n); if (!c) return false; c.click(); return true; }, name), { label: 'chip ' + name }); };
   // meds: the exact names win over lookalikes ("Insulin" not "Insulin Detemir")
   await tap('Lisinopril'); await tap('Insulin');
   await waitFor(async () => ((await T.record(id)).tree.patient?.patientMedications || []).length === 2, { label: 'two meds on ESO', timeout: 15000 });
@@ -688,7 +690,7 @@ test('quick transport: chips after each transport field pick in ESO\'s list; a f
   const fld = await T.page.evaluate(() => document.querySelector('eso-field[data-field-ref=HOWPATIENTWASMOVEDTOSTRETCHERIDS]').getBoundingClientRect().toJSON());
   const c0 = (await chips('toStretcher'))[0];
   assert.ok(c0.rect.top >= lab.bottom && Math.abs(c0.rect.left - fld.left) < 4 && c0.rect.right <= fld.right, 'first chip sits under the label, inside the field width');
-  const tap = async (name) => { await waitFor(() => T.page.evaluate((n) => { const c = Array.from(window.__qa('.quick .chip')).find(x => x.title === n); return !!c && !/busy/.test(c.className); }, name), { label: 'chip ' + name }); await T.page.evaluate((n) => { Array.from(window.__qa('.quick .chip')).find(x => x.title === n).click(); }, name); };
+  const tap = async (name) => { await waitFor(() => T.page.evaluate((n) => { const c = Array.from(window.__qa('.quick .chip')).find(x => x.title === n); if (!c || /busy/.test(c.className)) return false; c.click(); return true; }, name), { label: 'chip ' + name }); };
   await tap('Lifted to stretcher via draw-sheet');
   const rec = await waitFor(async () => { const r = await T.record(id); return (r.tree.narrative?.patientTransport?.howPatientWasMovedToStretcherIds || []).length ? r : null; }, { label: 'to-stretcher saved by the app', timeout: 15000 });
   assert.deepEqual(rec.tree.narrative.patientTransport.howPatientWasMovedToStretcherIds.map(Number), [15113]);
