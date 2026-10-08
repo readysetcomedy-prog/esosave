@@ -112,6 +112,11 @@ to bad signal or a hung page.
   paramedic on the crew makes the unit ALS, whatever they run it as; otherwise BLS. A unit named
   NT… is non-transport. Set once the unit is known (the CAD import brings it), once per crew and
   unit, again when either changes. Under the CAD gate's setting.
+- **Don't use ESO Save.** The first thing under Settings, each login's own: ticked, the card stays
+  folded and grey for them and nothing the extension does runs (no quick buttons, templates,
+  copies, scanner, call times, validation outlines, fax prompt or offline holding; their saves go
+  straight to ESO), on any tablet they sign in to, until they untick it. A tap on the folded card
+  opens Settings. Changes held before it was ticked still push, since they are real saves.
 - **Agency settings.** A locked setting is the agency's: one agency row in the table, read by
   every tablet, greyed out for the crew. Which settings are locked is itself the agency's choice,
   made under Management; the original block (retention, tab warm-up, call times, fax prompt, Not

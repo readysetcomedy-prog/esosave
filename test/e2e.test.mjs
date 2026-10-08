@@ -2503,3 +2503,51 @@ test('templates: one made by the crew is pending, unusable even by its owner, un
     await T.control({ userName: 'TEST, MEDIC', userId: 'person-1' });
   }
 });
+
+test('Don\'t use ESO Save: ticked at the top of Settings, it is saved to the login; the card stays folded and nothing is recorded or added for them; unticked, everything is back', async () => {
+  const db = () => fetch(T.base + '/__db_dump').then(r => r.json());
+  const row = async () => ((await db()).find(r => r.name === 'TEST, MEDIC') || { settings: {} }).settings;
+  await T.control({ userName: 'TEST, MEDIC', userId: 'person-1' });
+  const id = await freshRun();
+  await signedIn('TEST, MEDIC');
+  await app(() => window.app.openTab('Incident'));
+  await waitFor(() => sr(() => !!window.__q('.quick [data-group]')), { label: 'quick buttons while on' });
+  const before = (await T.run(id)).batches.length;
+  await openSettingsPanel();
+  assert.equal(await sr(() => document.getElementById('esosave-host').shadowRoot.querySelector('#optout').checked), false, 'off by default');
+  assert.equal(await sr(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.panel label.s'))[0].querySelector('input').id), 'optout', 'first thing under Settings');
+  await sr(() => { const r = document.getElementById('esosave-host').shadowRoot; r.querySelector('#optout').checked = true; r.querySelector('[data-act=save-settings]').click(); });
+  await waitFor(async () => (await row()).optOut === true, { label: 'saved to his row' });
+  await waitFor(() => sr(() => { const b = document.getElementById('esosave-host').shadowRoot.querySelector('.bar'); return b.classList.contains('collapsed') && b.classList.contains('off'); }), { label: 'the card folds and greys' });
+  await waitFor(() => sr(() => !window.__q('.quick [data-group]')), { label: 'quick buttons gone' });
+  await sr(() => document.getElementById('esosave-host').shadowRoot.querySelector('.panel [data-act=close]').click());
+  // a save goes straight to ESO and is not recorded
+  await app(() => window.app.edit('incident', 'incident.scene.manualAddress.locationName', 'Off St'));
+  await waitFor(async () => (await T.record(id)).tree.incident?.scene?.manualAddress?.locationName === 'Off St', { label: 'ESO got the save' });
+  await sleep(1500);
+  assert.equal((await T.run(id)).batches.length, before, 'not recorded while off');
+  // a fresh page keeps it off for this login; the folded card opens Settings
+  await T.page.goto(T.url);
+  await waitFor(() => T.page.evaluate(() => !!window.__esosave), { label: 'interceptor' });
+  await app(() => window.app.start());
+  // the folded card carries no name: the status says who, the card says off
+  await waitFor(() => sr(() => { const b = document.getElementById('esosave-host').shadowRoot.querySelector('.bar'); return !!b && b.classList.contains('off'); }), { label: 'still off after a reload', timeout: 20000 });
+  await app(() => window.app.openTab('Incident'));
+  await sleep(1200);
+  assert.equal(await sr(() => !!window.__q('.quick [data-group]')), false, 'no quick buttons on a fresh page either');
+  await sr(() => document.getElementById('esosave-host').shadowRoot.querySelector('.bar').click());
+  await waitFor(() => sr(() => !!document.getElementById('esosave-host').shadowRoot.querySelector('#optout')), { label: 'a tap on the folded card opens Settings' });
+  assert.match(await sr(() => document.getElementById('esosave-host').shadowRoot.querySelector('.panel').textContent), /ESO Save is off for you/);
+  await waitFor(() => sr(() => /signed in as TEST, MEDIC/.test(document.getElementById('esosave-host').shadowRoot.querySelector('.panel').textContent)), { label: 'the login is known before the change is saved' });
+  await waitFor(() => sr(() => document.getElementById('esosave-host').shadowRoot.querySelector('#optout').checked), { label: 'his row\'s choice is on the tablet' });
+  await sr(() => { const r = document.getElementById('esosave-host').shadowRoot; r.querySelector('#optout').checked = false; r.querySelector('[data-act=save-settings]').click(); });
+  await waitFor(async () => (await row()).optOut === false, { label: 'back on in his row' });
+  await waitFor(() => sr(() => !document.getElementById('esosave-host').shadowRoot.querySelector('.bar').classList.contains('off')), { label: 'the card is back' });
+  await sr(() => document.getElementById('esosave-host').shadowRoot.querySelector('.panel [data-act=close]').click());
+  await app(() => window.app.openTab('Incident'));
+  await waitFor(() => sr(() => !!window.__q('.quick [data-group]')), { label: 'quick buttons back' });
+  const id2 = await app(() => window.app.recordId);
+  const n2 = (await T.run(id2)).batches.length;
+  await app(() => window.app.edit('incident', 'incident.scene.manualAddress.locationName', 'On St'));
+  await waitFor(async () => (await T.run(id2)).batches.length > n2, { label: 'recorded again' });
+});

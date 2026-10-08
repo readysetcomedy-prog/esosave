@@ -13,7 +13,9 @@ greyed out for the crew; changed only by the agency owner (`ADMIN`) or a manager
 locks (`DEFAULT_LOCKS`: retention, tab warm-up, call times, fax prompt, Not sent list, the
 paperwork question before a lock, the CAD import gate) are what the agency had locked before the
 switch existed; everything else starts open. `tplLocks`, `locks` and `managers` are always the
-agency's (`AGENCY_ONLY`), never a person's and never a switch. The agency row is written by merging
+agency's (`AGENCY_ONLY`), never a person's and never a switch. `optOut` ("Don't use ESO Save") is
+open: with it on, `off()` in both scripts gates everything (the card folds, no quick buttons, no
+prompts, no scan, no outlines, and the app's requests pass straight through unrecorded). The agency row is written by merging
 the named keys over what it holds (`pushAgency(keys)`), never wholesale.
 
 The card's panel shows one view at a time (`panelView`: runs, unsent, settings, management); there

@@ -27,7 +27,7 @@
   if (ext) return;
   if (window.__esosave) return;
 
-  const VERSION = '0.15.25';
+  const VERSION = '0.15.26';
   const API_PREFIX_RE = /^\/ehr\/api\/+/i;
   const FAKE_OK_TEXT = '{"result":"Success","data":[]}';
   const PROBE_PATH = '/ehr/api/thirdpartydata/partners';
@@ -697,6 +697,10 @@
   }
 
   // ------------------------------------------------------------------ request classification
+  // "Don't use ESO Save" (the login's own setting): the app's requests pass straight through,
+  // nothing is recorded or held, no prompt, no scan, no outline. Changes held before stay in the
+  // queue and still push, since they are real saves.
+  const off = () => !!(S.settings && S.settings.optOut === true);
   function classify(method, url) {
     let u;
     try { u = new URL(url, location.href); } catch { return null; }
@@ -734,6 +738,19 @@
         S.xsrf = v;
         if (first && anyHeld()) kick(300); // held changes were waiting on the app's token: push now
       }
+    }
+    if (off()) {
+      // "Don't use ESO Save": the request goes through untouched and nothing is recorded or held;
+      // only who is signed in is read from a view, so the login's own choice can be found again
+      const res = await rawRequest(req);
+      if (kind.type === 'view' && outcome(res) === 'ok') {
+        try {
+          const j = JSON.parse(res.text); const u = j && j.meta && j.meta.user;
+          const who = u && typeof u.fullName === 'string' ? u.fullName.trim() : '';
+          if (who) { const pid = typeof u.agencyPersonId === 'string' ? u.agencyPersonId : null; if (S.user !== who || S.userId !== pid) { S.user = who; S.userId = pid; emit(); } }
+        } catch (e) { /* not JSON */ }
+      }
+      return res;
     }
     if (kind.type !== 'view' && kind.type !== 'autosave' && kind.type !== 'create') maybeLearnCompanion(req);
     switch (kind.type) {
@@ -889,7 +906,7 @@
   }
   // Right after the app locks a run: is there somewhere to send it, and has it gone already?
   async function afterLock(run) {
-    if (S.settings.sendPrompt === false) return;
+    if (off() || S.settings.sendPrompt === false) return;
     const pcrId = run.realId || run.recordId;
     const c = await canSend(pcrId, true);
     if (!c.fax.ok && !c.email.ok) {
@@ -933,9 +950,9 @@
   // Agency-wide: locked runs from the last 15 days that have a fax or email destination and no
   // fax in ESO's history (and no email sent from a device running this extension).
   let unsentTimer = null;
-  function scheduleUnsentScan(delay) { if (S.settings.unsentList === false) return; clearTimeout(unsentTimer); unsentTimer = setTimeout(() => scanUnsent().catch(() => {}), delay == null ? 2000 : delay); }
+  function scheduleUnsentScan(delay) { if (off() || S.settings.unsentList === false) return; clearTimeout(unsentTimer); unsentTimer = setTimeout(() => scanUnsent().catch(() => {}), delay == null ? 2000 : delay); }
   async function scanUnsent() {
-    if (S.settings.unsentList === false || !S.online || S.loggedOut || !S.xsrf || S.scanning) return;
+    if (off() || S.settings.unsentList === false || !S.online || S.loggedOut || !S.xsrf || S.scanning) return;
     S.scanning = true;
     try {
       const rows = [];
@@ -1441,11 +1458,11 @@
     const st = document.createElement('style'); st.id = 'esosave-val-style'; st.textContent = VAL_CSS; (document.head || document.documentElement).appendChild(st);
   }
   function scheduleValidate(run, delay) {
-    if (!run || S.settings.valHighlight === false) return;
+    if (!run || off() || S.settings.valHighlight === false) return;
     clearTimeout(VAL.timer); VAL.timer = setTimeout(() => validateRun(run), delay == null ? 1000 : delay);
   }
   async function validateRun(run) {
-    if (S.settings.valHighlight === false || !S.online || S.loggedOut || !run || run.locked || (run.tmp && !run.realId) || run.pendingCreate) return;
+    if (off() || S.settings.valHighlight === false || !S.online || S.loggedOut || !run || run.locked || (run.tmp && !run.realId) || run.pendingCreate) return;
     if (VAL.busy) { VAL.again = true; return; }
     VAL.busy = true;
     try {
@@ -1477,7 +1494,7 @@
     return m ? { ref: null, address: m } : null;
   }
   function applyValidation() {
-    const on = S.settings.valHighlight !== false && VAL.issues && S.currentRecordId === VAL.recordId;
+    const on = !off() && S.settings.valHighlight !== false && VAL.issues && S.currentRecordId === VAL.recordId;
     const byRef = new Map();
     for (const i of (on ? VAL.issues : [])) {
       if (!i || !i.fieldRef) continue;
@@ -1670,7 +1687,7 @@
       const kind = es.kind;
       const virtualizable = kind && es.async && (rt === '' || rt === 'text' || rt === 'json') && (body == null || typeof body === 'string');
       if (!virtualizable) {
-        if (kind && kind.type === 'record' && kind.method === 'POST' && /^Attachments$/i.test(kind.tail) && typeof FormData !== 'undefined' && body instanceof FormData) {
+        if (!off() && kind && kind.type === 'record' && kind.method === 'POST' && /^Attachments$/i.test(kind.tail) && typeof FormData !== 'undefined' && body instanceof FormData) {
           sendAttachment(this, body, kind); return;
         }
         if (kind) {

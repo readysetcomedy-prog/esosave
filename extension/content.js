@@ -43,7 +43,7 @@
   const sget = (keys) => new Promise(res => storage.get(keys, (v) => res(v || {})));
   const sset = (obj) => new Promise(res => storage.set(obj, () => res()));
   const sremove = (keys) => new Promise(res => storage.remove(keys, () => res()));
-  const DEFAULT_SETTINGS = { valHighlight: true, quickTreatments: true, purgeHoursAfterLock: 0, probeSec: 20, heldProbeSec: 8, warmTabs: true, cardCollapsed: false, showTimes: true, sendPrompt: true, unsentList: true, quickHistory: true, quickMeds: true, quickAllergies: true, quickAcuity: true, quickDelays: true, quickTransport: true, quickAssess: true, quickDisposition: true, autoResponse: true, quickIncident: true, quickMechanism: true, quickFacilities: true, quickNarrative: true, quickPatient: true, quickRefusal: true, autoMileage: true, askBeforeLock: true, cadGate: true, scanDocs: true, vitalCopySkip: [], tplLocks: [], facilitySending: [], facilityDestination: [] };
+  const DEFAULT_SETTINGS = { optOut: false, valHighlight: true, quickTreatments: true, purgeHoursAfterLock: 0, probeSec: 20, heldProbeSec: 8, warmTabs: true, cardCollapsed: false, showTimes: true, sendPrompt: true, unsentList: true, quickHistory: true, quickMeds: true, quickAllergies: true, quickAcuity: true, quickDelays: true, quickTransport: true, quickAssess: true, quickDisposition: true, autoResponse: true, quickIncident: true, quickMechanism: true, quickFacilities: true, quickNarrative: true, quickPatient: true, quickRefusal: true, autoMileage: true, askBeforeLock: true, cadGate: true, scanDocs: true, vitalCopySkip: [], tplLocks: [], facilitySending: [], facilityDestination: [] };
   // The agency's standard facility chips (ids and names from ESO's saved facilities). Every install
   // starts with these; Settings can add or remove per device.
   const FAC = {
@@ -75,7 +75,7 @@
   // every tablet) is itself the agency's choice, made on the Management tab; today's agency block
   // starts locked, the rest open. A person's row carries the open ones; the agency row the locked
   // ones, the lock list, the template locks and the managers.
-  const ALL_SETTINGS = ['purgeHoursAfterLock', 'warmTabs', 'showTimes', 'sendPrompt', 'unsentList', 'askBeforeLock', 'cadGate', 'valHighlight', 'quickTreatments', 'quickHistory', 'quickMeds', 'quickAllergies', 'quickAcuity', 'quickDelays', 'quickTransport', 'quickAssess', 'quickDisposition', 'autoResponse', 'quickIncident', 'quickMechanism', 'quickFacilities', 'quickNarrative', 'quickPatient', 'quickRefusal', 'autoMileage', 'scanDocs', 'vitalCopySkip', 'facilitySending', 'facilityDestination'];
+  const ALL_SETTINGS = ['optOut', 'purgeHoursAfterLock', 'warmTabs', 'showTimes', 'sendPrompt', 'unsentList', 'askBeforeLock', 'cadGate', 'valHighlight', 'quickTreatments', 'quickHistory', 'quickMeds', 'quickAllergies', 'quickAcuity', 'quickDelays', 'quickTransport', 'quickAssess', 'quickDisposition', 'autoResponse', 'quickIncident', 'quickMechanism', 'quickFacilities', 'quickNarrative', 'quickPatient', 'quickRefusal', 'autoMileage', 'scanDocs', 'vitalCopySkip', 'facilitySending', 'facilityDestination'];
   const DEFAULT_LOCKS = ['purgeHoursAfterLock', 'warmTabs', 'showTimes', 'sendPrompt', 'unsentList', 'askBeforeLock', 'cadGate'];
   const AGENCY_ONLY = ['tplLocks', 'locks', 'managers']; // always the agency's: never a person's, never a switch
   const locksIn = (src) => Array.isArray(src && src.locks) ? src.locks.filter(k => ALL_SETTINGS.includes(k)) : DEFAULT_LOCKS.slice();
@@ -104,6 +104,9 @@
     ['approveTemplates', 'Approve templates', 'a template they share is approved as it is saved'],
     ['deleteTemplates', 'Delete templates', 'anyone\'s, from the Templates window or here'],
   ];
+  // "Don't use ESO Save": the login's own choice (saved to their row). With it on, the card stays
+  // folded and nothing the extension does runs for them until they turn it back on.
+  const off = () => settings.optOut === true;
   const managers = () => (settings.managers && typeof settings.managers === 'object' && !Array.isArray(settings.managers)) ? settings.managers : {};
   const myManager = () => (userId && managers()[userId]) || null;
   const can = (perm) => isAdmin() || !!(myManager() && myManager().perms && myManager().perms[perm]);
@@ -313,6 +316,8 @@
     .bar.collapsed.warn .ring { border-color: #b45309; } .bar.collapsed.bad .ring { border-color: #b91c1c; } .bar.collapsed.info .ring { border-color: #1d4ed8; }
     .bar.collapsed .pip { position: absolute; top: -6px; right: -6px; min-width: 20px; height: 20px; border-radius: 10px; background: #b45309; color: #fff; font-size: 12px; font-weight: 700; line-height: 20px; text-align: center; padding: 0 5px; }
     .bar.collapsed.bad .pip { background: #b91c1c; }
+    .bar.collapsed.off { opacity: .55; } .bar.collapsed.off .ring { border-color: #94a3b8; }
+    label.s.top { border: 1px solid #fcd34d; background: #fffbeb; border-radius: 8px; padding: 8px 10px; margin-bottom: 10px; }
     @media (max-width: 640px) { .bar.collapsed { left: 8px; right: auto; bottom: 8px; width: 56px; border-radius: 14px; } }
     .bar .btn { background: rgba(255,255,255,.2); border: 1px solid rgba(255,255,255,.55); color: #fff; border-radius: 6px; padding: 3px 9px; font-size: 12px; font-weight: 600; cursor: pointer; }
     @media (max-width: 640px) { .bar { left: 0; right: 0; bottom: 0; width: auto; border-radius: 0; } }
@@ -417,7 +422,7 @@
     shadow = host.attachShadow({ mode: 'open' });
     const style = document.createElement('style'); style.textContent = CSS; shadow.appendChild(style);
     bar = document.createElement('div'); bar.className = 'bar info';
-    bar.addEventListener('click', (e) => { if (e.target.closest('.btn, .fold')) return; if (settings.cardCollapsed) { setCollapsed(false, true); return; } togglePanel(); });
+    bar.addEventListener('click', (e) => { if (e.target.closest('.btn, .fold')) return; if (off()) { panelView = 'settings'; togglePanel(true); return; } if (settings.cardCollapsed) { setCollapsed(false, true); return; } togglePanel(); });
     shadow.appendChild(bar);
     document.body.appendChild(host);
     renderBar();
@@ -447,6 +452,12 @@
     // held) shows as the ring colour and the count, so the card stays the way the medic left it.
     if (settings.cardCollapsed && lastCls && lastCls !== st.cls && st.cls === 'bad') setCollapsed(false, false);
     lastCls = st.cls;
+    if (off()) {
+      bar.className = 'bar collapsed off';
+      bar.title = `ESO Save is off for ${user || 'this login'} ("Don't use ESO Save", under Settings). Tap to open Settings and turn it back on.`;
+      bar.innerHTML = `<img src="${api.runtime.getURL('icons/logo.png')}" alt="ESO Save"><span class="ring"></span>`;
+      return;
+    }
     if (settings.cardCollapsed) {
       const held = lastStatus && (lastStatus.held || 0);
       const rejected = lastStatus && (lastStatus.rejected || 0);
@@ -498,6 +509,7 @@
     parts.push(`<div class="muted">${s.online ? 'Signal OK' : 'NO SIGNAL'}${s.loggedOut ? ' · logged out' : ''}${s.pushing ? ' · pushing' : ''} · ${nRuns} run${nRuns === 1 ? '' : 's'} on this device` +
       `${user ? ` · signed in as <b>${esc(user)}</b>` : ''}` +
       `${s.hasTemplates ? '' : ' · <span title="Start one run with signal so a blank-run template is saved">no offline new-run template yet</span>'}</div>`);
+    if (off()) parts.push(`<div class="run" style="border-color:#f59e0b;background:#fffbeb"><b>ESO Save is off for you.</b> Nothing is recorded, held, filled or added until you untick "Don't use ESO Save" at the top of Settings.</div>`);
     const u = s.unsent, nUnsent = u ? u.items.length : 0;
     const tab = (v, label) => `<button class="a ${panelView === v ? '' : 'sec'}" data-act="${v}">${label}</button>`;
     parts.push(`<div class="actions tabs">${tab('runs', `Current Runs${nRuns ? ` (${nRuns})` : ''}`)}${settings.unsentList !== false ? tab('unsent', `Faxes Not Sent${nUnsent ? ` (${nUnsent})` : ''}`) : ''}${tab('settings', 'Settings')}${tab('management', `Management${can('approveTemplates') && mgmt.pending && mgmt.pending.length ? ` (${mgmt.pending.length})` : ''}`)}</div>`);
@@ -509,7 +521,7 @@
         const tag = lk ? '<span title="Locked by the agency: the same on every tablet">🔒</span> ' : '';
         const head = d.head ? `<div class="s" style="margin-top:8px;font-weight:700">${esc(d.head)}${user ? ` <span class="muted" style="font-weight:400">· yours, ${esc(user)}: they follow your ESO login to any tablet, unless the agency locked them</span>` : ''}</div>` : '';
         if (d.type === 'number') return head + `<label class="s${dis ? ' locked' : ''}">${tag}${esc(d.before)} <input type="number" min="0" max="720" id="${d.id}" value="${esc(settings[d.k])}" ${dis ? 'disabled' : ''}> ${esc(d.after)}</label>`;
-        if (d.type === 'bool') return head + `<label class="s${dis ? ' locked' : ''}"><input type="checkbox" id="${d.id}" ${settings[d.k] === false ? '' : 'checked'} ${dis ? 'disabled' : ''}> ${tag}${d.label}</label>`;
+        if (d.type === 'bool') return head + `<label class="s${dis ? ' locked' : ''}${d.offByDefault ? ' top' : ''}"><input type="checkbox" id="${d.id}" ${d.offByDefault ? (settings[d.k] === true ? 'checked' : '') : (settings[d.k] === false ? '' : 'checked')} ${dis ? 'disabled' : ''}> ${tag}${d.label}</label>`;
         if (d.type === 'vitals') return head + `<div class="fac${dis ? ' locked' : ''}"><b>${tag}Vitals copy: what the copy button carries over</b><div class="muted" style="font-size:12px;margin:2px 0 4px">Untick anything that changes every time (blood pressure, say) so the copied vital comes in without it and nobody has to erase it.</div>` +
           VITAL_GROUPS.map(([k, label]) => `<label class="s"><input type="checkbox" data-vc="${k}" ${(settings.vitalCopySkip || []).includes(k) ? '' : 'checked'} ${dis ? 'disabled' : ''}> ${esc(label)}</label>`).join('') + `</div>`;
         if (d.type === 'facility') return head + facilityPicker(d.k, d.title);
@@ -785,6 +797,7 @@
   // Settings, in the order the panel shows them: key, the input's id, kind, the long label (HTML)
   // and the short name Management lists. The first seven are the agency's by default.
   const SETTING_DEFS = [
+    { k: 'optOut', id: 'optout', type: 'bool', offByDefault: true, label: '<b>Don\'t use ESO Save.</b> Everything it does is off for me while this is ticked: the card stays folded, no quick buttons, templates, copies, scanner, call times, validation outlines, fax prompt or offline holding, and my saves go straight to ESO. Untick it to have it all back.', short: 'Don\'t use ESO Save' },
     { k: 'purgeHoursAfterLock', id: 'purge', type: 'number', before: 'Clear a run from this device', after: 'hours after it is locked (0 = as soon as the lock is seen)', short: 'Hours a locked run stays on the device' },
     { k: 'warmTabs', id: 'warm', type: 'bool', label: 'Open every tab once, quietly, when a run opens (so tabs you have not touched still work with no signal)', short: 'Open every tab once when a run opens' },
     { k: 'showTimes', id: 'times', type: 'bool', label: "Show the call times (dispatched, en route, on scene, at patient, depart, at destination, transfer) in the empty part of ESO's top bar", short: "Call times in ESO's top bar" },
@@ -854,7 +867,7 @@
       }
       if (agencyKeys.length) pushAgency(agencyKeys);
       layoutQuick();
-      await sset({ settings }); toPage('settings', settings); renderPanel(); renderTimes();
+      await sset({ settings }); toPage('settings', settings); renderBar(); renderPanel(); renderTimes();
       pushUser();
     }
     else if (act === 'management') { panelView = 'management'; if (can('approveTemplates') || can('deleteTemplates')) mgmtLoad(); renderPanel(); }
@@ -950,7 +963,7 @@
     return TAB_LABELS[v] || v.toUpperCase();
   }
   function maybeWarmTabs(s) {
-    if (settings.warmTabs === false || warming) return;
+    if (off() || settings.warmTabs === false || warming) return;
     const id = s.currentRecordId;
     if (!id || warmed.has(id) || !s.online || s.loggedOut) return;
     const run = s.runs.find(r => r.recordId === id);
@@ -1165,7 +1178,7 @@
     const run = s && s.currentRecordId ? s.runs.find(r => r.recordId === s.currentRecordId) : null;
     // only while the page is actually inside that run (ESO keeps the run id in the address)
     const inRun = run && (location.href.includes(run.recordId) || (run.realId && location.href.includes(run.realId)));
-    const bar = settings.showTimes !== false && inRun && !run.locked ? topBarRect() : null;
+    const bar = !off() && settings.showTimes !== false && inRun && !run.locked ? topBarRect() : null;
     if (!bar) { if (timesEl) { timesEl.remove(); timesEl = null; timesKey = ''; } if (squeezed.size) { for (const [el, st] of squeezed) el.setAttribute('style', st); squeezed.clear(); squeezedAt = 0; } return; }
     if (!timesEl) { timesEl = document.createElement('div'); timesEl.className = 'times'; shadow.appendChild(timesEl); }
     const times = run.times || {};
@@ -2339,6 +2352,7 @@
     if (scroller) scrollBase = scrollPos(scroller);
   }
   function layoutQuick() {
+    if (off()) { dropQuick(''); return; }
     try { rebaseLayers(); } catch (e) { /* keep going */ }
     try { placeRides(); } catch (e) { /* keep going */ }
     try { clipLayers(); } catch (e) { /* keep going */ }
@@ -2501,7 +2515,7 @@
   }
   let lockApproved = false;
   guardTap((btn) => {
-    if (!/^Lock Record$/i.test(norm(btn.textContent)) || settings.askBeforeLock === false) return null;
+    if (off() || !/^Lock Record$/i.test(norm(btn.textContent)) || settings.askBeforeLock === false) return null;
     if (lockApproved) { lockApproved = false; return 'through'; }
     return 'ask';
   }, (btn) => askBeforeLock(btn));
@@ -2521,7 +2535,7 @@
   // crew (by the agency's users) includes this ESO login goes through.
   let cadApproved = false;
   guardTap((btn) => {
-    if (!/^Import$/i.test(norm(btn.textContent)) || settings.cadGate === false) return null;
+    if (off() || !/^Import$/i.test(norm(btn.textContent)) || settings.cadGate === false) return null;
     const dlg = btn.closest('eso-modal-dialog');
     if (!dlg || !/CAD Import/i.test(norm(dlg.textContent))) return null;
     if (cadApproved) { cadApproved = false; return 'through'; }
@@ -2595,7 +2609,7 @@
   };
   guardTap((btn) => {
     const mode = norm(btn.textContent);
-    if (!/^(Camera|Add Attachment)$/i.test(mode) || settings.scanDocs === false || !attachmentsDialog(btn)) return null;
+    if (off() || !/^(Camera|Add Attachment)$/i.test(mode) || settings.scanDocs === false || !attachmentsDialog(btn)) return null;
     const run = currentRun(); if (!run || run.locked) return null;
     if (attachApproved) { attachApproved = false; return 'through'; }
     return /^Camera$/i.test(mode) ? 'camera' : 'file';
@@ -2671,6 +2685,7 @@
     watchScans();
   })();
   function onAttached(p) {
+    if (off()) return;
     endVeil();
     if (p.scanId) nativeCall({ type: 'consume', id: p.scanId });
     if (!p.ok) { alert(`ESO Save: could not attach ${p.label}. ${p.error || ''}`); return; }
@@ -3650,7 +3665,7 @@
   }
   // ---------------------------------------------------------------- send after lock
   function showSendPrompt(p) {
-    if (settings.sendPrompt === false || !shadow) return;
+    if (off() || settings.sendPrompt === false || !shadow) return;
     hideVeil();
     const dest = (p.fax.ok ? p.fax : p.email).destinationName || 'the destination';
     veil = document.createElement('div');
