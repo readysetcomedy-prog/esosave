@@ -235,6 +235,13 @@ to bad signal or a hung page.
   were not. Settings lists the groups a vital is made of (blood pressure, pulse, respirations,
   SpO2/EtCO2/CO, glucose and temperature, pain, AVPU, side and posture, GCS, trauma score, ECG):
   untick one and the copy leaves it out, for things that change every time.
+- **Attaching shows what it is doing.** From the moment scanned pages are picked up, or ESO's own
+  dialog starts an upload, a veil says what is attaching and which page it is on, and asks the
+  crew to stay on the page until it says attached. A scan whose upload fails (no signal, a tab
+  left early) is never thrown away: the crew is told it will be tried again, the app's hand-off
+  is a lease that runs out, and the pages go on at the next try without sending any page twice.
+  Once attached, the tab is re-read (back where the crew was), so the Attachments list is fresh
+  the next time the dialog opens instead of after leaving the page.
 - **Not sent list.** Its own view on the card, Faxes Not Sent, with the count on the tab.
 
 Nothing is invented. The extension only replays what ESO's own app tried to send.

@@ -50,32 +50,53 @@ enum Scans {
     }
     static var takenDir: URL? { dir?.appendingPathComponent("taken", isDirectory: true) }
     static func safe(_ id: String) -> String { id.replacingOccurrences(of: "/", with: "").replacingOccurrences(of: "..", with: "") }
-    // Every scan the app left and no tab has claimed yet, oldest first, without the pages.
+    // A claim is a lease: a tab that took a scan and died mid-upload (the crew left the page)
+    // must not strand the pages, so a claimed scan not consumed within the lease is listed again.
+    static let leaseMs: Double = 180000
+    static func read(_ url: URL) -> [String: Any]? {
+        guard let data = try? Data(contentsOf: url), let scan = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return nil }
+        return scan
+    }
+    // Every scan the app left and no tab holds, oldest first, without the pages.
     static func list() -> [[String: Any]] {
-        guard let dir = dir, let names = try? FileManager.default.contentsOfDirectory(atPath: dir.path) else { return [] }
         var out: [[String: Any]] = []
-        for name in names.sorted() where name.hasSuffix(".json") {
-            guard let data = try? Data(contentsOf: dir.appendingPathComponent(name)), let scan = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { continue }
-            var head: [String: Any] = [:]
-            for k in ["id", "type", "record", "incident", "at"] { if let v = scan[k] { head[k] = v } }
-            out.append(head)
+        let now = Date().timeIntervalSince1970 * 1000
+        for (d, claimed) in [(dir, false), (takenDir, true)] {
+            guard let d = d, let names = try? FileManager.default.contentsOfDirectory(atPath: d.path) else { continue }
+            for name in names.sorted() where name.hasSuffix(".json") {
+                guard let scan = read(d.appendingPathComponent(name)) else { continue }
+                if claimed, let t = scan["takenAt"] as? Double, now - t < leaseMs { continue }
+                var head: [String: Any] = [:]
+                for k in ["id", "type", "record", "incident", "at"] { if let v = scan[k] { head[k] = v } }
+                out.append(head)
+            }
         }
         return out
     }
-    // One tab takes the scan: the file moves aside so no other tab lists it again. A facesheet
-    // gets its text read here, once.
+    // One tab takes the scan: the file moves aside so no other tab lists it again while the lease
+    // runs. A facesheet gets its text read here, once; a scan taken again keeps the text it had.
     static func claim(_ id: String) -> [String: Any]? {
         guard let dir = dir, let taken = takenDir else { return nil }
         let from = dir.appendingPathComponent(safe(id) + ".json"), to = taken.appendingPathComponent(safe(id) + ".json")
         try? FileManager.default.createDirectory(at: taken, withIntermediateDirectories: true)
-        guard (try? FileManager.default.moveItem(at: from, to: to)) != nil else { return nil }
-        guard let data = try? Data(contentsOf: to), var scan = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return nil }
+        var again = false
+        if FileManager.default.fileExists(atPath: from.path) {
+            guard (try? FileManager.default.moveItem(at: from, to: to)) != nil else { return nil }
+        } else {
+            guard let old = read(to) else { return nil }
+            let now = Date().timeIntervalSince1970 * 1000
+            if let t = old["takenAt"] as? Double, now - t < leaseMs { return nil } // another tab holds it
+            again = true
+        }
+        guard var scan = read(to) else { return nil }
+        scan["takenAt"] = Date().timeIntervalSince1970 * 1000
+        scan["takenBefore"] = again
         if (scan["type"] as? String) == "Facesheet", scan["text"] == nil, let pages = scan["pages"] as? [String] {
             var text = ""
             for p in pages { if let d = Data(base64Encoded: p), let img = UIImage(data: d) { text += OCR.text(of: img) + "\n" } }
             scan["text"] = text
-            if let d = try? JSONSerialization.data(withJSONObject: scan) { try? d.write(to: to) }
         }
+        if let d = try? JSONSerialization.data(withJSONObject: scan) { try? d.write(to: to) }
         return scan
     }
     static func consume(_ id: String) {

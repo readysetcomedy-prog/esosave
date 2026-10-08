@@ -193,6 +193,10 @@
       if (panelOpen && (panelView === 'settings' || panelView === 'management')) renderPanel(); layoutQuick();
     } else if (type === 'event' && payload && payload.name === 'attached') {
       onAttached(payload);
+    } else if (type === 'event' && payload && payload.name === 'attachStart') {
+      onAttachStart(payload);
+    } else if (type === 'event' && payload && payload.name === 'attachProgress') {
+      onAttachProgress(payload);
     } else if (type === 'event' && payload && payload.name === 'facesheetFilled') {
       onFacesheetFilled(payload);
     } else if (type === 'catalog' && payload && Array.isArray(payload.fields)) {
@@ -2645,7 +2649,7 @@
   }
   function watchScans() {
     if (scanPoll) return;
-    scanPoll = setInterval(pollScans, 4000);
+    scanPoll = setInterval(pollScans, 1500);
     pollScans();
   }
   let pollingScans = false;
@@ -2659,8 +2663,10 @@
       const listed = r && Array.isArray(r.scans) ? r.scans : [];
       for (const item of listed) {
         if (!item || !item.id) continue;
+        if (pendingScan && pendingScan.uploading === item.id) continue; // its pages are on their way now
         // claimed before it is used: two ESO tabs (the one the scan left from and the one the
-        // app's Attach button opened) never attach the same pages twice
+        // app's Attach button opened) never attach the same pages twice. The claim is a lease:
+        // a tab that dies mid-upload lets the scan be listed again, so no pages are ever lost
         const c = await nativeCall({ type: 'claim', id: item.id });
         const sc = c && c.scan; if (!sc) continue;
         if (!Array.isArray(sc.pages) || !sc.pages.length) { nativeCall({ type: 'consume', id: sc.id }); continue; }
@@ -2671,9 +2677,11 @@
         if (!recordId) { nativeCall({ type: 'consume', id: sc.id }); continue; }
         const label = (p && p.label) || `${(run && run.incidentNumber) || sc.incident || 'run'}:${type}`;
         const pagesBlobs = sc.pages.map(b64 => { try { const bin = atob(b64); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return new Blob([u], { type: 'image/jpeg' }); } catch (e) { return null; } }).filter(Boolean);
-        lateVeil('Attaching…', `${label}${pagesBlobs.length > 1 ? ` (${pagesBlobs.length} pages)` : ''}`, 0);
-        toPage('action', { name: 'attachUpload', recordId, label, type, replace: !!(p && p.replace), pages: pagesBlobs, text: sc.text || null, ext: 'jpg', scanId: sc.id });
-        if (p) { pendingScan = null; sset({ pendingScan: null }); }
+        showVeilMessage(`Attaching ${label}…`, `${pagesBlobs.length > 1 ? pagesBlobs.length + ' pages' : '1 page'} going onto the run. Stay on this page until it says attached.`);
+        const retry = !!(sc.takenAt && sc.takenBefore);
+        toPage('action', { name: 'attachUpload', recordId, label, type, replace: !!(p && p.replace), pages: pagesBlobs, text: sc.text || null, ext: 'jpg', scanId: sc.id, retry });
+        // the scan stays pending until ESO has every page, so a page left early is tried again
+        if (p) { pendingScan = { ...p, uploading: sc.id }; sset({ pendingScan }); }
       }
     } finally { pollingScans = false; }
     if (!pendingScan) { clearInterval(scanPoll); scanPoll = null; }
@@ -2687,12 +2695,29 @@
     if (pendingScan.back && pendingScan.back === location.href && ON_ESO) { try { api.runtime.sendMessage({ type: 'closeTwins', url: location.href }, () => { void api.runtime.lastError; }); } catch (e) { /* ignore */ } }
     watchScans();
   })();
-  function onAttached(p) {
+  function onAttachStart(p) { if (off()) return; showVeilMessage('Attaching…', `${p.label || 'the attachment'} is going onto the run. Stay on this page until it says attached.`); }
+  function onAttachProgress(p) { if (off()) return; showVeilMessage(`Attaching ${p.label}…`, `Page ${p.page} of ${p.pages}. Stay on this page until it says attached.`); }
+  async function onAttached(p) {
     if (off()) return;
     endVeil();
+    if (!p.ok) {
+      // the scan is kept: it is tried again when the claim runs out (a lost signal, a tab that was left)
+      if (p.source === 'scan') { if (pendingScan && pendingScan.uploading === p.scanId) { pendingScan = { ...pendingScan, uploading: null }; sset({ pendingScan }); } notice(`${p.label} not attached yet`, `${p.error || 'ESO did not take it.'} It will be tried again shortly; stay on this page.`, 6000); }
+      else alert(`ESO Save: could not attach ${p.label}. ${p.error || ''}`);
+      return;
+    }
     if (p.scanId) nativeCall({ type: 'consume', id: p.scanId });
-    if (!p.ok) { alert(`ESO Save: could not attach ${p.label}. ${p.error || ''}`); return; }
-    if (p.source === 'scan') notice(`${p.label} attached`, `${p.pages > 1 ? p.pages + ' pages are' : 'It is'} on the run. Reopen Attachments to see ${p.pages > 1 ? 'them' : 'it'}.`);
+    if (pendingScan && (pendingScan.uploading === p.scanId || pendingScan.recordId === p.recordId)) { pendingScan = null; sset({ pendingScan: null }); }
+    if (p.source === 'scan') {
+      // ESO's Attachments list is what it loaded when the dialog opened: the tab is re-read so the
+      // list is fresh when the dialog is opened again (the page comes back where it was)
+      showVeilMessage(`${p.label} attached`, 'Refreshing the page so it shows…');
+      try { const dlg = document.querySelector('eso-modal-dialog'); const x = dlg && dlg.querySelector('button.close, .close-btn, [aria-label="Close"], header .close'); if (x && visible(x)) x.click(); } catch (e) { /* no dialog */ }
+      const here = Object.keys(TAB_LABELS).find(v => onTab(v));
+      if (here) await reloadTab(here);
+      hideVeil();
+      notice(`${p.label} attached`, `${p.pages > 1 ? p.pages + ' pages are' : 'It is'} on the run. Open Attachments to see ${p.pages > 1 ? 'them' : 'it'}.`, 4000);
+    }
     if (p.type === 'Facesheet' && p.file) onFacesheet(p);
   }
   // ---- the facesheet: read (the app's text recognition on an iPad: a scan carries its text, an

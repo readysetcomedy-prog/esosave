@@ -1674,6 +1674,9 @@ test('paperwork on an iPad: Camera hops to the ESO Save scanner and the pages co
   await waitFor(() => T.page.evaluate(() => /attached/.test((document.getElementById('esosave-host').shadowRoot.querySelector('.veil') || {}).textContent || '')), { label: 'the notice' });
   // a facesheet replacing one that came back: the old one goes
   await waitFor(async () => ((await T.status()).runs.find(r => r.recordId === id) || {}).attachments?.length === 2, { label: 'extension knows the list' });
+  // the tab was re-read after the attach (so the list is fresh), which closed the dialog: open it again
+  const openDialog = async () => { await waitFor(() => T.page.evaluate(() => !(document.getElementById('esosave-host').shadowRoot.querySelector('.veil .box') || {}).textContent?.includes('Refreshing')), { label: 'refresh done' }); if (!(await app(() => !!document.querySelector('eso-modal-dialog .camera')))) await app(() => document.getElementById('attachments').click()); await waitFor(() => app(() => !!document.querySelector('eso-modal-dialog .camera')), { label: 'Attachments dialog again' }); };
+  await openDialog();
   await app(() => document.querySelector('eso-modal-dialog .camera').click());
   await waitFor(async () => /What is this paperwork/.test((await box()) || ''), { label: 'asked' }); await choose('Facesheet');
   await waitFor(async () => (await native()).opened.length === 2, { label: 'hopped' });
@@ -1683,6 +1686,7 @@ test('paperwork on an iPad: Camera hops to the ESO Save scanner and the pages co
   const fs1 = (await list()).find(a => a.description === `${inc}:Facesheet`).itemId;
   await waitFor(async () => { const r = (await T.status()).runs.find(x => x.recordId === id) || {}; return (r.attachments || []).some(a => a.description === `${inc}:Facesheet`); }, { label: 'extension knows the facesheet' });
   await waitFor(async () => !(await box()), { label: 'no question left over' });
+  await openDialog();
   await app(() => document.querySelector('eso-modal-dialog .camera').click());
   await waitFor(async () => /What is this paperwork/.test((await box()) || ''), { label: 'asked' }); await choose('Facesheet');
   await waitFor(async () => /already attached/.test((await box()) || ''), { label: 'replace question' }); await choose('Replace it');
@@ -2552,4 +2556,41 @@ test('Don\'t use ESO Save: ticked at the top of Settings, it is saved to the log
   const n2 = (await T.run(id2)).batches.length;
   await app(() => window.app.edit('incident', 'incident.scene.manualAddress.locationName', 'On St'));
   await waitFor(async () => (await T.run(id2)).batches.length > n2, { label: 'recorded again' });
+});
+
+test('paperwork on an iPad: a scan whose upload fails is not lost; the crew is told to stay, the claim runs out, and the pages go on at the next try', async () => {
+  const dialogs = []; const onDialog = (d) => { dialogs.push(d.message()); d.dismiss().catch(() => {}); }; T.page.on('dialog', onDialog);
+  try {
+    await T.control({ scanner: true, failAttachments: 1 });
+    await fetch(T.base + '/__native_reset', { method: 'POST' });
+    const id = await freshRun();
+    const inc = (await T.record(id)).incidentNumber;
+    await app(() => window.app.openTab('Incident'));
+    const box = () => T.page.evaluate(() => { const b = document.getElementById('esosave-host').shadowRoot.querySelector('.veil .askbox'); return b ? b.textContent : null; });
+    const choose = (label) => T.page.evaluate((l) => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.askbox button')).find(x => x.textContent.trim() === l).click(), label);
+    const list = async () => (await T.record(id)).attachments;
+    const native = () => fetch(T.base + '/__native_dump').then(r => r.json());
+    const veil = () => T.page.evaluate(() => (document.getElementById('esosave-host').shadowRoot.querySelector('.veil') || {}).textContent || '');
+    await app(() => document.getElementById('attachments').click());
+    await waitFor(() => app(() => !!document.querySelector('eso-modal-dialog .camera')), { label: 'Attachments dialog' });
+    await app(() => document.querySelector('eso-modal-dialog .camera').click());
+    await waitFor(async () => /scanner opens next/.test((await box()) || ''), { label: 'the question' });
+    await choose('Med List');
+    await waitFor(async () => (await native()).opened.length === 1, { label: 'hopped to the app' });
+    const jpeg = Buffer.from('ffd8ffe000104a46494600010100000100010000ffd9', 'hex').toString('base64');
+    // the app leaves two pages; the first upload fails (no signal, a tab left early); the claim is a short lease here
+    await fetch(T.base + '/__native_seed', { method: 'POST', body: JSON.stringify({ lease: 2500, scans: [{ id: 'scan-r', type: 'Med List', record: id, incident: inc, pages: [jpeg, jpeg], at: Date.now() }] }) });
+    await waitFor(async () => /not attached yet[\s\S]*tried again/.test(await veil()), { label: 'told it will be tried again', timeout: 20000 });
+    assert.ok(!(await native()).consumed.includes('scan-r'), 'the scan is kept');
+    assert.equal((await list()).length, 0, 'nothing on the run yet');
+    await waitFor(async () => (await list()).length === 2, { label: 'both pages attached at the next try', timeout: 30000 });
+    assert.deepEqual((await list()).map(a => a.description), [`${inc}:Med List`, `${inc}:Med List`]);
+    await waitFor(async () => (await native()).consumed.includes('scan-r'), { label: 'consumed once it is on the run' });
+    assert.deepEqual((await native()).claimed, ['scan-r', 'scan-r'], 'claimed twice: once per try');
+    await waitFor(async () => /attached[\s\S]*Open Attachments/.test(await veil()), { label: 'the notice', timeout: 15000 });
+    assert.match(await app(() => location.hash), /\/incident$/, 'back on the tab it was on');
+    assert.deepEqual(dialogs, [], 'no alert for a lost upload');
+    // the pending scan is done with: the next page load has nothing to pick up
+    await waitFor(async () => !(await T.storage()).pendingScan, { label: 'nothing pending' });
+  } finally { T.page.off('dialog', onDialog); await T.control({ scanner: false, failAttachments: 0 }); }
 });

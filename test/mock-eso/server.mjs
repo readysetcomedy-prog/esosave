@@ -63,7 +63,7 @@ export function applyToTree(tree, op) {
 
 export function createMockEso() {
   const records = new Map();
-  const control = { loggedOut: false, rejectValue: null, failAutosaves: 0, refuseAutosaves: 0, faxStatus: 'SUCCESS', userName: 'TEST, MEDIC', userId: 'person-1', dbDown: false, scanner: false, log: [] };
+  const control = { loggedOut: false, rejectValue: null, failAutosaves: 0, refuseAutosaves: 0, failAttachments: 0, faxStatus: 'SUCCESS', userName: 'TEST, MEDIC', userId: 'person-1', dbDown: false, scanner: false, log: [] };
   // a stand-in for the extension's settings table (Supabase's REST shape): one row per ESO login
   const dbUsers = new Map();
   const dbTables = { call_log_entries: [], users: [], ambulances: [] }; // the agency's own tables, seeded by tests
@@ -373,15 +373,17 @@ export function createMockEso() {
       if (path === '/__native' && req.method === 'POST') {
         const m = JSON.parse(body || '{}');
         if (m.type === 'ping') return send(200, { ok: true, native: true, scanner: control.scanner !== false });
-        if (m.type === 'scans') return send(200, { scans: native.scans.filter(x => !x.taken).map(x => ({ id: x.id, type: x.type, record: x.record, incident: x.incident, at: x.at })) });
-        if (m.type === 'claim') { const x = native.scans.find(y => y.id === m.id && !y.taken); if (!x) return send(200, { scan: null }); x.taken = true; native.claimed.push(m.id); return send(200, { scan: { ...x, taken: undefined } }); }
+        // a claim is a lease: a scan claimed but not consumed within the lease is listed again
+        const free = (x) => !x.takenAt || Date.now() - x.takenAt > (native.lease || 180000);
+        if (m.type === 'scans') return send(200, { scans: native.scans.filter(free).map(x => ({ id: x.id, type: x.type, record: x.record, incident: x.incident, at: x.at })) });
+        if (m.type === 'claim') { const x = native.scans.find(y => y.id === m.id && free(y)); if (!x) return send(200, { scan: null }); const again = !!x.takenAt; x.takenAt = Date.now(); native.claimed.push(m.id); return send(200, { scan: { ...x, takenBefore: again } }); }
         if (m.type === 'consume') { native.scans = native.scans.filter(x => x.id !== m.id); native.consumed.push(m.id); return send(200, { ok: true }); }
         if (m.type === 'open') { native.opened.push(m.url); return send(200, { ok: true }); }
         return send(200, { ok: false });
       }
-      if (path === '/__native_seed' && req.method === 'POST') { const b = JSON.parse(body || '{}'); native.scans.push(...(b.scans || [])); return send(200, { ok: true }); }
+      if (path === '/__native_seed' && req.method === 'POST') { const b = JSON.parse(body || '{}'); native.scans.push(...(b.scans || [])); if (b.lease) native.lease = b.lease; return send(200, { ok: true }); }
       if (path === '/__native_dump') return send(200, native);
-      if (path === '/__native_reset' && req.method === 'POST') { native.scans = []; native.opened = []; native.consumed = []; native.claimed = []; return send(200, { ok: true }); }
+      if (path === '/__native_reset' && req.method === 'POST') { native.scans = []; native.opened = []; native.consumed = []; native.claimed = []; native.lease = 0; return send(200, { ok: true }); }
       if (path === '/__db_seed' && req.method === 'POST') { const b = JSON.parse(body || '{}'); dbTables[b.table] = b.rows || []; return send(200, { ok: true }); }
       // the agency's tables, read the way Supabase's REST answers: ?col=eq.v, ?col=in.(a,b)
       { const m = /^\/__db\/(call_log_entries|users|ambulances)$/.exec(path);
@@ -518,6 +520,7 @@ export function createMockEso() {
       rec.attachments = rec.attachments || [];
       if (tail === 'Attachments' && req.method === 'GET') return send(200, { data: { model: { attachments: rec.attachments.map(a => ({ ...a, bytes: undefined })), incidentNumber: rec.incidentNumber } }, meta: { state: rec.state, user: { agencyPersonId: control.userId, claims: ['CREW'], fullName: control.userName } }, responseStatus: null });
       if (tail === 'Attachments' && req.method === 'POST') {
+        if (control.failAttachments > 0) { control.failAttachments--; res.writeHead(503); return res.end(); }
         // multipart, as ESO's dialog sends it: a description part and a file part
         const bm = /boundary=([^;]+)/.exec(req.headers['content-type'] || ''); if (!bm) return send(400, { result: 'Failure', message: 'not multipart' });
         const parts = multipart(raw, bm[1].trim());

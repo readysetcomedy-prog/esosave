@@ -27,7 +27,7 @@
   if (ext) return;
   if (window.__esosave) return;
 
-  const VERSION = '0.15.27';
+  const VERSION = '0.15.28';
   const API_PREFIX_RE = /^\/ehr\/api\/+/i;
   const FAKE_OK_TEXT = '{"result":"Success","data":[]}';
   const PROBE_PATH = '/ehr/api/thirdpartydata/partners';
@@ -1342,6 +1342,7 @@
     if (tag) {
       try { body.set('description', tag.label); } catch (e) { /* not a FormData */ }
       if (tag.replace) await replaceOld(run, tag.label, null);
+      post('event', { name: 'attachStart', recordId: kind.recordId, label: tag.label });
     }
     xhr.addEventListener('loadend', () => {
       if (xhr.status === 0) { setOnline(false, 'request failed'); return; }
@@ -1361,9 +1362,15 @@
     const pages = Array.isArray(a.pages) ? a.pages.filter(p => p instanceof Blob) : [];
     if (!pages.length) { post('event', { name: 'attached', recordId: a.recordId, ok: false, label: a.label, type: a.type, error: 'no pages', source: 'scan', scanId: a.scanId }); return; }
     if (!S.xsrf) { post('event', { name: 'attached', recordId: a.recordId, ok: false, label: a.label, type: a.type, error: 'Open any ESO page first so the extension can see your session.', source: 'scan', scanId: a.scanId }); return; }
+    // a scan tried again after a lost upload: pages already on the run under this label are not sent twice
+    if (a.retry && !a.replace) {
+      const have = (run.attachments || []).filter(x => x.description === a.label).length;
+      if (have >= pages.length) { post('event', { name: 'attached', recordId: a.recordId, ok: true, label: a.label, type: a.type, pages: have, error: null, file: null, text: a.text || null, source: 'scan', scanId: a.scanId }); return; }
+    }
     if (a.replace) await replaceOld(run, a.label, null);
     let n = (run.attachments || []).length, done = 0, error = null;
     for (const page of pages) {
+      post('event', { name: 'attachProgress', recordId: a.recordId, label: a.label, page: done + 1, pages: pages.length });
       const fd = new FormData();
       fd.append('description', a.label);
       fd.append('file', page, `${run.incidentNumber || 'run'}Photo${++n}.${a.ext || 'jpg'}`);
