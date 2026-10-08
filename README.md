@@ -112,6 +112,9 @@ to bad signal or a hung page.
   paramedic on the crew makes the unit ALS, whatever they run it as; otherwise BLS. A unit named
   NT… is non-transport. Set once the unit is known (the CAD import brings it), once per crew and
   unit, again when either changes. Under the CAD gate's setting.
+- **Settings save as they are changed.** No Save button: a tick, an untick or a number typed is
+  saved at once, to the login's row or, for a locked setting, the agency row, and the panel keeps
+  its place instead of jumping back to the top.
 - **Don't use ESO Save.** The first thing under Settings, each login's own: ticked, the card stays
   folded and grey for them and nothing the extension does runs (no quick buttons, templates,
   copies, scanner, call times, validation outlines, fax prompt or offline holding; their saves go

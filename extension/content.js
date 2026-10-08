@@ -528,10 +528,9 @@
         return '';
       };
       const nLocked = SETTING_DEFS.filter(d => isLocked(d.k)).length;
-      parts.push(`<div class="run">` +
-        `<div class="lock">${canA ? `🔓 Settings marked 🔒 are the agency's and apply to every tablet: yours to change here, and to lock or unlock under Management.` : `🔒 marks a setting set by the agency (${nLocked} of them). Those cannot be changed here; the rest are yours.`}</div>` +
-        SETTING_DEFS.map(rowOf).join('') +
-        `<div class="actions"><button class="a" data-act="save-settings">Save</button></div></div>`);
+      parts.push(`<div class="run sview">` +
+        `<div class="lock">Each setting saves the moment it is changed. ${canA ? `Settings marked 🔒 are the agency's and apply to every tablet: yours to change here, and to lock or unlock under Management.` : `🔒 marks a setting set by the agency (${nLocked} of them). Those cannot be changed here; the rest are yours.`}</div>` +
+        SETTING_DEFS.map(rowOf).join('') + `</div>`);
     }
     if (panelView === 'unsent' && settings.unsentList !== false) {
       const items = u ? u.items : [];
@@ -570,7 +569,10 @@
     }
     parts.push(`<p class="muted">Everything here stays on this device until ESO confirms it. Locked runs clear ${Number(settings.purgeHoursAfterLock) ? esc(settings.purgeHoursAfterLock) + ' hour(s) after locking' : 'as soon as the lock is seen'}. Runs untouched for 30 days clear too. Signature images are a backup in case a signature never reaches ESO.</p>`);
     }
+    const keepTop = panel.scrollTop; // a redraw keeps the place on the panel
     panel.innerHTML = parts.join('');
+    panel.scrollTop = keepTop;
+    panel.querySelectorAll('.sview input[id], .sview [data-vc]').forEach(el => el.addEventListener('change', onSettingChange));
     panel.querySelectorAll('.fac .facq').forEach(inp => inp.addEventListener('input', () => {
       const key = inp.closest('.fac').dataset.key; facSearch[key] = inp.value;
       const box = inp.closest('.fac'); const fresh = document.createElement('div'); fresh.innerHTML = facilityPicker(key, box.querySelector('b').textContent);
@@ -658,7 +660,9 @@
   // The agency row is written by merging the named keys over what the row holds now, so two
   // managers' changes do not overwrite each other's. A key no longer locked leaves the row, so a
   // later lock takes the locker's value, never a stale one.
-  async function pushAgency(keys) {
+  let agencyQueue = Promise.resolve();
+  function pushAgency(keys) { const run = () => pushAgencyNow(keys); agencyQueue = agencyQueue.then(run, run); return agencyQueue; }
+  async function pushAgencyNow(keys) {
     const allowed = (k) => isAdmin() || (k === 'managers' ? false : k === 'tplLocks' ? can('lockTemplates') : can('lockSettings'));
     const want = (keys || AGENCY_ONLY.concat(locksIn(settings))).filter(allowed);
     if (!want.length) return;
@@ -845,6 +849,21 @@
         `<div class="facm">${matches.map(f => { const t = typeNameFor(key === 'facilitySending' ? 'locationTypes' : 'destinationTypes', f.typeId); return `<a data-act="fac-add" data-id="${esc(f.id)}">${esc(f.name)}${f.city || t ? ` <span class="muted">${esc([f.city, t].filter(Boolean).join(' · '))}</span>` : ''}</a>`; }).join('')}${q && !matches.length ? '<span class="muted">no saved facility matches</span>' : ''}</div>`
         : '<span class="muted">Open a run first so ESO\'s facility list is loaded.</span>') + '</div>';
   }
+  // a setting changed on the panel: saved at once, to the login's row or, if the agency locked it,
+  // the agency row; the panel is not redrawn, so the place on it is kept
+  async function onSettingChange(e) {
+    const el = e.currentTarget;
+    const d = el.dataset.vc ? SETTING_DEFS.find(x => x.type === 'vitals') : SETTING_DEFS.find(x => x.id === el.id);
+    if (!d || (isLocked(d.k) && !can('lockSettings'))) return;
+    if (d.type === 'number') { const v = Number(el.value); settings[d.k] = Number.isFinite(v) && v >= 0 ? v : 0; }
+    else if (d.type === 'bool') settings[d.k] = !!el.checked;
+    else if (d.type === 'vitals') settings[d.k] = Array.from(panel.querySelectorAll('[data-vc]')).filter(c => !c.checked).map(c => c.dataset.vc);
+    else return;
+    await sset({ settings }); toPage('settings', settings);
+    if (isLocked(d.k)) pushAgency([d.k]); else pushUser();
+    layoutQuick(); renderTimes(); renderBar();
+    if (d.k === 'optOut') renderPanel(); // the notice at the top follows
+  }
   async function onPanelAction(e) {
     const el = e.currentTarget;
     const act = el.dataset.act;
@@ -854,22 +873,6 @@
     else if (act === 'runs') { panelView = 'runs'; renderPanel(); }
     else if (act === 'unsent') { panelView = 'unsent'; renderPanel(); if (!lastStatus || !lastStatus.unsent || Date.now() - lastStatus.unsent.at > 2 * 60 * 1000) toPage('action', { name: 'scanUnsent' }); }
     else if (act === 'settings') { panelView = 'settings'; renderPanel(); }
-    else if (act === 'save-settings') {
-      // the locked settings go to the agency row (for whoever may change them), the open ones to the login's row
-      const canA = can('lockSettings'); const agencyKeys = [];
-      for (const d of SETTING_DEFS) {
-        const lk = isLocked(d.k); if (lk && !canA) continue;
-        if (d.type === 'number') { const v = Number(panel.querySelector('#' + d.id).value); settings[d.k] = Number.isFinite(v) && v >= 0 ? v : 0; }
-        else if (d.type === 'bool') settings[d.k] = !!panel.querySelector('#' + d.id).checked;
-        else if (d.type === 'vitals') settings[d.k] = Array.from(panel.querySelectorAll('[data-vc]')).filter(c => !c.checked).map(c => c.dataset.vc);
-        else continue; // the facility lists are written as they are picked
-        if (lk) agencyKeys.push(d.k);
-      }
-      if (agencyKeys.length) pushAgency(agencyKeys);
-      layoutQuick();
-      await sset({ settings }); toPage('settings', settings); renderBar(); renderPanel(); renderTimes();
-      pushUser();
-    }
     else if (act === 'management') { panelView = 'management'; if (can('approveTemplates') || can('deleteTemplates')) mgmtLoad(); renderPanel(); }
     else if (act === 'toggle-log') { if (openLogs.has(id)) openLogs.delete(id); else openLogs.add(id); renderPanel(); }
     else if (act === 'rescan') { toPage('action', { name: 'scanUnsent' }); }

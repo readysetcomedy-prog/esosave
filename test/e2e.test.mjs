@@ -1375,7 +1375,7 @@ test('settings follow the ESO login: a row per login in the agency table; locked
   const locked = await T.page.evaluate(() => ['#purge', '#warm', '#times', '#sendprompt', '#unsentlist'].map(s => document.getElementById('esosave-host').shadowRoot.querySelector(s).disabled));
   assert.deepEqual(locked, [true, true, true, true, true], 'the agency block cannot be changed');
   assert.match(await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.panel').textContent), /signed in as JONES, ALEX/);
-  await T.page.evaluate(() => { const r = document.getElementById('esosave-host').shadowRoot; r.querySelector('#qhistory').checked = false; r.querySelector('[data-act=save-settings]').click(); });
+  await T.page.evaluate(() => { const r = document.getElementById('esosave-host').shadowRoot; { const i = r.querySelector('#qhistory'); i.checked = false; i.dispatchEvent(new Event('change', { bubbles: true })); } });
   await waitFor(async () => (await db()).find(r => r.name === 'JONES, ALEX').settings.quickHistory === false, { label: 'change reached the row' });
   // another login on the same tablet: their own row, and a run whose crew she is not on is not listed for her
   await T.control({ userName: 'SMITH, JANE', userId: 'person-j' });
@@ -1408,7 +1408,7 @@ test('settings follow the ESO login: a row per login in the agency table; locked
   await waitFor(() => T.page.evaluate(() => !!document.getElementById('esosave-host').shadowRoot.querySelector('.panel [data-act=settings]')), { label: 'panel' });
   await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('[data-act=settings]').click());
   await waitFor(() => T.page.evaluate(() => !!document.getElementById('esosave-host').shadowRoot.querySelector('#qmeds')), { label: 'settings open' });
-  await T.page.evaluate(() => { const r = document.getElementById('esosave-host').shadowRoot; r.querySelector('#qmeds').checked = true; r.querySelector('[data-act=save-settings]').click(); });
+  await T.page.evaluate(() => { const r = document.getElementById('esosave-host').shadowRoot; { const i = r.querySelector('#qmeds'); i.checked = true; i.dispatchEvent(new Event('change', { bubbles: true })); } });
   await sleep(800);
   assert.equal((await db()).find(r => r.name === 'SMITH, JANE').settings.quickMeds, false, 'not written while the table is away');
   assert.equal((await T.storage()).settings.quickMeds, true, 'kept on the tablet');
@@ -1516,7 +1516,7 @@ test('the agency settings: locked for everyone, changed only by the agency owner
   await waitFor(() => T.page.evaluate(() => (document.getElementById('esosave-host').shadowRoot.querySelector('.bar .who') || {}).textContent === 'GASTON, MICHAEL'), { label: 'owner on the card' });
   await openSettings();
   assert.deepEqual(await lockedDisabled(), [false, false, false, false], 'the owner may change the agency block');
-  await T.page.evaluate(() => { const r = document.getElementById('esosave-host').shadowRoot; r.querySelector('#purge').value = '12'; r.querySelector('#asklock').checked = false; r.querySelector('[data-act=save-settings]').click(); });
+  await T.page.evaluate(() => { const r = document.getElementById('esosave-host').shadowRoot; { const i = r.querySelector('#purge'); i.value = '12'; i.dispatchEvent(new Event('change', { bubbles: true })); } { const i = r.querySelector('#asklock'); i.checked = false; i.dispatchEvent(new Event('change', { bubbles: true })); } });
   await waitFor(async () => { const a = (await db()).find(r => r.name === '__agency__'); return a && a.settings.purgeHoursAfterLock === 12 && a.settings.askBeforeLock === false; }, { label: 'agency row written' });
   assert.ok(!('quickHistory' in (await db()).find(r => r.name === '__agency__').settings), 'only the locked settings are the agency\'s');
   // anyone else: greyed out, and the agency row is what their tablet runs with
@@ -1892,12 +1892,12 @@ test("validation highlight: what ESO's validation summary wants is outlined on t
   await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('[data-act=settings]').click());
   await waitFor(() => q('#valhl'), { label: 'settings open' });
   assert.equal(await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('#valhl').disabled), false, 'open to everyone');
-  await T.page.evaluate(() => { const r = document.getElementById('esosave-host').shadowRoot; r.querySelector('#valhl').checked = false; r.querySelector('[data-act=save-settings]').click(); });
+  await T.page.evaluate(() => { const r = document.getElementById('esosave-host').shadowRoot; { const i = r.querySelector('#valhl'); i.checked = false; i.dispatchEvent(new Event('change', { bubbles: true })); } });
   await waitFor(async () => { const c = await cls('CHIEFCOMPLAINTDURATION'); return c && !c.warn && !c.title; }, { label: 'off: no outlines', timeout: 10000 });
   assert.equal(await T.page.evaluate(() => document.querySelectorAll('.esosave-val-err, .esosave-val-warn').length), 0);
   await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('[data-act=settings]').click());
   await waitFor(() => q('#valhl'), { label: 'settings open again' });
-  await T.page.evaluate(() => { const r = document.getElementById('esosave-host').shadowRoot; r.querySelector('#valhl').checked = true; r.querySelector('[data-act=save-settings]').click(); });
+  await T.page.evaluate(() => { const r = document.getElementById('esosave-host').shadowRoot; { const i = r.querySelector('#valhl'); i.checked = true; i.dispatchEvent(new Event('change', { bubbles: true })); } });
   await waitFor(async () => { const c = await cls('CHIEFCOMPLAINTDURATION'); return c && c.warn; }, { label: 'on again: back', timeout: 10000 });
   // a row's issue (a treatment with no provider) names the row, not a field on the tab: nothing else is marked
   assert.equal(await T.page.evaluate(() => Array.from(document.querySelectorAll('.esosave-val-err')).filter(e => e.closest('#narrative')).length), 0, 'nothing red on the narrative tab (the mock keeps the other tabs in the page, hidden)');
@@ -2374,7 +2374,7 @@ test('Management: a locked setting takes the agency value on every tablet and th
   // the owner turns the Delays button off for themselves, then locks it
   await openSettingsPanel();
   assert.equal(await sr(() => document.getElementById('esosave-host').shadowRoot.querySelector('#purge').disabled), false, 'the owner may change the agency block');
-  await sr(() => { const r = document.getElementById('esosave-host').shadowRoot; r.querySelector('#qdelays').checked = false; r.querySelector('[data-act=save-settings]').click(); });
+  await sr(() => { const r = document.getElementById('esosave-host').shadowRoot; { const i = r.querySelector('#qdelays'); i.checked = false; i.dispatchEvent(new Event('change', { bubbles: true })); } });
   await waitFor(async () => ((await db()).find(r => r.name === 'GASTON, MICHAEL') || { settings: {} }).settings.quickDelays === false, { label: 'the owner\'s own row' });
   assert.ok(!('quickDelays' in (await agencyRow())), 'an open setting is not the agency\'s');
   await openMgmt();
@@ -2516,7 +2516,7 @@ test('Don\'t use ESO Save: ticked at the top of Settings, it is saved to the log
   await openSettingsPanel();
   assert.equal(await sr(() => document.getElementById('esosave-host').shadowRoot.querySelector('#optout').checked), false, 'off by default');
   assert.equal(await sr(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.panel label.s'))[0].querySelector('input').id), 'optout', 'first thing under Settings');
-  await sr(() => { const r = document.getElementById('esosave-host').shadowRoot; r.querySelector('#optout').checked = true; r.querySelector('[data-act=save-settings]').click(); });
+  await sr(() => { const r = document.getElementById('esosave-host').shadowRoot; { const i = r.querySelector('#optout'); i.checked = true; i.dispatchEvent(new Event('change', { bubbles: true })); } });
   await waitFor(async () => (await row()).optOut === true, { label: 'saved to his row' });
   await waitFor(() => sr(() => { const b = document.getElementById('esosave-host').shadowRoot.querySelector('.bar'); return b.classList.contains('collapsed') && b.classList.contains('off'); }), { label: 'the card folds and greys' });
   await waitFor(() => sr(() => !window.__q('.quick [data-group]')), { label: 'quick buttons gone' });
@@ -2540,7 +2540,7 @@ test('Don\'t use ESO Save: ticked at the top of Settings, it is saved to the log
   assert.match(await sr(() => document.getElementById('esosave-host').shadowRoot.querySelector('.panel').textContent), /ESO Save is off for you/);
   await waitFor(() => sr(() => /signed in as TEST, MEDIC/.test(document.getElementById('esosave-host').shadowRoot.querySelector('.panel').textContent)), { label: 'the login is known before the change is saved' });
   await waitFor(() => sr(() => document.getElementById('esosave-host').shadowRoot.querySelector('#optout').checked), { label: 'his row\'s choice is on the tablet' });
-  await sr(() => { const r = document.getElementById('esosave-host').shadowRoot; r.querySelector('#optout').checked = false; r.querySelector('[data-act=save-settings]').click(); });
+  await sr(() => { const r = document.getElementById('esosave-host').shadowRoot; { const i = r.querySelector('#optout'); i.checked = false; i.dispatchEvent(new Event('change', { bubbles: true })); } });
   await waitFor(async () => (await row()).optOut === false, { label: 'back on in his row' });
   await waitFor(() => sr(() => !document.getElementById('esosave-host').shadowRoot.querySelector('.bar').classList.contains('off')), { label: 'the card is back' });
   await sr(() => document.getElementById('esosave-host').shadowRoot.querySelector('.panel [data-act=close]').click());
