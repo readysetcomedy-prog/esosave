@@ -235,6 +235,10 @@ to bad signal or a hung page.
   were not. Settings lists the groups a vital is made of (blood pressure, pulse, respirations,
   SpO2/EtCO2/CO, glucose and temperature, pain, AVPU, side and posture, GCS, trauma score, ECG):
   untick one and the copy leaves it out, for things that change every time.
+- **Quick things say nothing.** A quick button, a chip, a copy or Same as LKWT shows no screen and
+  no "done" message: the tab comes back with the copy on it, the boxes show the time. Only work
+  that takes a while and must not be left (attaching pages, a template fill, the facesheet fill)
+  holds the screen and says when it is done. An error is still said.
 - **Attaching shows what it is doing.** From the moment scanned pages are picked up, or ESO's own
   dialog starts an upload, a veil says what is attaching and which page it is on, and asks the
   crew to stay on the page until it says attached. A scan whose upload fails (no signal, a tab

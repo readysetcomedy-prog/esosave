@@ -2444,9 +2444,8 @@
       e.preventDefault(); e.stopPropagation();
       if (copyBusy) return;
       copyBusy = true;
-      showVeilMessage('Copying vital…', 'Entering the same values as a new vital with the current time.');
       toPage('action', { name: 'copyVital', recordId: lastStatus.currentRecordId, time: btn.dataset.time, nth: Number(btn.dataset.nth) });
-      setTimeout(() => { if (copyBusy) { copyBusy = false; hideVeil(); } }, 20000);
+      setTimeout(() => { if (copyBusy) { copyBusy = false; } }, 20000);
     });
     return btn;
   }
@@ -3754,16 +3753,15 @@
   function copyAssessment(rec) {
     if (copyBusy || quickBusy) return;
     copyBusy = true;
-    showVeilMessage('Copying assessment…', 'Entering every finding and comment again as a new assessment with the current time.');
     const time = norm((rec.querySelector('.date-and-time') || {}).textContent || '').slice(-8);
     toPage('action', { name: 'copyAssessment', recordId: lastStatus.currentRecordId, key: rec.getAttribute('data-item-id') || '', time });
-    setTimeout(() => { if (copyBusy) { copyBusy = false; hideVeil(); } }, 20000);
+    setTimeout(() => { if (copyBusy) { copyBusy = false; } }, 20000);
   }
+  // a copy shows nothing of its own: the tab is re-read and comes back with the copy on it
   async function onAssessmentCopied(p) {
-    if (!p.ok) { copyBusy = false; hideVeil(); alert('ESO Save: ' + (p.error || 'could not copy the assessment')); return; }
+    if (!p.ok) { copyBusy = false; alert('ESO Save: ' + (p.error || 'could not copy the assessment')); return; }
     await reloadTab('Assessments');
-    copyBusy = false; hideVeil();
-    notice('Assessment copied', p.held ? 'Entered again with the current time; held until ESO answers.' : 'Entered again with the current time.', 3500);
+    copyBusy = false;
     setTimeout(layoutQuick, 300);
   }
   // Copy a treatment: a button just left of each saved treatment's time on the Flowchart tab
@@ -3784,9 +3782,8 @@
           e.preventDefault(); e.stopPropagation();
           if (copyBusy || quickBusy) return;
           copyBusy = true; layoutTreatmentCopies();
-          showVeilMessage('Copying treatment…', 'Entering the same treatment again with the current time.');
           toPage('action', { name: 'copyTreatment', recordId: lastStatus.currentRecordId, key, time: norm(cell.textContent).slice(-8) });
-          setTimeout(() => { if (copyBusy) { copyBusy = false; hideVeil(); } }, 20000);
+          setTimeout(() => { if (copyBusy) { copyBusy = false; } }, 20000);
         });
         return el;
       });
@@ -3800,10 +3797,9 @@
     for (const [k, el] of quickEls) if (k.startsWith('tc:') && !keep.has(k)) { el.remove(); quickEls.delete(k); }
   }
   async function onTreatmentCopied(p) {
-    if (!p.ok) { copyBusy = false; hideVeil(); alert('ESO Save: ' + (p.error || 'could not copy the treatment')); return; }
+    if (!p.ok) { copyBusy = false; alert('ESO Save: ' + (p.error || 'could not copy the treatment')); return; }
     await reloadTab('FlowchartTreatments');
-    copyBusy = false; hideVeil();
-    notice('Treatment copied', p.held ? 'Entered again with the current time; held until ESO answers.' : 'Entered again with the current time.', 3500);
+    copyBusy = false;
     setTimeout(layoutQuick, 300);
   }
   // Same as LKWT: a button under Onset Time that sets it to the Last Known Well time, as the screen shows it
@@ -3889,10 +3885,9 @@
       b.addEventListener('click', async (e) => {
         e.preventDefault(); e.stopPropagation();
         if (copyBusy || quickBusy) return;
-        copyBusy = true;
-        showVeilMessage('Setting Onset Time…', 'to the same date and time as Last Known Well Time, through ESO\'s own time shelf.');
-        try { const lk = await sameAsLkwUi(); hideVeil(); notice('Onset Time set', `Same as Last Known Well: ${lk.date} ${lk.time}.`, 3000); }
-        catch (err) { hideVeil(); alert('ESO Save: ' + err.message); }
+        copyBusy = true; layoutQuick(); // the button shows busy; the Onset Time boxes show the result, nothing else is said
+        try { await sameAsLkwUi(); }
+        catch (err) { alert('ESO Save: ' + err.message); }
         finally { copyBusy = false; setTimeout(layoutQuick, 300); }
       });
       return b;
@@ -3905,10 +3900,9 @@
     btn.style.visibility = '';
   }
   async function onVitalCopied(p) {
-    if (!p.ok) { copyBusy = false; hideVeil(); alert('ESO Save: ' + (p.error || 'could not copy the vital')); return; }
+    if (!p.ok) { copyBusy = false; alert('ESO Save: ' + (p.error || 'could not copy the vital')); return; }
     await reloadTab('Vitals');
     copyBusy = false;
-    hideVeil();
     if (p.held) setTimeout(() => alert('ESO Save: no signal right now. The copied vital is held on this device and will be pushed to ESO when signal returns.'), 50);
     setTimeout(decorateVitalRows, 300);
   }
