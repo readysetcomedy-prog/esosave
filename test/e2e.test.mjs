@@ -2419,7 +2419,7 @@ test('Management: a locked setting takes the agency value on every tablet and th
   await fetch(T.base + '/__db_set', { method: 'POST', body: JSON.stringify({ ...own, settings: { ...own.settings, quickDelays: true } }) });
 });
 
-test('templates: one made by the crew is pending, unusable even by its owner, until a manager approves it; the approver sees the count and approves it, then everyone sees it; an approver\'s own is approved as saved; the delete permission reaches anyone\'s', async () => {
+test('templates: one the crew shares is pending for others until a manager approves it, usable by its owner meanwhile; a private one needs no approval; the approver sees the count and approves it, then everyone sees it; an approver\'s own is approved as saved; the delete permission reaches anyone\'s', async () => {
   const onDialog = (d) => d.accept().catch(() => {});
   T.page.on('dialog', onDialog);
   try {
@@ -2436,12 +2436,23 @@ test('templates: one made by the crew is pending, unusable even by its owner, un
     await twClick('[data-page=incident]');
     await pick('incident.response.runTypeId', '911 Response (Scene)');
     await sr(() => { const r = document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin input[name=share][value=everyone]'); r.checked = true; r.dispatchEvent(new Event('change', { bubbles: true })); });
-    await waitFor(() => tw('[data-approvalnote]'), { label: 'the editor says it will be pending' });
+    await waitFor(() => tw('[data-approvalnote]'), { label: 'the editor says others see it once approved' });
     await twClick('[data-act=save]');
     const waiting = await waitFor(async () => (await tplDb()).templates.find(t => t.name === 'Waiting room'), { label: 'saved' });
     assert.equal(waiting.approved, false); assert.equal(waiting.share, 'everyone');
-    await waitFor(async () => /Waiting room[\s\S]*pending: it can be used once a manager approves it/.test((await tw('.body')) || ''), { label: 'his list says it is pending' });
-    assert.equal(await sr(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.tplwin .tpl')).find(r => /^Waiting room/.test(r.querySelector('.tn').textContent)).querySelector('[data-act=fill]').disabled), true, 'not his to use until approved');
+    await waitFor(async () => /Waiting room[\s\S]*pending: others see it once a manager approves it[\s\S]*you can use it/.test((await tw('.body')) || ''), { label: 'his list says it is pending for others' });
+    assert.equal(await sr(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.tplwin .tpl')).find(r => /^Waiting room/.test(r.querySelector('.tn').textContent)).querySelector('[data-act=fill]').disabled), false, 'his to use meanwhile');
+    // a private one of his needs no approval
+    await twClick('[data-act=new]');
+    await waitFor(() => sr(() => !!document.getElementById('esosave-host').shadowRoot.querySelector('.tplwin [data-name]')), { label: 'editor' });
+    await twType('[data-name]', 'Just mine');
+    await twClick('[data-page=incident]');
+    await pick('incident.response.runTypeId', '911 Response (Scene)');
+    assert.equal(await tw('[data-approvalnote]'), null, 'no approval note for a private template');
+    await twClick('[data-act=save]');
+    const mine = await waitFor(async () => (await tplDb()).templates.find(t => t.name === 'Just mine'), { label: 'saved' });
+    assert.equal(mine.approved, true, 'a private template is approved as saved');
+    await waitFor(() => tw('[data-act=new]'), { label: 'back on the list' });
     // Jane does not see it yet
     await T.control({ userName: 'SMITH, JANE', userId: 'person-j' });
     await freshRun();

@@ -8,3 +8,5 @@ alter table public.esosave_templates add column if not exists approved_at timest
 -- what already exists: the agency owner's templates stand approved, everyone else's wait
 update public.esosave_templates set approved = true, approved_by = 'GASTON, MICHAEL', approved_at = now()
   where owner_id = 'd4e45fac-ee36-4ac8-bf9a-3fb3e265c0d0' and approved = false;
+-- Approval gates sharing only (2026-10-13): a private template is the person's own
+update public.esosave_templates set approved = true where share = 'private' and approved = false;

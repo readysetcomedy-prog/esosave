@@ -26,10 +26,10 @@ is no export and no push into a new run (a restore goes into the run that is ope
 approveTemplates, deleteTemplates), kept as `managers` in the agency row; `can(perm)` gates every
 use. Template approval: `esosave_templates.approved/approved_by/approved_at`
 (`supabase/esosave_templates_approval.sql`); `tplSave` approves the saver's own when they hold
-approveTemplates; template field locks (`tplLocks`) are set only there (`templateLocksBody`: every
-catalog field by tab, each item as a whole and its parts), never in the editor, which only shows
-them; an unapproved template cannot fill (its owner sees it pending, `tplLoad` hides
-another's), the queue is every row with `approved=is.false`.
+approveTemplates or the template is private; template field locks (`tplLocks`) are set only there
+(`templateLocksBody`: every catalog field by tab, each item as a whole and its parts), never in the
+editor, which only shows them; an unapproved shared template is the owner's to use, hidden from
+others (`tplLoad`), the queue is `approved=is.false&share=neq.private`.
 
 **Before adding any new setting, ask the repo owner whether it is locked or open.** Do not guess.
 
