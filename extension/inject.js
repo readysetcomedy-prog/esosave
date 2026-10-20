@@ -27,7 +27,7 @@
   if (ext) return;
   if (window.__esosave) return;
 
-  const VERSION = '0.15.30';
+  const VERSION = '0.15.31';
   const API_PREFIX_RE = /^\/ehr\/api\/+/i;
   const FAKE_OK_TEXT = '{"result":"Success","data":[]}';
   const PROBE_PATH = '/ehr/api/thirdpartydata/partners';
@@ -982,6 +982,36 @@
     } finally { S.scanning = false; }
   }
   setInterval(() => { if (S.unsent && Date.now() - S.unsent.at > 3600 * 1000) scheduleUnsentScan(0); }, 60 * 1000);
+  // CAD import: is this run number already on a run? ESO's records of the number's own day
+  // (YYMMDD-NNN), a day either side, in every state; the open run itself does not count, since
+  // importing the same CAD entry again is how it gets its updates.
+  async function cadInUse(a) {
+    const reply = (r) => post('event', { name: 'cadInUse', id: a.id, incident: a.incident, ...r });
+    const m = /^(\d{2})(\d{2})(\d{2})-\d+$/.exec(String(a.incident || '').trim());
+    if (!m) return reply({ checked: false, why: 'not a dated run number' });
+    const day = new Date(2000 + Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    if (isNaN(day.getTime())) return reply({ checked: false, why: 'not a date' });
+    const from = new Date(day); from.setDate(from.getDate() - 1); const to = new Date(day); to.setDate(to.getDate() + 1);
+    const search = async (filters) => {
+      const rows = [];
+      for (let index = 0; index < 500; index += 100) {
+        const res = await rawRequest({ method: 'POST', url: apiUrl('/PatientCareRecords/Search'), headers: headersFor(true), timeout: 20000, body: JSON.stringify({ startDate: esoDate(from), endDate: esoDate(to), index, count: 100, filters }) });
+        if (outcome(res) !== 'ok') return { error: outcome(res) === 'net' ? 'net' : summarize(res) };
+        const j = tryJSON(res.text); const page = j && Array.isArray(j.data) ? j.data : [];
+        rows.push(...page); if (page.length < 100) break;
+      }
+      return { rows };
+    };
+    const run = S.runs[a.recordId] || S.runs[S.currentRecordId];
+    let r = await search([]);
+    if (r.error && r.error !== 'net') { if (run) log(run, `The records search with no status filter was refused (${r.error}); the locked runs were checked instead.`, 'warn'); r = await search([{ fieldRef: 'PCRSEARCHSTATUS', itemId: 6, value: [2] }]); }
+    if (r.error) return reply({ checked: false, why: r.error === 'net' ? 'no signal' : r.error });
+    // the open run, by every id it is known by here
+    const owns = new Set([run && run.recordId, run && run.realId, S.currentRecordId, a.recordId].filter(Boolean));
+    const hit = r.rows.find(x => x && !x.deleted && String(x.incidentNumber || '').trim() === String(a.incident).trim() && !owns.has(x.pcrId));
+    if (run) log(run, `CAD import ${a.incident}: ${hit ? 'already on run ' + hit.pcrId : 'not on any other run'} (${r.rows.length} run${r.rows.length === 1 ? '' : 's'} around that day).`);
+    reply({ checked: true, used: !!hit, pcrId: hit ? hit.pcrId : null });
+  }
 
   // ------------------------------------------------------------------ copy a vital
   const VITAL_ITEM_RE = /^vitals\.vitalSigns\.\['[^']+'\]\.(.+)$/;
@@ -1872,6 +1902,7 @@
         else if (a.name === 'catalog') { if (S.catalog) post('catalog', S.catalog); }
         else if (a.name === 'attachTag') { S.attachTag = a.recordId && a.label ? { recordId: a.recordId, label: String(a.label), type: a.type || null, replace: !!a.replace, at: Date.now() } : null; }
         else if (a.name === 'attachUpload') { uploadScan(a); }
+        else if (a.name === 'cadInUse') { cadInUse(a); }
         else if (a.name === 'fillFacesheet') { fillFacesheet(a); }
         else if (a.name === 'fillTemplate') { fillTemplate(a); }
       }

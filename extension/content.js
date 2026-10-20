@@ -43,7 +43,7 @@
   const sget = (keys) => new Promise(res => storage.get(keys, (v) => res(v || {})));
   const sset = (obj) => new Promise(res => storage.set(obj, () => res()));
   const sremove = (keys) => new Promise(res => storage.remove(keys, () => res()));
-  const DEFAULT_SETTINGS = { optOut: false, valHighlight: true, quickTreatments: true, purgeHoursAfterLock: 0, probeSec: 20, heldProbeSec: 8, warmTabs: true, cardCollapsed: false, showTimes: true, sendPrompt: true, unsentList: true, quickHistory: true, quickMeds: true, quickAllergies: true, quickAcuity: true, quickDelays: true, quickTransport: true, quickAssess: true, quickDisposition: true, autoResponse: true, quickIncident: true, quickMechanism: true, quickFacilities: true, quickNarrative: true, quickPatient: true, quickRefusal: true, autoMileage: true, askBeforeLock: true, cadGate: true, scanDocs: true, vitalCopySkip: [], tplLocks: [], facilitySending: [], facilityDestination: [] };
+  const DEFAULT_SETTINGS = { optOut: false, newRecordOff: true, valHighlight: true, quickTreatments: true, purgeHoursAfterLock: 0, probeSec: 20, heldProbeSec: 8, warmTabs: true, cardCollapsed: false, showTimes: true, sendPrompt: true, unsentList: true, quickHistory: true, quickMeds: true, quickAllergies: true, quickAcuity: true, quickDelays: true, quickTransport: true, quickAssess: true, quickDisposition: true, autoResponse: true, quickIncident: true, quickMechanism: true, quickFacilities: true, quickNarrative: true, quickPatient: true, quickRefusal: true, autoMileage: true, askBeforeLock: true, cadGate: true, scanDocs: true, vitalCopySkip: [], tplLocks: [], facilitySending: [], facilityDestination: [] };
   // The agency's standard facility chips (ids and names from ESO's saved facilities). Every install
   // starts with these; Settings can add or remove per device.
   const FAC = {
@@ -75,8 +75,8 @@
   // every tablet) is itself the agency's choice, made on the Management tab; today's agency block
   // starts locked, the rest open. A person's row carries the open ones; the agency row the locked
   // ones, the lock list, the template locks and the managers.
-  const ALL_SETTINGS = ['optOut', 'purgeHoursAfterLock', 'warmTabs', 'showTimes', 'sendPrompt', 'unsentList', 'askBeforeLock', 'cadGate', 'valHighlight', 'quickTreatments', 'quickHistory', 'quickMeds', 'quickAllergies', 'quickAcuity', 'quickDelays', 'quickTransport', 'quickAssess', 'quickDisposition', 'autoResponse', 'quickIncident', 'quickMechanism', 'quickFacilities', 'quickNarrative', 'quickPatient', 'quickRefusal', 'autoMileage', 'scanDocs', 'vitalCopySkip', 'facilitySending', 'facilityDestination'];
-  const DEFAULT_LOCKS = ['purgeHoursAfterLock', 'warmTabs', 'showTimes', 'sendPrompt', 'unsentList', 'askBeforeLock', 'cadGate'];
+  const ALL_SETTINGS = ['optOut', 'purgeHoursAfterLock', 'warmTabs', 'showTimes', 'sendPrompt', 'unsentList', 'askBeforeLock', 'cadGate', 'newRecordOff', 'valHighlight', 'quickTreatments', 'quickHistory', 'quickMeds', 'quickAllergies', 'quickAcuity', 'quickDelays', 'quickTransport', 'quickAssess', 'quickDisposition', 'autoResponse', 'quickIncident', 'quickMechanism', 'quickFacilities', 'quickNarrative', 'quickPatient', 'quickRefusal', 'autoMileage', 'scanDocs', 'vitalCopySkip', 'facilitySending', 'facilityDestination'];
+  const DEFAULT_LOCKS = ['purgeHoursAfterLock', 'warmTabs', 'showTimes', 'sendPrompt', 'unsentList', 'askBeforeLock', 'cadGate', 'newRecordOff'];
   const AGENCY_ONLY = ['tplLocks', 'locks', 'managers']; // always the agency's: never a person's, never a switch
   const locksIn = (src) => Array.isArray(src && src.locks) ? src.locks.filter(k => ALL_SETTINGS.includes(k)) : DEFAULT_LOCKS.slice();
   const isLocked = (k) => locksIn(settings).includes(k);
@@ -103,6 +103,7 @@
     ['lockTemplates', 'Lock and unlock template fields', 'Lock fields in a template\'s editor, and the unlock list here'],
     ['approveTemplates', 'Approve templates', 'a template they share is approved as it is saved'],
     ['deleteTemplates', 'Delete templates', 'anyone\'s, from the Templates window or here'],
+    ['newRecord', 'New Record button', 'ESO\'s New Record button works for them while the agency has it greyed out for everyone else'],
   ];
   // "Don't use ESO Save": the login's own choice (saved to their row). With it on, the card stays
   // folded and nothing the extension does runs for them until they turn it back on.
@@ -110,6 +111,8 @@
   const managers = () => (settings.managers && typeof settings.managers === 'object' && !Array.isArray(settings.managers)) ? settings.managers : {};
   const myManager = () => (userId && managers()[userId]) || null;
   const can = (perm) => isAdmin() || !!(myManager() && myManager().perms && myManager().perms[perm]);
+  // New Record is the one grant the owner does not hold by being the owner: it is off for them too
+  const canNewRecord = () => !!(myManager() && myManager().perms && myManager().perms.newRecord);
   // the agency's tables (the RuralMed site): the call log and its users
   const AGENCY_DB = ON_ESO ? { url: 'https://qkprkwydxbtybaxylhln.supabase.co/rest/v1', key: SYNC.key } : { url: location.origin + '/__db', key: 'test-anon' };
   async function loadAll() {
@@ -193,6 +196,8 @@
       if (panelOpen && (panelView === 'settings' || panelView === 'management')) renderPanel(); layoutQuick();
     } else if (type === 'event' && payload && payload.name === 'attached') {
       onAttached(payload);
+    } else if (type === 'event' && payload && payload.name === 'cadInUse') {
+      const w = pageWaits.get(payload.id); if (w) { pageWaits.delete(payload.id); w(payload); }
     } else if (type === 'event' && payload && payload.name === 'attachStart') {
       onAttachStart(payload);
     } else if (type === 'event' && payload && payload.name === 'attachProgress') {
@@ -813,6 +818,7 @@
     { k: 'unsentList', id: 'unsentlist', type: 'bool', label: 'Keep a list of locked runs from the last 15 days that have a fax or email destination but were never sent', short: 'The Not sent list' },
     { k: 'askBeforeLock', id: 'asklock', type: 'bool', label: 'Before a lock, ask whether the proper paperwork is attached (or not required); No leaves the run open', short: 'Paperwork question before a lock' },
     { k: 'cadGate', id: 'cadgate', type: 'bool', label: "CAD import: only a run the call log shows you on may be imported. Unit Capability and Unit's Level of Care follow the crew's ESO certifications (a paramedic on the crew makes it ALS; a unit named NT… is non-transport)", short: 'CAD import only for your own runs' },
+    { k: 'newRecordOff', id: 'newrec', type: 'bool', label: "ESO's New Record button is greyed out and does nothing, for everyone: a run starts from a CAD import, so no run is ever made without its dispatch number. A manager given New Record under Management keeps the button", short: 'New Record button greyed out' },
     { k: 'quickDelays', id: 'qdelays', type: 'bool', head: 'Quick buttons', label: 'Delays: one "All: None/No Delay" button above the delay fields (Incident tab) that presses ESO\'s own None button on every delay still empty', short: 'Delays: All None' },
     { k: 'quickHistory', id: 'qhistory', type: 'bool', label: 'History: one-tap chips for common conditions under Add History (Patient tab)', short: 'History chips' },
     { k: 'quickMeds', id: 'qmeds', type: 'bool', label: 'Medications: chips for common home meds under Add Medications (Patient tab)', short: 'Medication chips' },
@@ -2561,7 +2567,28 @@
     const ul = nameKey(u.last_name), uf = nameKey(u.first_name);
     return !!last && ul === last && (!first || !uf || uf === first || uf.startsWith(first) || first.startsWith(uf));
   }
+  // a question to the page script answered by an event with the same id
+  const pageWaits = new Map(); let pageAskN = 0;
+  function pageAsk(name, payload, timeout) {
+    return new Promise(res => { const id = 'q' + (++pageAskN); pageWaits.set(id, res); toPage('action', { name, ...payload, id }); setTimeout(() => { if (pageWaits.has(id)) { pageWaits.delete(id); res(null); } }, timeout || 20000); });
+  }
   async function gateCad(btn, incident) {
+    const run = currentRun();
+    // first: a run number already on another run is never imported again (a second patient on
+    // the same call needs its own number from dispatch); the open run may take its own number
+    // again, since that is how it gets the CAD's updates
+    lateVeil('Checking the run number…', incident);
+    const dup = await pageAsk('cadInUse', { recordId: (run && run.recordId) || (lastStatus && lastStatus.currentRecordId) || null, incident }, 25000);
+    if (!dup || (!dup.checked && dup.why !== 'not a dated run number' && dup.why !== 'not a date')) {
+      endVeil();
+      askBox('Could not check the run number', `ESO's records could not be read (${dup && dup.why ? dup.why : 'no answer'}), so it is not known whether ${incident} is already in use. Try again in a moment.`, [['OK', null]]);
+      return;
+    }
+    if (dup.used) {
+      endVeil();
+      askBox('Run number already in use', "This run number is already in use. If you need a second run number for the same call, check imports. If it's not there, ask dispatch to make you another run.", [['OK', null]]);
+      return;
+    }
     lateVeil('Checking the call log…', incident);
     let calls = null, users = [];
     try {
@@ -3673,6 +3700,17 @@
     } catch (e) { alert("ESO Save: could not set the unit's level. " + (e && e.message ? e.message : '')); }
     endVeil(); quickBusy = false; layoutQuick();
   }, 700);
+  // ESO's New Record button (on its records list): greyed out and dead while the agency has it so,
+  // for everyone but a manager given New Record; a run is made from a CAD import instead
+  function blockNewRecord() {
+    const want = !off() && settings.newRecordOff !== false && !canNewRecord();
+    for (const b of document.querySelectorAll('button')) {
+      if (!/^New Record$/i.test(norm(b.textContent))) continue;
+      if (want) { if (!b.dataset.esosaveBlocked) { b.dataset.esosaveBlocked = '1'; b.disabled = true; b.setAttribute('aria-disabled', 'true'); b.style.opacity = '.4'; b.style.cursor = 'not-allowed'; b.title = 'Turned off by the agency: import your run from CAD.'; } }
+      else if (b.dataset.esosaveBlocked) { delete b.dataset.esosaveBlocked; b.disabled = false; b.removeAttribute('aria-disabled'); b.style.opacity = ''; b.style.cursor = ''; b.title = ''; }
+    }
+  }
+  setInterval(blockNewRecord, 700);
   // a question or a notice in our own overlay: [label, value] buttons; the value goes to the callback
   function askBox(title, text, buttons, cb) {
     hideVeil();

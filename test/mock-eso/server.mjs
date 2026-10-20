@@ -310,6 +310,7 @@ export function createMockEso() {
         if ('destination' in b) r.destination = b.destination;
         if ('locked' in b) { r.locked = !!b.locked; r.state = r.locked ? 'locked' : 'draft'; }
         if (b.incidentDateTime) r.incidentDateTime = new Date(b.incidentDateTime);
+        if (b.incidentNumber) r.incidentNumber = b.incidentNumber; // as a CAD import sets it on the real record
         if (Array.isArray(b.crew)) { r.crew = b.crew.map(c => ({ itemId: randomUUID(), firstName: null, lastName: null, rank: 0, ...c })); for (const c of r.crew) r.knownKeys.add(c.itemId); }
         return send(200, { ok: true });
       }

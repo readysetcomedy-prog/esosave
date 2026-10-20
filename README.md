@@ -120,6 +120,16 @@ to bad signal or a hung page.
   copies, scanner, call times, validation outlines, fax prompt or offline holding; their saves go
   straight to ESO), on any tablet they sign in to, until they untick it. A tap on the folded card
   opens Settings. Changes held before it was ticked still push, since they are real saves.
+- **One run number, one run.** A CAD entry whose run number is already on another run is never
+  imported again: ESO's records of that number's own day (a day either side, every state) are
+  checked first, and the crew is told "This run number is already in use. If you need a second run
+  number for the same call, check imports. If it's not there, ask dispatch to make you another
+  run." The run that already holds the number may import it again, which is how it gets the CAD's
+  updates. If ESO's records cannot be read, the import waits rather than guesses.
+- **New Record greyed out.** ESO's New Record button is greyed out and does nothing for everyone,
+  the owner included: a run starts from a CAD import, so no run is ever made without its dispatch
+  number. An agency-locked setting (so it can be unlocked or turned off under Management without a
+  rebuild), and a manager given New Record under Management, by the owner alone, keeps the button.
 - **Agency settings.** A locked setting is the agency's: one agency row in the table, read by
   every tablet, greyed out for the crew. Which settings are locked is itself the agency's choice,
   made under Management; the original block (retention, tab warm-up, call times, fax prompt, Not

@@ -41,6 +41,16 @@ the extension finds the row by id first and renames it when the login name chang
 id. The Management API does run DDL now (the earlier refusals were the policy statements); the
 SQL for these tables was applied from here.
 
+## CAD import and New Record
+
+`gateCad` asks the page (`pageAsk` → `cadInUse` in inject.js) whether the run number is on another
+run: ESO's `PatientCareRecords/Search` over the number's own day ±1 (no status filter; if ESO
+refuses that, the locked-runs filter as a fallback), every state, the open run excluded. A hit
+blocks the import in the owner's words; a failed check blocks too (never guesses). `newRecordOff`
+(agency-locked, default on) greys out and disables ESO's New Record button (`blockNewRecord`) for
+everyone including the owner; the `newRecord` manager permission (`canNewRecord`, not implied by
+being the owner) keeps it.
+
 ## Templates
 
 The field catalog comes from ESO's configuration bundle (`fieldConfigs`: address, fieldRef,

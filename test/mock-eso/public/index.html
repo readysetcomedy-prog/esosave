@@ -54,7 +54,7 @@
 <section id="incident" style="display:none;width:700px;margin-left:48px">
   <div style="height:20px"></div>
   <!-- crew, as ESO lists it in multi-role mode: a row per member (tap = Edit), roles in the aside -->
-  <div><button id="cadimport" class="btn">CAD Import</button> <button id="attachments" class="btn">Attachments</button></div>
+  <div><button id="cadimport" class="btn">CAD Import</button> <button id="attachments" class="btn">Attachments</button> <button id="newpcr" class="btn green-btn workflow-btn" ng-show="appData.config.pcrCreateEnabled" ng-click="newPcr()"> New Record </button></div>
   <crew-list id="crew"></crew-list>
   <div id="response"></div>
   <div id="disposition"></div>

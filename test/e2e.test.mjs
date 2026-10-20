@@ -2605,3 +2605,79 @@ test('paperwork on an iPad: a scan whose upload fails is not lost; the crew is t
     await waitFor(async () => !(await T.storage()).pendingScan, { label: 'nothing pending' });
   } finally { T.page.off('dialog', onDialog); await T.control({ scanner: false, failAttachments: 0 }); }
 });
+
+test('CAD import: a run number already on another run cannot be imported again; the run that holds it may take it again for updates', async () => {
+  const seed = (table, rows) => fetch(T.base + '/__db_seed', { method: 'POST', body: JSON.stringify({ table, rows }) });
+  await seed('users', [{ username: 'tmedic', first_name: 'Medic', last_name: 'Test' }, { username: 'cberg', first_name: 'Chad', last_name: 'Berg' }]);
+  await seed('call_log_entries', [{ runnumber: '260918-017', callsign: 'RM-16', crewmemberone: 'tmedic', crewmembertwo: 'cberg', crewmemberthree: '', cmslevel: 'BLS-E', createdat: '2026-09-18T12:54:00Z' }]);
+  await T.control({ userName: 'TEST, MEDIC', userId: 'person-1' });
+  const box = () => T.page.evaluate(() => { const b = document.getElementById('esosave-host').shadowRoot.querySelector('.veil .askbox'); return b ? b.textContent : null; });
+  const pick = async (incident) => { await app((n) => Array.from(document.querySelectorAll('eso-modal grid-row[data-cad]')).find(r => r.textContent.includes(n)).click(), incident); await app(() => document.querySelector('eso-modal .import').click()); };
+  const openCad = async () => { await app(() => document.getElementById('cadimport').click()); await waitFor(() => app(() => !!document.querySelector('eso-modal .import')), { label: 'CAD dialog' }); };
+  // the first run takes 260918-017 (a run of this login's), dated as dispatch dated it
+  const first = await freshRun();
+  await app(() => window.app.openTab('Incident'));
+  await openCad(); await pick('260918-017');
+  await waitFor(async () => (await app(() => window.app.cadImports)) === 1, { label: 'imported into the first run', timeout: 15000 });
+  await app(() => document.querySelector('eso-modal button').click());
+  await waitFor(async () => (await T.record(first)).tree.incident?.response?.incidentNumber === '260918-017', { label: 'the number is on the first run' });
+  // the mock keeps a record's own number apart from the tree: shape it as the CAD import does on ESO
+  await fetch(T.base + '/__shape/' + first, { method: 'POST', body: JSON.stringify({ incidentDateTime: '2026-09-18T12:54:00Z', incidentNumber: '260918-017' }) });
+  // a second run: the same number is refused, in the words asked for, and ESO never sees the press
+  const second = await freshRun();
+  await app(() => window.app.openTab('Incident'));
+  await openCad(); await pick('260918-017');
+  await waitFor(async () => /This run number is already in use\. If you need a second run number for the same call, check imports\. If it's not there, ask dispatch to make you another run\./.test((await box()) || ''), { label: 'refused, in the words asked for', timeout: 15000 });
+  assert.equal(await app(() => window.app.cadImports), 0, 'ESO never saw the press');
+  assert.equal(await app(() => !!document.querySelector('eso-modal .import')), true, 'the CAD dialog is still there to choose another');
+  await T.page.evaluate(() => document.getElementById('esosave-host').shadowRoot.querySelector('.askbox button').click());
+  await app(() => document.querySelector('eso-modal .cancel').click());
+  assert.ok(/CAD import 260918-017: already on run/.test((await T.run(second)).log.map(l => l.msg).join('\n')), 'the log says which run has it');
+  // the first run again: its own number goes through, as that is how the CAD's updates come in
+  await app((id) => window.app.use(id), first);
+  await waitFor(async () => (await T.status()).currentRecordId === first, { label: 'back on the first run' });
+  await app(() => window.app.openTab('Incident'));
+  await openCad(); await pick('260918-017');
+  try { await waitFor(async () => (await app(() => window.app.cadImports)) === 1, { label: 'imported again into its own run', timeout: 15000 }); }
+  catch (e) { throw new Error(e.message + ' · box: ' + JSON.stringify(await box()) + ' · log: ' + JSON.stringify((await T.run(first)).log.slice(-4).map(l => l.msg)) + ' · current: ' + (await T.status()).currentRecordId + ' first: ' + first); }
+  await app(() => document.querySelector('eso-modal button').click());
+});
+
+test('New Record: ESO\'s button is greyed out and dead for everyone, the owner included; a manager given New Record keeps it; the agency can turn the block off', async () => {
+  const agencyRow = async () => ((await fetch(T.base + '/__db_dump').then(r => r.json())).find(r => r.name === '__agency__') || {}).settings || {};
+  const setAgency = (settings) => fetch(T.base + '/__db_set', { method: 'POST', body: JSON.stringify({ name: '__agency__', settings }) });
+  const state = () => app(() => { const b = document.getElementById('newpcr'); return { disabled: b.disabled, title: b.title, dim: b.style.opacity === '0.4' }; });
+  const base = await agencyRow();
+  try {
+    await setAgency({ ...base, managers: {}, newRecordOff: true });
+    await T.control({ userName: 'TEST, MEDIC', userId: 'person-1' });
+    await freshRun();
+    await waitFor(async () => (await state()).disabled, { label: 'greyed out for the crew' });
+    assert.deepEqual(await state(), { disabled: true, title: 'Turned off by the agency: import your run from CAD.', dim: true });
+    await app(() => document.getElementById('newpcr').click());
+    assert.equal(await app(() => window.app.newPcrClicks), 0, 'a tap does nothing');
+    // the owner too
+    await T.control({ userName: 'GASTON, MICHAEL', userId: 'd4e45fac-ee36-4ac8-bf9a-3fb3e265c0d0' });
+    await freshRun();
+    await waitFor(() => T.page.evaluate(() => (document.getElementById('esosave-host').shadowRoot.querySelector('.bar .who') || {}).textContent === 'GASTON, MICHAEL'), { label: 'owner on the card' });
+    await sleep(1500);
+    assert.equal((await state()).disabled, true, 'greyed out for the owner as well');
+    // a manager given New Record keeps it
+    await setAgency({ ...base, newRecordOff: true, managers: { 'person-1': { name: 'TEST, MEDIC', perms: { newRecord: true } } } });
+    await T.control({ userName: 'TEST, MEDIC', userId: 'person-1' });
+    await freshRun();
+    await waitFor(async () => !!(((await T.storage()).settings.managers || {})['person-1']), { label: 'the grant reached the tablet' });
+    await waitFor(async () => !(await state()).disabled, { label: 'the button works for the manager' });
+    await app(() => document.getElementById('newpcr').click());
+    assert.equal(await app(() => window.app.newPcrClicks), 1, 'and ESO sees the tap');
+    // the agency turns the block off: everyone has it
+    await setAgency({ ...base, managers: {}, newRecordOff: false });
+    await T.control({ userName: 'SMITH, JANE', userId: 'person-j' });
+    await freshRun();
+    await waitFor(async () => (await T.storage()).settings.newRecordOff === false, { label: 'the agency value reached the tablet' });
+    await waitFor(async () => !(await state()).disabled, { label: 'the button works for the crew once the agency says so' });
+  } finally {
+    await setAgency({ ...base, managers: {} });
+    await T.control({ userName: 'TEST, MEDIC', userId: 'person-1' });
+  }
+});

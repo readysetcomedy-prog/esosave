@@ -485,6 +485,8 @@
   // a row per CAD record (tap selects), Import once one is selected, then a success alert whose
   // button refreshes the tab
   app.cads = [{ cadId: 1, dt: '09/18/2026 @16:21:00', incidentNumber: '260918-024', unit: '23' }, { cadId: 2, dt: '09/18/2026 @12:54:00', incidentNumber: '260918-017', unit: '16' }, { cadId: 3, dt: '09/18/2026 @10:07:00', incidentNumber: '260918-031', unit: 'NT02' }, { cadId: 4, dt: '09/17/2026 @11:53:00', incidentNumber: '260917-099', unit: '23' }];
+  app.newPcrClicks = 0;
+  document.getElementById('newpcr').addEventListener('click', () => { app.newPcrClicks++; });
   app.cadImports = 0;
   document.getElementById('cadimport').addEventListener('click', () => {
     const m = document.createElement('eso-modal'); m.setAttribute('modal-type', 'modal');
