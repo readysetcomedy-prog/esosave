@@ -1,5 +1,7 @@
 node_modules/
-ios/
+/ios/
+# the local Expo module's sources are not the generated project
+!modules/**/ios/
 android/
 .expo/
 dist/
