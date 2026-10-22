@@ -1081,7 +1081,7 @@ test('Narrative rows: impressions, care level, duration units and every anatomic
   await tap('sr-primary', 'Chest Pain');
   await waitFor(async () => (await nar()).clinicalImpression?.primaryImpressionId === 582, { label: 'primary impression', timeout: 15000 });
   await tap('sr-secondary', 'SOB');
-  await waitFor(async () => (await nar()).clinicalImpression?.secondaryImpressionId === 630, { label: 'secondary impression', timeout: 15000 });
+  await waitFor(async () => (await nar()).clinicalImpression?.secondaryImpressionId === 631, { label: 'secondary impression: SOB is Shortness of breath', timeout: 15000 });
   await tap('sr-system', 'Neuro'); // ESO shows its own quick-picks here: through its Other button (ESO's name carries a trailing space)
   await waitFor(async () => (await nar()).clinicalImpression?.chiefComplaintOrganSystemId === 7104, { label: 'organ system', timeout: 15000 });
   await tap('sr-anatomic', 'Chest');

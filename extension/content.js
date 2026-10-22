@@ -2066,7 +2066,7 @@
   // once the field is set (ESO's own quick-picks only show while it is empty)
   // Rows of one-tap choices above a single-select field, one tap even once the field is set (ESO's
   // own quick-picks only show while it is empty). [label, ESO's full name, ESO quick-pick label]
-  const IMPRESSIONS = [['Chest Pain', 'Chest Pain / Discomfort'], ['SOB', 'Acute Respiratory Distress (Dyspnea)'], ['Abd Pain', 'Abdominal Pain'], ['AMS', 'Altered Mental Status'], ['Weakness', 'Generalized Weakness'],
+  const IMPRESSIONS = [['Chest Pain', 'Chest Pain / Discomfort'], ['SOB', 'Shortness of breath'], ['Abd Pain', 'Abdominal Pain'], ['AMS', 'Altered Mental Status'], ['Weakness', 'Generalized Weakness'],
     ['Syncope', 'Syncope / Fainting'], ['Seizure', 'Seizures without status epilepticus'], ['Injury', 'Injury'], ['Stroke', 'Stroke'], ['No Complaint', 'No Complaints or Injury/Illness Noted']];
   const SINGLE_ROWS = {
     // Where ESO shows its own quick-picks (and its own Other), the row carries only what ESO does
