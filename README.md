@@ -249,6 +249,14 @@ to bad signal or a hung page.
   no "done" message: the tab comes back with the copy on it, the boxes show the time. Only work
   that takes a while and must not be left (attaching pages, a template fill, the facesheet fill)
   holds the screen and says when it is done. An error is still said.
+- **A facesheet is checked before you leave the app.** The ESO Save app reads the scanned
+  facesheet itself, right after the scan, and shows what the fill will put on the Patient page
+  (Name, DOB, Sex, Address and the rest) and, in red, what it could not find. Scan it again, or
+  "Scan again and combine", which keeps what the first read found and adds what the next one
+  finds; the better page is the one attached. The reading is done twice (as printed, and with
+  spelling correction and the facesheet labels taught as words), small print is enlarged first,
+  and the fill takes the first value it finds for each label; nothing is ever guessed, a label
+  not read is left for the crew. The read text rides with the scan, so attaching is quicker.
 - **Attaching shows what it is doing.** From the moment scanned pages are picked up, or ESO's own
   dialog starts an upload, a veil says what is attaching and which page it is on, and asks the
   crew to stay on the page until it says attached. A scan whose upload fails (no signal, a tab

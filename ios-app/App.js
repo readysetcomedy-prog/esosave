@@ -3,6 +3,8 @@ import { StatusBar } from 'expo-status-bar';
 import { Image, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import DocumentScanner, { ResponseType } from 'react-native-document-scanner-plugin';
 import { Directory, File, Paths } from 'expo-file-system';
+import EsosaveOcr from './modules/esosave-ocr';
+const FS = require('./facesheet.js'); // the same reader the extension fills from
 
 // The app carries the ESO Save extension for Safari, and lends it a document scanner: the
 // extension opens esosave://scan?type=…&record=…&incident=…&pages=N from ESO's Attachments
@@ -42,31 +44,72 @@ function parseScanUrl(url) {
   const back = /^https:\/\/(www\.)?esosuite\.net\//i.test(q.back || '') ? q.back : 'https://www.esosuite.net/ehr/';
   return { type: q.type || 'Other', record: q.record || '', incident: q.incident || '', pages: Math.max(1, Math.min(20, Number(q.pages) || 1)), back };
 }
-function saveScan(req, pages) {
+function saveScan(req, pages, text) {
   const dir = scansDir();
   const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const f = new File(dir, id + '.json');
-  f.write(JSON.stringify({ id, type: req.type, record: req.record, incident: req.incident, at: Date.now(), pages }));
+  f.write(JSON.stringify({ id, type: req.type, record: req.record, incident: req.incident, at: Date.now(), pages, ...(text ? { text } : {}) }));
   return id;
+}
+// a scan not yet taken by the extension is dropped (the crew scanned it again)
+function dropScan(id) {
+  try { const f = new File(scansDir(), id + '.json'); if (f.exists) f.delete(); } catch (e) { /* taken already, or gone */ }
+}
+// the text on the pages, as the extension would read it, read here instead so the crew sees it now
+async function readPages(pages) {
+  if (!EsosaveOcr) return null;
+  const texts = [];
+  for (const p of pages) { try { texts.push(await EsosaveOcr.read(p)); } catch (e) { texts.push(''); } }
+  return texts.join('\n');
+}
+// what a facesheet read gives: the lines the fill would write, and what it could not find
+const WANT = [['Name', /^Name:/], ['Date of birth', /^DOB:/], ['Sex', /^Sex:/], ['Address', /^Address/], ['Phone', /phone/i], ['SSN', /^SSN:/]];
+function assess(text) {
+  const plan = FS.facesheetPlan(FS.parseFacesheet(text || ''), null);
+  const lines = plan.lines || [];
+  const missing = WANT.filter(([, re]) => !lines.some(l => re.test(l))).map(([n]) => n);
+  return { lines, missing, skipped: plan.skipped || [] };
 }
 
 export default function App() {
   const [scan, setScan] = useState(null);   // the request from Safari
-  const [state, setState] = useState('idle'); // idle | scanning | done | cancelled | error
+  const [state, setState] = useState('idle'); // idle | scanning | reading | done | cancelled | error
   const [count, setCount] = useState(0);
   const [error, setError] = useState('');
+  const [review, setReview] = useState(null); // a facesheet: what was read, what was not
   const busy = useRef(false);
+  const shots = useRef([]);   // a facesheet's reads so far: { pages, text, n }
+  const savedId = useRef(null);
 
-  async function runScanner(req) {
+  // combine: a second scan of the same facesheet, its text joined after the better read, so the
+  // fill finds every label either read gave (the first value wins, nothing is guessed)
+  async function runScanner(req, combine) {
     if (busy.current) return;
     busy.current = true;
     setScan(req); setState('scanning'); setError('');
+    if (!combine) { shots.current = []; setReview(null); }
     try {
-      const r = await DocumentScanner.scanDocument({ responseType: ResponseType.Base64, croppedImageQuality: 85, maxNumDocuments: req.pages });
-      const pages = (r && r.scannedImages) || [];
-      if (r && r.status === 'cancel' || !pages.length) { setState('cancelled'); return; }
-      saveScan(req, pages.slice(0, req.pages));
-      setCount(pages.length); setState('done');
+      const r = await DocumentScanner.scanDocument({ responseType: ResponseType.Base64, croppedImageQuality: 90, maxNumDocuments: req.pages });
+      const pages = ((r && r.scannedImages) || []).slice(0, req.pages);
+      if (r && r.status === 'cancel' || !pages.length) { if (!shots.current.length) setState('cancelled'); else setState('done'); return; }
+      let text = null;
+      if (req.type === 'Facesheet' && EsosaveOcr) {
+        setState('reading');
+        const t = await readPages(pages);
+        shots.current.push({ pages, text: t || '', n: assess(t).lines.length });
+        const best = shots.current.slice().sort((a, b) => b.n - a.n);
+        text = best.map(x => x.text).join('\n');
+        const a = assess(text);
+        setReview({ ...a, reads: shots.current.length });
+        if (savedId.current) dropScan(savedId.current);
+        savedId.current = saveScan(req, best[0].pages, text);
+        setCount(best[0].pages.length);
+      } else {
+        if (savedId.current) dropScan(savedId.current);
+        savedId.current = saveScan(req, pages);
+        setCount(pages.length);
+      }
+      setState('done');
     } catch (e) {
       setError(String((e && e.message) || e)); setState('error');
     } finally { busy.current = false; }
@@ -97,7 +140,25 @@ export default function App() {
         <Image source={require('./assets/icon.png')} style={styles.logo} />
         <Text style={styles.scanTitle}>ESO Save</Text>
         {state === 'scanning' && <Text style={styles.scanLead}>Scanning {scan.type}{scan.incident ? ` for ${scan.incident}` : ''}…</Text>}
-        {state === 'done' && (
+        {state === 'reading' && <Text style={styles.scanLead}>Reading the facesheet…</Text>}
+        {state === 'done' && review && (
+          <>
+            <Corner>Tap ◀ Safari up here to go back to ESO</Corner>
+            <Text style={styles.scanLead}>Read from the facesheet{review.reads > 1 ? ` (${review.reads} scans combined)` : ''}:</Text>
+            <View style={styles.readBox}>
+              {review.lines.length ? review.lines.map((l, i) => <Text key={i} style={styles.readLine}>✓ {l}</Text>) : <Text style={styles.readMiss}>Nothing could be read into the Patient page.</Text>}
+              {review.missing.map((m, i) => <Text key={'m' + i} style={styles.readMiss}>✗ {m} not found</Text>)}
+            </View>
+            {review.missing.length ? <Text style={styles.scanHint}>Something missing? Scan it again: the whole page in the frame, the tablet still, no glare or shadow. Combine keeps what this read found and adds what the next one finds. Whatever is not read is left for you to enter.</Text> : <Text style={styles.scanHint}>Check these over on the Patient page once it is filled.</Text>}
+            <Text style={styles.scanBig}>Tap ◀ Safari in the top-left corner</Text>
+            <Text style={styles.scanHint}>That takes you back to the run; the page attaches itself and ESO Save offers to fill the Patient page from it.</Text>
+            <View style={styles.row}>
+              <Pressable style={styles.linkBtn} onPress={() => runScanner(scan, true)}><Text style={styles.linkText}>Scan again and combine</Text></Pressable>
+              <Pressable style={styles.linkBtn} onPress={() => runScanner(scan)}><Text style={styles.linkText}>Scan it again instead</Text></Pressable>
+            </View>
+          </>
+        )}
+        {state === 'done' && !review && (
           <>
             <Corner>Tap ◀ Safari up here to go back to ESO</Corner>
             <Text style={styles.scanLead}>{count === 1 ? 'One page' : `${count} pages`} scanned as {scan.incident ? scan.incident + ':' : ''}{scan.type}</Text>
@@ -151,6 +212,10 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
+  readBox: { alignSelf: 'stretch', backgroundColor: 'rgba(255,255,255,0.12)', borderRadius: 12, padding: 14, marginBottom: 18 },
+  readLine: { color: '#fff', fontSize: 17, lineHeight: 26 },
+  readMiss: { color: '#fecaca', fontSize: 17, lineHeight: 26, fontWeight: '700' },
+  row: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 18 },
   scanPage: { flex: 1, backgroundColor: '#15803d', alignItems: 'center', justifyContent: 'center', padding: 32 },
   logo: { width: 180, height: 180, borderRadius: 40, marginBottom: 18 },
   scanTitle: { fontSize: 40, fontWeight: '800', color: '#fff', marginBottom: 10 },

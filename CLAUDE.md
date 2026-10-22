@@ -83,6 +83,17 @@ is decided on the tablet from each run's crew list. Recorded runs, signature ima
 map and the Not sent list never do. The Supabase Management token lives in `.env.local`
 (gitignored) and is never committed; the anon key in `content.js` is public by design.
 
+## The facesheet reader
+
+`extension/facesheet.js` (a UMD file: the `ESOSAVE_FACESHEET` global for the content script, a
+module for the app; `scripts/build.mjs` copies it to `ios-app/facesheet.js`) holds
+`parseFacesheet`/`facesheetPlan`. The text reader (`enum OCR`, Swift) lives twice, identical: in
+the Safari handler (a claimed scan without text, and `ocr` for an uploaded picture) and in the
+app's local Expo module `ios-app/modules/esosave-ocr` (`EsosaveOcr.read(base64)`), which the app
+runs right after a facesheet scan for its check-and-retake screen; the text is saved with the
+scan so the handler does not read it again. Two reads per page (plain, then corrected with the
+labels as custom words) joined in that order; never fuzzy label matching (the owner's rule).
+
 ## Attachments and the scanner
 
 ESO's attachment upload is one multipart POST (`description`, `file`) to

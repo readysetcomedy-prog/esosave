@@ -56,4 +56,6 @@ emit('safari', (m) => {
   if (existsSync(target)) rmSync(target, { recursive: true });
   cpSync(join(dist, 'safari'), target, { recursive: true });
   console.log('copied Safari build to', target);
+  // the facesheet reader the app's check-and-retake screen runs: one source, copied in
+  cpSync(join(src, 'facesheet.js'), join(root, 'ios-app', 'facesheet.js'));
 }

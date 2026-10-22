@@ -105,13 +105,37 @@ enum Scans {
 }
 
 enum OCR {
-    // The text on a page: one line per printed row, top to bottom, the cells of a row (a label
-    // and its value, the two columns of a facesheet) left to right separated by " | ".
+    // The text on a page, read twice: once as printed (no spelling correction, so a name or a
+    // number is never "corrected" into something else) and once with correction on and the
+    // facesheet's own labels taught as words (so a label the plain read misspelt still reads).
+    // The second read follows the first, and the fill takes the first value it finds for each
+    // label, so the plain read wins wherever both have it. Small print is enlarged first.
+    static let labels = ["Patient", "Guarantor", "Subscriber", "Insurance", "Insured", "Policy", "Coverage", "Primary", "Secondary", "DOB", "SSN", "MRN", "Sex", "Gender", "Race", "Ethnicity", "Address", "City", "State", "Zip", "Phone", "Mobile", "Cell", "Employer", "Relationship", "Marital", "Religion", "Language", "Account", "Admit", "Attending", "Physician", "Medicare", "Medicaid", "Group", "Payor", "Payer", "Carrier", "Name", "Birth", "Home"]
     static func text(of image: UIImage) -> String {
+        let img = enlarged(image)
+        let plain = read(img, correct: false)
+        let corrected = read(img, correct: true)
+        if corrected.isEmpty || corrected == plain { return plain }
+        return plain + "\n— second read —\n" + corrected
+    }
+    // a page narrower than 2400 px is drawn larger before reading: small print reads better
+    static func enlarged(_ image: UIImage) -> UIImage {
+        let w = image.size.width * image.scale
+        guard w > 0, w < 2400 else { return image }
+        let f = 2400 / w
+        let size = CGSize(width: image.size.width * f, height: image.size.height * f)
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        return UIGraphicsImageRenderer(size: size, format: format).image { _ in image.draw(in: CGRect(origin: .zero, size: size)) }
+    }
+    // one line per printed row, top to bottom, the cells of a row (a label and its value, the
+    // two columns of a facesheet) left to right separated by " | "
+    static func read(_ image: UIImage, correct: Bool) -> String {
         guard let cg = image.cgImage else { return "" }
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .accurate
-        request.usesLanguageCorrection = false
+        request.usesLanguageCorrection = correct
+        if correct { request.customWords = labels }
         let handler = VNImageRequestHandler(cgImage: cg, orientation: cgOrientation(image.imageOrientation), options: [:])
         do { try handler.perform([request]) } catch { return "" }
         let obs = (request.results ?? []).compactMap { o -> (String, CGRect)? in
