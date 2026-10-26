@@ -207,7 +207,31 @@ test('restore: push a whole recorded run into a brand-new run, crew and item key
   assert.equal(held.length, 0, 'no rejected batches on restore: ' + JSON.stringify(held.map(b => b.error)));
   assert.notEqual(dst.crew[0].itemId, src.crew[0].itemId);
   assert.equal(dst.tree.signatures.standardSignatures.providerSignatures.firstProviderId, dst.crew[0].itemId, 'crew reference points at the new run\'s crew row');
+  // the run number went with the push, as the one save the recorded changes did not carry
+  assert.equal(dst.tree.incident?.response?.incidentNumber, src.incidentNumber, 'the run number went with the push');
+  if (!src.tree.incident) delete dst.tree.incident;
   assert.deepEqual(normalizeTree(dst.tree, dst.crew), normalizeTree(src.tree, src.crew), 'new run has the same content as the old one');
+});
+
+test('the run number typed on the Incident page shows on the card at once, stays after leaving the page, and goes with a push', async () => {
+  const id = await freshRun();
+  await app(() => window.app.openTab('Incident'));
+  const mine = async () => ((await T.status()).runs.find(r => r.recordId === id) || {}).incidentNumber;
+  const was = await mine();
+  await app(() => window.app.edit('incident', 'incident.response.incidentNumber', '261026-004'));
+  await waitFor(async () => (await mine()) === '261026-004', { label: 'the card follows the typed number at once', timeout: 10000 });
+  await app(() => window.app.openTab('Narrative'));
+  await app(() => window.app.edit('narrative', 'narrative.narrative.text', 'after the number'));
+  await sleep(1500);
+  assert.equal(await mine(), '261026-004', 'still the typed number after leaving the page');
+  assert.notEqual(was, '261026-004');
+  const before = (await T.records()).length;
+  await app((i) => window.postMessage({ __esosave: 'to-page', type: 'action', payload: { name: 'pushIntoNew', recordId: i, pages: ['incident', 'narrative'] } }, location.origin), id);
+  const list = await waitFor(async () => { const l = await T.records(); return l.length > before ? l : null; }, { label: 'new run created' });
+  const newId = list[list.length - 1].id;
+  await waitFor(async () => { const s = await T.status(); const r = s.runs.find(x => x.recordId === newId); return r && r.counts.held === 0 && !s.pushing && r.counts.total > 0; }, { label: 'pushed', timeout: 30000 });
+  assert.equal((await T.record(newId)).tree.incident?.response?.incidentNumber, '261026-004', 'the new run got the number');
+  await waitFor(async () => ((await T.status()).runs.find(r => r.recordId === newId) || {}).incidentNumber === '261026-004', { label: 'and the card shows it for the new run' });
 });
 
 test('restore can copy only the chosen pages: incident and narrative go, patient and signatures stay blank', async () => {

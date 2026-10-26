@@ -126,6 +126,11 @@ to bad signal or a hung page.
   number for the same call, check imports. If it's not there, ask dispatch to make you another
   run." The run that already holds the number may import it again, which is how it gets the CAD's
   updates. If ESO's records cannot be read, the import waits rather than guesses.
+- **The run number follows the Incident page.** The card, the times strip and the run's log show
+  the number the moment it is typed and saved on the Incident page (no need to leave the page and
+  come back), the Incident header is read again right after a CAD import so an imported number is
+  known without the page being opened, and a push into a NEW run carries the number along with the
+  Incident page's other changes.
 - **New Record greyed out.** ESO's New Record button is greyed out and does nothing for everyone,
   the owner included: a run starts from a CAD import, so no run is ever made without its dispatch
   number. An agency-locked setting (so it can be unlocked or turned off under Management without a

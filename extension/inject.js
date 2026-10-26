@@ -27,7 +27,7 @@
   if (ext) return;
   if (window.__esosave) return;
 
-  const VERSION = '0.15.33';
+  const VERSION = '0.15.34';
   const API_PREFIX_RE = /^\/ehr\/api\/+/i;
   const FAKE_OK_TEXT = '{"result":"Success","data":[]}';
   const PROBE_PATH = '/ehr/api/thirdpartydata/partners';
@@ -565,12 +565,21 @@
       await mapCrew(tgt, targetId, src.crew);
     }
     let n = 0;
+    // the run number goes with the push when the Incident page does: a number the source got from
+    // ESO (a CAD import) is written as the one save the recorded changes do not carry
+    const carriesNumber = src.batches.some(b => b.status !== 'dropped' && Array.isArray(b.ops) && b.ops.some(op => op && op.address === 'incident.response.incidentNumber'));
+    const num = src.incidentNumber && !/^PENDING/i.test(src.incidentNumber) ? src.incidentNumber : null;
+    if (num && !carriesNumber && targetId !== sourceId && (!wanted || wanted.has('incident'))) {
+      tgt.batches.push({ seq: tgt.nextSeq++, ts: Date.now(), origTs: Date.now(), scope: 'incident', ops: [{ verb: 'EDIT', address: 'incident.response.incidentNumber', fieldRef: 'INCIDENTNUMBER', value: num, dataType: 'string' }], status: 'held', attempts: 0, restored: true });
+      n++;
+    }
     for (const b of src.batches) {
       if (b.status === 'dropped') continue;
       if (wanted && !wanted.has(pageOf(b.scope))) continue;
       tgt.batches.push({ seq: tgt.nextSeq++, ts: Date.now(), origTs: b.ts, scope: b.scope, ops: b.ops, status: 'held', attempts: 0, restored: true });
       n++;
     }
+    if (targetId !== sourceId) for (const b of tgt.batches) if (b.restored && Array.isArray(b.ops)) noteIncidentNumber(tgt, b.ops);
     persist(tgt);
     const pagesTxt = wanted ? ` (pages: ${[...wanted].join(', ')})` : ' (every page)';
     log(tgt, `${created ? 'Created a NEW run and queued' : 'Queued'} ${n} saved change${n === 1 ? '' : 's'} from ${src.incidentNumber || sourceId}${pagesTxt} ` +
@@ -1210,6 +1219,7 @@
     learnFieldDefs(ops);
     noteTimes(run, ops);
     noteListOps(run, ops);
+    noteIncidentNumber(run, ops);
     const batch = { seq: run.nextSeq++, ts: Date.now(), scope: kind.scope, ops, status: 'pending', attempts: 0 };
     run.batches.push(batch);
     const hold = (why) => {
@@ -1231,6 +1241,24 @@
     if (o === 'auth') { batch.status = 'held'; persist(run, true); setLoggedOut(true); return res; }
     reject(run, batch, res); persist(run, true);
     return res;
+  }
+  // The run number typed onto the Incident page: the card, the times strip and a push follow it
+  // the moment it is saved, not only once the Incident page is read again.
+  function noteIncidentNumber(run, ops) {
+    for (const op of ops) {
+      if (!op || op.verb !== 'EDIT' || op.address !== 'incident.response.incidentNumber' || typeof op.value !== 'string') continue;
+      const num = op.value.trim();
+      if (num && run.incidentNumber !== num) { run.incidentNumber = num; persist(run); emit(); }
+    }
+  }
+  // A CAD import sets the run number on ESO's side: the Incident header is read again right after,
+  // so the number is known without the page being opened.
+  async function refreshHeader(run) {
+    try {
+      const m = await currentModel(run, 'Incident');
+      const num = (m && (m.incidentNumber || (m.response && m.response.incidentNumber))) || null;
+      if (num && run.incidentNumber !== num) { run.incidentNumber = num; persist(run); emit(); }
+    } catch (e) { /* no signal: the number comes with the next read of the page */ }
   }
   async function handleView(kind, req) {
     const run = getRun(kind.recordId);
@@ -1323,6 +1351,7 @@
       else if (kind.method !== 'GET' && /lock|final|submit/i.test(kind.tail)) { setLocked(run, true); persist(run); afterLock(run); }
       if (kind.method === 'POST' && /^Email\/Send$/i.test(kind.tail)) { run.emailedAt = Date.now(); persist(run); post('persistEmailed', { pcrId: run.realId || run.recordId, ts: run.emailedAt }); scheduleUnsentScan(5000); }
       if (kind.method === 'POST' && /^Fax\/Send$/i.test(kind.tail)) scheduleUnsentScan(5000);
+      if (kind.method !== 'GET' && /import|cad/i.test(kind.tail)) setTimeout(() => refreshHeader(run), 600);
     } else if (o === 'net') {
       setOnline(false, 'request failed');
       const hit = cacheGet(req.method, req.url, req.body);

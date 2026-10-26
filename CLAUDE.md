@@ -51,6 +51,13 @@ blocks the import in the owner's words; a failed check blocks too (never guesses
 everyone including the owner; the `newRecord` manager permission (`canNewRecord`, not implied by
 being the owner) keeps it.
 
+`run.incidentNumber` is set from the Incident view (`handleView`), from any saved EDIT of
+`incident.response.incidentNumber` (`noteIncidentNumber`, called from `handleAutosave`), and from
+a header re-read (`refreshHeader`) 600 ms after a non-GET record request whose tail matches
+`/import|cad/i` (the CAD import path on real ESO is a guess from the mock; confirm on a real
+import). `restoreInto` into a different run adds one held EDIT of the number when the Incident page
+is wanted and no recorded batch already carries it.
+
 ## Templates
 
 The field catalog comes from ESO's configuration bundle (`fieldConfigs`: address, fieldRef,
