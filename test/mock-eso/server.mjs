@@ -119,10 +119,6 @@ export function createMockEso() {
         op.address = op.address.replace(`['${last.key}']`, `['${newKey}']`);
       }
       applyToTree(rec.tree, op);
-      // a crew member added or taken off, as ESO's Add Crew and remove save them
-      const cm = /^incident\.crew\.\['([^']+)'\]$/.exec(op.address);
-      if (cm && op.verb === 'ADD' && op.value && op.value.personnelId) rec.crew.push({ itemId: cm[1], personnelId: op.value.personnelId, firstName: null, lastName: null, rank: 0, roleIds: [], certification: (op.value.certification && op.value.certification.itemId) || null, licenseNumber: op.value.licenseNumber == null ? null : op.value.licenseNumber, saved: op.value });
-      if (cm && op.verb === 'DELETE') rec.crew = rec.crew.filter(c => String(c.itemId) !== cm[1]);
       rec.ops.push(op);
     }
     rec.mappings.push(...mappings);
@@ -460,12 +456,11 @@ export function createMockEso() {
             { itemId: 'loc-lakeland', itemName: 'Lakeland Rehab & Healthcare', locationTypeId: 6545, city: 'Effingham' },
           ] },
           'UDL.CREW': { values: [
-            { itemId: 'person-1', firstName: 'MEDIC', lastName: 'TEST', credentials: [{ credentialName: 'EMT-Basic', credentialNumber: 'B-1001', personCredentialID: 'cred-b1', credentialId: 'd4874fd4' }] },
-            { itemId: 'person-2', firstName: 'PAT', lastName: 'MEDIC', credentials: [{ credentialName: 'EMT-Paramedic', credentialNumber: 'P-2002', personCredentialID: 'cred-p2', credentialId: '0316067f' }] },
-            { itemId: 'person-m', firstName: 'ALEX', lastName: 'JONES', credentials: [{ credentialName: 'EMT-Basic', credentialNumber: 'B-3003', personCredentialID: 'cred-bm', credentialId: 'd4874fd4' }] },
-            { itemId: 'person-j', firstName: 'JANE', lastName: 'SMITH', credentials: [{ credentialName: 'EMT-Basic', credentialNumber: 'B-4004', personCredentialID: 'cred-bj', credentialId: 'd4874fd4' }] },
-            { itemId: 'person-k', firstName: 'KIM', lastName: 'LEE', credentials: [{ credentialName: 'EMT-Paramedic', credentialNumber: 'P-6006', personCredentialID: 'cred-pk', credentialId: '0316067f' }, { credentialName: 'EMT-Basic', credentialNumber: 'B-6007', personCredentialID: 'cred-bk', credentialId: 'd4874fd4' }] },
-            { itemId: 'd4e45fac-ee36-4ac8-bf9a-3fb3e265c0d0', firstName: 'MICHAEL', lastName: 'GASTON', credentials: [{ credentialName: 'EMT-Basic', credentialNumber: 'B-5005', personCredentialID: 'cred-bg', credentialId: 'd4874fd4' }] },
+            { itemId: 'person-1', firstName: 'MEDIC', lastName: 'TEST', credentials: [{ credentialName: 'EMT-Basic', personCredentialID: 'cred-b1', credentialId: 'd4874fd4' }] },
+            { itemId: 'person-2', firstName: 'PAT', lastName: 'MEDIC', credentials: [{ credentialName: 'EMT-Paramedic', personCredentialID: 'cred-p2', credentialId: '0316067f' }] },
+            { itemId: 'person-m', firstName: 'ALEX', lastName: 'JONES', credentials: [{ credentialName: 'EMT-Basic', personCredentialID: 'cred-bm', credentialId: 'd4874fd4' }] },
+            { itemId: 'person-j', firstName: 'JANE', lastName: 'SMITH', credentials: [{ credentialName: 'EMT-Basic', personCredentialID: 'cred-bj', credentialId: 'd4874fd4' }] },
+            { itemId: 'd4e45fac-ee36-4ac8-bf9a-3fb3e265c0d0', firstName: 'MICHAEL', lastName: 'GASTON', credentials: [{ credentialName: 'EMT-Basic', personCredentialID: 'cred-bg', credentialId: 'd4874fd4' }] },
           ] },
           'SL.LOCATIONTYPE': { values: [{ itemId: 6535, itemName: 'Home/Residence' }, { itemId: 6540, itemName: 'Hospital' }, { itemId: 6542, itemName: 'Nursing home' }, { itemId: 6545, itemName: 'Rehabilitation Center' }, { itemId: 6556, itemName: 'Other Specified Place' }] },
           'SL.DESTINATIONTYPE': { values: [{ itemId: 6575, itemName: 'Hospital', parentItemId: 6540 }, { itemId: 6577, itemName: 'Nursing Home', parentItemId: 6542 }, { itemId: 6580, itemName: 'Rehabilitation Center', parentItemId: 6545 }, { itemId: 6582, itemName: 'Home', parentItemId: 6535 }, { itemId: 6588, itemName: 'Other (Not Listed)', parentItemId: 6556 }] },

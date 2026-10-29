@@ -131,14 +131,6 @@ to bad signal or a hung page.
   come back), the Incident header is read again right after a CAD import so an imported number is
   known without the page being opened, and a push into a NEW run carries the number along with the
   Incident page's other changes.
-- **Add me to the crew (Chrome, managers given it).** On a run you are not crew on, ESO greys out
-  its whole crew section, so a wrong crew used to have to fix their own chart. A manager given "Add
-  themselves to a crew" under Management gets an "Add me to the crew" button under ESO's greyed-out
-  Add Crew. One tap saves them onto the crew exactly as ESO's own Add Crew would (them, their
-  credential and its number from ESO's crew list; asked which if ESO lists more than one), and the
-  Incident page is read again so ESO opens the crew to them. They then fix the crew in ESO's own
-  screen and take themselves off there. It needs signal (nothing is held) and the run's Log says it
-  was done. Not on the iPad.
 - **New Record greyed out.** ESO's New Record button is greyed out and does nothing for everyone,
   the owner included: a run starts from a CAD import, so no run is ever made without its dispatch
   number. An agency-locked setting (so it can be unlocked or turned off under Management without a
