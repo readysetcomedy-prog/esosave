@@ -2705,3 +2705,74 @@ test('New Record: ESO\'s button is greyed out and dead for everyone, the owner i
     await T.control({ userName: 'TEST, MEDIC', userId: 'person-1' });
   }
 });
+
+test('Add me to the crew: a manager given it gets a button under ESO\'s greyed-out crew on a run they are not on; one tap saves them onto it as ESO\'s Add Crew would, and ESO opens the crew to them; no grant, no button', async () => {
+  const agencyRow = async () => ((await fetch(T.base + '/__db_dump').then(r => r.json())).find(r => r.name === '__agency__') || {}).settings || {};
+  const setAgency = (settings) => fetch(T.base + '/__db_set', { method: 'POST', body: JSON.stringify({ name: '__agency__', settings }) });
+  // ESO hides its Add Crew row on a chart the login is not on: the button sits under the crew section
+  const btn = () => T.page.evaluate(() => { const b = window.__q('.quick [data-group=selfcrew]'); const a = document.getElementById('crewwrap'); return b && a && b.style.display !== 'none' ? { text: b.textContent, rect: b.getBoundingClientRect().toJSON(), add: a.getBoundingClientRect().toJSON(), addRowShown: !!document.querySelector('#crewwrap grid-row.add').getBoundingClientRect().width } : null; });
+  const greyed = () => app(() => document.getElementById('crewwrap').hasAttribute('disabled'));
+  const record = (id) => fetch(T.base + '/__record/' + id).then(r => r.json());
+  // the run as someone else's: the crew is another person, as on a chart the login is not on
+  const othersRun = async () => {
+    const id = await freshRun();
+    await fetch(T.base + '/__shape/' + id, { method: 'POST', body: JSON.stringify({ crew: [{ personnelId: 'person-2', certification: 'cred-p2' }] }) });
+    await app(() => window.app.openTab('Incident'));
+    await waitFor(async () => { const r = (await T.status()).runs.find(x => x.recordId === id); return r && r.crewIds.join() === 'person-2'; }, { label: 'the tablet sees the other crew' });
+    assert.equal(await greyed(), true, 'ESO greys the crew out for them');
+    return id;
+  };
+  const base = await agencyRow();
+  try {
+    // a manager without it: nothing
+    await setAgency({ ...base, managers: { 'person-1': { name: 'TEST, MEDIC', perms: {} } } });
+    await T.control({ userName: 'TEST, MEDIC', userId: 'person-1' });
+    await othersRun();
+    await waitFor(async () => !!(((await T.storage()).settings.managers || {})['person-1']), { label: 'the manager reached the tablet' });
+    await sleep(1200);
+    assert.equal(await btn(), null, 'no button without the grant');
+    // given it: the button sits under ESO's Add Crew row
+    await setAgency({ ...base, managers: { 'person-1': { name: 'TEST, MEDIC', perms: { addSelfCrew: true } } } });
+    const id = await othersRun();
+    await waitFor(async () => !!((((await T.storage()).settings.managers || {})['person-1'] || {}).perms || {}).addSelfCrew, { label: 'the grant reached the tablet' });
+    const b = await waitFor(btn, { label: 'Add me to the crew button' });
+    assert.equal(b.text, 'Add me to the crew');
+    assert.equal(b.addRowShown, false, 'ESO\'s own Add Crew row is hidden');
+    assert.ok(b.rect.top >= b.add.bottom && b.rect.top < b.add.bottom + 40 && Math.abs(b.rect.left - b.add.left) < 4, 'under ESO\'s crew section: ' + JSON.stringify(b));
+    await T.page.evaluate(() => window.__q('.quick [data-group=selfcrew]').click());
+    await waitFor(async () => (await record(id)).crew.some(c => c.personnelId === 'person-1'), { label: 'on the crew in ESO' });
+    const rec = await record(id);
+    // exactly what ESO's own Add Crew saves for a person: them, their credential and its number
+    assert.deepEqual(rec.crew.find(c => c.personnelId === 'person-1').saved, { personnelId: 'person-1', certification: { itemId: 'cred-b1', isCrewCertification: true }, licenseNumber: 'B-1001', personalProtectiveEquipment: [], injuryExposureDeath: [], roleIds: [] });
+    const op = rec.ops.find(o => o.verb === 'ADD' && /^incident\.crew\.\['[^']+'\]$/.test(o.address));
+    assert.deepEqual([op.fieldRef, op.dataType, op.isComplexType], ['CREW', 'multiselectWithData', true]);
+    assert.ok(rec.crew.some(c => c.personnelId === 'person-2'), 'nobody is taken off: that is done in ESO');
+    // the tab is read again, ESO opens the crew to them, and the button goes
+    await waitFor(async () => !(await greyed()), { label: 'ESO opens the crew to them' });
+    await waitFor(async () => (await btn()) === null, { label: 'the button is gone once they are on it' });
+    assert.ok((await T.run(id)).log.some(l => /^Added TEST, MEDIC to the crew \(EMT-Basic\)/.test(l.msg)), 'the run\'s log says so');
+    // two credentials on ESO's crew list: they are asked which, as ESO's own screen would
+    await setAgency({ ...base, managers: { 'person-k': { name: 'LEE, KIM', perms: { addSelfCrew: true } } } });
+    await T.control({ userName: 'LEE, KIM', userId: 'person-k' });
+    const id2 = await othersRun();
+    await waitFor(async () => !!(((await T.storage()).settings.managers || {})['person-k']), { label: 'the second manager reached the tablet' });
+    await waitFor(btn, { label: 'the button for the second manager' });
+    await T.page.evaluate(() => window.__q('.quick [data-group=selfcrew]').click());
+    const ask = () => sr(() => { const v = document.getElementById('esosave-host').shadowRoot.querySelector('.veil .askbox'); return v ? { title: v.querySelector('h2').textContent, buttons: Array.from(v.querySelectorAll('button')).map(x => x.textContent) } : null; });
+    assert.deepEqual(await waitFor(ask, { label: 'which credential' }), { title: 'Which credential?', buttons: ['EMT-Paramedic', 'EMT-Basic', 'Cancel'] });
+    assert.ok(!(await record(id2)).crew.some(c => c.personnelId === 'person-k'), 'nothing is saved before they choose');
+    await sr(() => Array.from(document.getElementById('esosave-host').shadowRoot.querySelectorAll('.veil .askbox button')).find(x => x.textContent === 'EMT-Paramedic').click());
+    await waitFor(async () => (await record(id2)).crew.some(c => c.personnelId === 'person-k'), { label: 'the second manager on the crew' });
+    const k = (await record(id2)).crew.find(c => c.personnelId === 'person-k').saved;
+    assert.deepEqual([k.certification, k.licenseNumber], [{ itemId: 'cred-pk', isCrewCertification: true }, 'P-6006'], 'the credential they chose, with its number');
+    // the crew, not a manager: never
+    await setAgency({ ...base, managers: {} });
+    await T.control({ userName: 'SMITH, JANE', userId: 'person-j' });
+    await othersRun();
+    await sleep(1500);
+    assert.equal(await btn(), null, 'no button for the crew');
+  } finally {
+    await setAgency({ ...base, managers: {} });
+    await T.control({ userName: 'TEST, MEDIC', userId: 'person-1' });
+  }
+});

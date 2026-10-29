@@ -51,6 +51,15 @@ blocks the import in the owner's words; a failed check blocks too (never guesses
 everyone including the owner; the `newRecord` manager permission (`canNewRecord`, not implied by
 being the owner) keeps it.
 
+Add me to the crew: the `addSelfCrew` manager permission (owner implied, like the others) and
+`IS_CHROME` (the manifest's background is a service worker; Safari's is a page) show
+`layoutSelfCrew`'s button under `incident-crew[disabled]` when the login is not in the run's
+`crewIds`. inject.js `addSelfCrew` sends the one ADD ESO's Add Crew sends, copied from a recording:
+`incident.crew.['<new key>']`, fieldRef `CREW`, dataType `multiselectWithData`, isComplexType,
+value `{ personnelId, certification: { itemId: personCredentialID, isCrewCertification: true },
+licenseNumber: credentialNumber, personalProtectiveEquipment: [], injuryExposureDeath: [], roleIds: [] }`
+from `UDL.CREW`. Online only; never removes anyone (that is done in ESO's own screen).
+
 `run.incidentNumber` is set from the Incident view (`handleView`), from any saved EDIT of
 `incident.response.incidentNumber` (`noteIncidentNumber`, called from `handleAutosave`), and from
 a header re-read (`refreshHeader`) 600 ms after a non-GET record request whose tail matches

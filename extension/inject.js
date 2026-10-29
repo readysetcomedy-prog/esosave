@@ -27,7 +27,7 @@
   if (ext) return;
   if (window.__esosave) return;
 
-  const VERSION = '0.15.34';
+  const VERSION = '0.15.35';
   const API_PREFIX_RE = /^\/ehr\/api\/+/i;
   const FAKE_OK_TEXT = '{"result":"Success","data":[]}';
   const PROBE_PATH = '/ehr/api/thirdpartydata/partners';
@@ -804,7 +804,7 @@
       locationTypes: vals('SL.LOCATIONTYPE').map(x => ({ id: x.itemId, name: x.itemName })),
       destinationTypes: vals('SL.DESTINATIONTYPE').map(x => ({ id: x.itemId, name: x.itemName, locationTypeId: x.parentItemId || null })),
       // the agency's people and their credentials (a run's crew entry names one by personCredentialID)
-      crew: vals('UDL.CREW').filter(x => x && x.itemId).map(x => ({ id: x.itemId, name: `${x.lastName || ''}, ${x.firstName || ''}`.replace(/^, |, $/g, '').trim(), creds: (Array.isArray(x.credentials) ? x.credentials : []).map(c => ({ id: c.personCredentialID || c.credentialId || null, name: c.credentialName || '' })) })),
+      crew: vals('UDL.CREW').filter(x => x && x.itemId).map(x => ({ id: x.itemId, name: `${x.lastName || ''}, ${x.firstName || ''}`.replace(/^, |, $/g, '').trim(), creds: (Array.isArray(x.credentials) ? x.credentials : []).map(c => ({ id: c.personCredentialID || c.credentialId || null, name: c.credentialName || '', number: c.credentialNumber || null, personCred: !!c.personCredentialID })) })),
       // the lists a facesheet fill needs on the Patient and Billing pages
       lists: {
         states: vals('UDL.PLACESSTATES').map(x => ({ id: x.itemId, abbr: x.stateAbbr || '', name: x.stateName || x.itemName || '' })),
@@ -994,6 +994,42 @@
   // CAD import: is this run number already on a run? ESO's records of the number's own day
   // (YYMMDD-NNN), a day either side, in every state; the open run itself does not count, since
   // importing the same CAD entry again is how it gets its updates.
+  // Add me to the crew: the one save ESO's own Add Crew sends for a person, with the signed-in
+  // login as the person and their credential and its number from ESO's crew list. Sent only with
+  // signal (ESO's answer decides it; nothing is held), and never for someone already on the crew.
+  async function addSelfCrew(a) {
+    const reply = (r) => post('event', { name: 'addSelfCrew', id: a.id, ...r });
+    const run = S.runs[a.recordId || S.currentRecordId];
+    if (!run) return reply({ ok: false, error: 'Open the run first.' });
+    if (!S.userId) return reply({ ok: false, error: 'ESO has not said who is signed in yet. Open the Incident page again, then try.' });
+    if (run.tmp && !run.realId) return reply({ ok: false, error: 'ESO has not made this run yet.' });
+    if (!S.online || S.loggedOut) return reply({ ok: false, error: 'No signal. Adding you to the crew needs ESO to answer; try again when there is signal.' });
+    if ((run.crew || []).some(c => c && c.personnelId === S.userId)) return reply({ ok: true, already: true });
+    const me = (S.facilities && Array.isArray(S.facilities.crew) ? S.facilities.crew.find(p => p && p.id === S.userId) : null) || (a.me && a.me.id === S.userId ? a.me : null);
+    if (!me) return reply({ ok: false, error: "ESO Save has not read ESO's crew list on this tablet yet. Reload the page, then try again." });
+    const creds = (me.creds || []).filter(c => c && c.id && c.personCred);
+    if (!creds.length) return reply({ ok: false, error: (me.creds || []).length ? "ESO Save's copy of ESO's crew list is from an older version. Reload the page, then try again." : "ESO's crew list has no credential for you, so ESO Save cannot add you the way ESO's Add Crew would." });
+    const cred = creds.length === 1 ? creds[0] : creds.find(c => c.id === a.credId);
+    if (!cred) return reply({ ok: false, choose: creds.map(c => ({ id: c.id, name: c.name })) });
+    const key = uuid();
+    const ops = [{ verb: 'ADD', address: `incident.crew.['${key}']`, fieldRef: 'CREW', value: { personnelId: S.userId, certification: { itemId: cred.id, isCrewCertification: true }, licenseNumber: cred.number, personalProtectiveEquipment: [], injuryExposureDeath: [], roleIds: [] }, dataType: 'multiselectWithData', isComplexType: true }];
+    const id = run.realId || run.recordId;
+    const res = await rawRequest({ method: 'POST', url: apiUrl(`/PatientCareRecords/${id}/autosave?scope=incident`), headers: headersFor(true), body: JSON.stringify(ops), timeout: 30000 });
+    const o = outcome(res);
+    if (o !== 'ok') {
+      if (o === 'auth') setLoggedOut(true);
+      const why = o === 'net' ? 'ESO did not answer. Check the signal and try again.' : `ESO refused it: ${summarize(res)}`;
+      log(run, `Could not add ${S.user || 'you'} to the crew: ${why}`, 'error');
+      return reply({ ok: false, error: why });
+    }
+    setOnline(true);
+    const j = tryJSON(res.text);
+    const m = j && Array.isArray(j.data) ? j.data.find(x => x && x.originalKey === key) : null;
+    run.crew = (run.crew || []).concat([{ itemId: (m && m.newKey) || key, personnelId: S.userId, certification: cred.id, licenseNumber: cred.number, rank: 0, roleIds: [] }]);
+    persist(run); emit();
+    log(run, `Added ${S.user || 'you'} to the crew (${cred.name || 'credential'}). Fix the crew in ESO, then take yourself off there.`, 'good');
+    reply({ ok: true });
+  }
   async function cadInUse(a) {
     const reply = (r) => post('event', { name: 'cadInUse', id: a.id, incident: a.incident, ...r });
     const m = /^(\d{2})(\d{2})(\d{2})-\d+$/.exec(String(a.incident || '').trim());
@@ -1932,6 +1968,7 @@
         else if (a.name === 'attachTag') { S.attachTag = a.recordId && a.label ? { recordId: a.recordId, label: String(a.label), type: a.type || null, replace: !!a.replace, at: Date.now() } : null; }
         else if (a.name === 'attachUpload') { uploadScan(a); }
         else if (a.name === 'cadInUse') { cadInUse(a); }
+        else if (a.name === 'addSelfCrew') { addSelfCrew(a); }
         else if (a.name === 'fillFacesheet') { fillFacesheet(a); }
         else if (a.name === 'fillTemplate') { fillTemplate(a); }
       }

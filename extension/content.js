@@ -84,6 +84,8 @@
   // the login is first seen and whenever they change something. Only these settings go there;
   // never a run, nor which runs were worked. The key is the project's public one.
   const ON_ESO = /(^|\.)esosuite\.net$/i.test(location.hostname);
+  // Chrome's build runs its background as a service worker; Safari's is a background page
+  const IS_CHROME = (() => { try { const m = api.runtime.getManifest(); return !!(m.background && m.background.service_worker); } catch (e) { return false; } })();
   const SYNC = ON_ESO
     ? { url: 'https://qkprkwydxbtybaxylhln.supabase.co/rest/v1/esosave_users', key: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFrcHJrd3lkeGJ0eWJheHlsaGxuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzY2MTc2MjYsImV4cCI6MjA1MjE5MzYyNn0.DNjMTLqWtB7KJfZc3I03ufAPoIx69eA6wCkvhgdp7u4' }
     : { url: location.origin + '/__db/esosave_users', key: 'test-anon' };
@@ -104,6 +106,7 @@
     ['approveTemplates', 'Approve templates', 'a template they share is approved as it is saved'],
     ['deleteTemplates', 'Delete templates', 'anyone\'s, from the Templates window or here'],
     ['newRecord', 'New Record button', 'ESO\'s New Record button works for them while the agency has it greyed out for everyone else'],
+    ['addSelfCrew', 'Add themselves to a crew', 'Chrome only: on a run they are not crew on, a button by ESO\'s greyed-out Add Crew puts them on it, so they can fix the crew in ESO and take themselves off'],
   ];
   // "Don't use ESO Save": the login's own choice (saved to their row). With it on, the card stays
   // folded and nothing the extension does runs for them until they turn it back on.
@@ -196,7 +199,7 @@
       if (panelOpen && (panelView === 'settings' || panelView === 'management')) renderPanel(); layoutQuick();
     } else if (type === 'event' && payload && payload.name === 'attached') {
       onAttached(payload);
-    } else if (type === 'event' && payload && payload.name === 'cadInUse') {
+    } else if (type === 'event' && payload && (payload.name === 'cadInUse' || payload.name === 'addSelfCrew')) {
       const w = pageWaits.get(payload.id); if (w) { pageWaits.delete(payload.id); w(payload); }
     } else if (type === 'event' && payload && payload.name === 'attachStart') {
       onAttachStart(payload);
@@ -2380,6 +2383,7 @@
     for (const gk of Object.keys(FACILITY_GROUPS)) { try { layoutFacilities(gk); } catch (e) { /* keep going */ } }
     try { layoutDelays(); } catch (e) { /* keep going */ }
     try { layoutLkw(); } catch (e) { /* keep going */ }
+    try { layoutSelfCrew(); } catch (e) { /* keep going */ }
     try { layoutTreatmentCopies(); } catch (e) { /* keep going */ }
     try { layoutAcuity(); } catch (e) { /* keep going */ }
   }
@@ -3720,6 +3724,55 @@
     btn.style.left = Math.round(r.left) + 'px';
     btn.style.top = Math.round(bottom + 8) + 'px';
     btn.style.visibility = '';
+  }
+  // Add me to the crew (Chrome, managers given it): on a run the login is not crew on, ESO greys out
+  // its crew section. The button sends the one save ESO's own Add Crew sends for a person (them,
+  // with their credential from ESO's crew list), then re-reads the tab so ESO opens the crew to
+  // them; the crew is then fixed in ESO's own screen and they take themselves off there.
+  function layoutSelfCrew() {
+    const run = currentRun();
+    const sec = IS_CHROME && userId && can('addSelfCrew') && run && run.hasCrew && !(run.crewIds || []).includes(userId) && onTab('Incident') && !shelfOpen()
+      ? Array.from(document.querySelectorAll('incident-crew[disabled]')).find(visible) : null;
+    // under ESO's Add Crew row when it shows; ESO hides that row on a chart the login is not on,
+    // so then under the crew section itself (below the last crew member)
+    const addRow = sec && sec.querySelector('grid-row.add');
+    const anchor = addRow && addRow.getBoundingClientRect().width ? addRow : sec;
+    const r = anchor && anchor.getBoundingClientRect();
+    if (!r || !r.width) { dropQuick('selfcrew:'); return; }
+    const btn = quickEl('selfcrew:add', () => {
+      const b = document.createElement('button'); b.type = 'button'; b.className = 'allnone'; b.dataset.group = 'selfcrew'; b.title = 'Put yourself on this run\'s crew, so ESO lets you fix the crew; take yourself off in ESO afterwards';
+      b.addEventListener('pointerdown', (e) => e.stopPropagation());
+      b.addEventListener('click', async (e) => {
+        e.preventDefault(); e.stopPropagation();
+        if (copyBusy || quickBusy) return;
+        copyBusy = true; layoutQuick();
+        try { await addSelfCrewUi(); }
+        catch (err) { alert('ESO Save: ' + err.message); }
+        finally { copyBusy = false; setTimeout(layoutQuick, 300); }
+      });
+      return b;
+    });
+    btn.textContent = 'Add me to the crew';
+    btn.classList.toggle('busy', copyBusy);
+    btn.style.visibility = 'hidden'; btn.style.display = 'block';
+    btn.style.left = Math.round(r.left) + 'px';
+    btn.style.top = Math.round(r.bottom + 8) + 'px';
+    btn.style.visibility = '';
+  }
+  async function addSelfCrewUi() {
+    const recordId = lastStatus && lastStatus.currentRecordId;
+    // the crew list as this tablet last saw it, for when the page has not loaded ESO's bundle yet
+    const me = ((facilityTypes && facilityTypes.crew) || []).find(c => c && c.id === userId) || null;
+    let ans = await pageAsk('addSelfCrew', { recordId, me }, 35000);
+    if (ans && ans.choose) {
+      // more than one credential on ESO's crew list: the person says which, as ESO's own screen would ask
+      const credId = await new Promise(res => askBox('Which credential?', 'ESO lists more than one credential for you. Which one goes on this run?', [...ans.choose.map(c => [c.name || 'Credential', c.id]), ['Cancel', null]], res));
+      if (!credId) return;
+      ans = await pageAsk('addSelfCrew', { recordId, me, credId }, 35000);
+    }
+    if (!ans) throw new Error('ESO did not answer. Check the signal and try again.');
+    if (!ans.ok) throw new Error(ans.error || 'could not add you to the crew.');
+    await reloadTab('Incident');
   }
   async function onVitalCopied(p) {
     if (!p.ok) { copyBusy = false; alert('ESO Save: ' + (p.error || 'could not copy the vital')); return; }

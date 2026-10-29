@@ -464,6 +464,10 @@
     const m = body && body.data && body.data.model;
     app.crew = ((m && m.crew) || []).map(c => ({ itemId: c.itemId, personnelId: c.personnelId, name: `${c.lastName || 'TEST'}, ${c.firstName || 'MEDIC'}`, roleIds: (c.roleIds || []).map(Number) }));
     const el = document.getElementById('crew');
+    const me = body && body.meta && body.meta.user && body.meta.user.agencyPersonId;
+    const wrap = document.getElementById('crewwrap');
+    wrap.toggleAttribute('disabled', !app.crew.some(c => c.personnelId === me));
+    wrap.querySelector('grid-row.add').classList.toggle('inactive', wrap.hasAttribute('disabled'));
     el.innerHTML = app.crew.map((c, i) => `<grid-row class="noselect" data-i="${i}"><grid-cell class="clickable"><div class="crew-info"><strong><div class="name">${c.name}</div></strong><aside>Roles: ${roleNames(c.roleIds)}</aside><aside>EMT-P</aside></div></grid-cell></grid-row>`).join('');
     el.querySelectorAll('grid-cell.clickable').forEach(cell => cell.addEventListener('click', () => {
       const c = app.crew[Number(cell.closest('grid-row').dataset.i)];
